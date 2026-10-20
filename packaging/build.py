@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 from release_guard import check_file, check_source
 
-VERSION = '0.5.2'
+VERSION = '0.5.3'
 LAUNCHERS = ('安装年轮.command', '打开年轮.command')
 
 

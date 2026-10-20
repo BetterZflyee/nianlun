@@ -1,6 +1,6 @@
 ---
 name: nianlun
-description: 在WorkBuddy 中使用年轮管理项目、本人待办、GBrain 记忆和阶段汇报。
+description: 在WorkBuddy 中使用年轮管理项目、本人待办、独立记忆空间和阶段汇报。
 ---
 
 读取用户目录 ~/.local/share/nianlun/install.json。用其 python_bin 调用 core/scripts 中的程序，先读 core/SKILL.md 和 core/references/host-contract.md。未安装时按完整安装包的在AI宿主中安装.md初始化核心。

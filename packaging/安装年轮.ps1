@@ -10,7 +10,7 @@ if ($nianlunArch -eq 'Arm64') {
     $nianlunAsset = 'uv-x86_64-pc-windows-msvc.zip'
     $nianlunHash = '3b2661a463a5baea7f5076ea2b25ab71d77f36a6c0d809e5350651792f80a672'
 } else { throw '需要 64 位 Windows（x64 或 ARM64）。' }
-Write-Host '年轮 · 正在准备个人运行环境（无需预装 Python 或 GBrain）'
+Write-Host '年轮 · 正在准备个人运行环境（无需预装 Python 或记忆工具）'
 $nianlunUv = Join-Path $nianlunBootstrap 'uv.exe'
 if (-not (Test-Path $nianlunUv)) {
     $nianlunArchive = Join-Path $nianlunBootstrap 'uv.zip'

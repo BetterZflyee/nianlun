@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '0.5.2'
+VERSION = '0.5.3'
 
 
 def options(*names):
@@ -88,7 +88,7 @@ class Setup:
                 'python_bin':sys.executable, 'home':str(self.home), 'config':str(self.config_path),
                 'configured':self.config_path.exists(), 'dependencies':self.runtimes(),
                 'existing_gbrain':(Path.home()/'.gbrain/config.json').exists(),
-                'steps':['环境与钉钉登录','AI 表格初始化或绑定','GBrain 安装与接入','采集与运行时间','验证并启用']}
+                'steps':['环境与钉钉登录','AI 表格初始化或绑定','创建或接入独立记忆空间','采集与运行时间','验证并启用']}
 
     def profiles(self):
         d = self.gateway(None).call(['profile','list'])
@@ -250,9 +250,9 @@ class Setup:
                 'counts':{r:len(snapshot[r]) for r in n.ROLES},'complete':snapshot['complete']}
 
     def memory(self, mode, directory=None, brain_home=None):
-        if mode not in ('new','existing'): raise n.Error('请选择新建或连接已有 GBrain')
+        if mode not in ('new','existing'): raise n.Error('请选择新建或连接已有独立记忆空间')
         command=self.runtimes().get('gbrain_command')
-        if not command: raise n.Error('请先安装 GBrain 运行环境')
+        if not command: raise n.Error('请先安装记忆引擎运行环境')
         config=n.load(self.config_path)
         require_idle(config)
         current=config.get('growth',{})
@@ -266,9 +266,9 @@ class Setup:
             work=Path(directory or memory_home/'workspace').expanduser().resolve()
             settings={'brain_home':str(memory_home),'brain_dir':str(work),'gbrain_command':command,'memory_mode':'managed'}
         else:
-            if not directory: raise n.Error('连接已有 GBrain 时请选择工作目录')
+            if not directory: raise n.Error('连接已有独立记忆空间时请选择工作目录')
             work=Path(directory).expanduser().resolve()
-            if not work.is_dir(): raise n.Error('已有 GBrain 工作目录不存在')
+            if not work.is_dir(): raise n.Error('已有独立记忆空间工作目录不存在')
             settings={'brain_dir':str(work),'gbrain_command':command,'memory_mode':'existing',
                       'brain_home':str(Path(brain_home or Path.home()).expanduser().resolve())}
         config['growth']={**current,**settings};work=Path(settings['brain_dir']); work.mkdir(parents=True,exist_ok=True)
@@ -278,8 +278,8 @@ class Setup:
             r=subprocess.run(command+['init','--pglite','--no-embedding','--non-interactive','--json'],cwd=work,
                 env=env,capture_output=True,text=True, encoding='utf-8',timeout=240)
             if r.returncode or not any(x.get('status')=='success' for x in json_result(r.stdout)):
-                raise n.Error('GBrain 初始化未通过；保留现有文件，不使用 --force 重建。请检查安装与网络。')
-        if not config_file.is_file(): raise n.Error('没有找到选定 GBrain 的配置，请核对记忆库位置')
+                raise n.Error('独立记忆空间初始化未通过；保留现有文件，不使用 --force 重建。请检查安装与网络。')
+        if not config_file.is_file(): raise n.Error('没有找到选定独立记忆空间的配置，请核对记忆库位置')
         # A deterministic, clearly labelled installation page is also the first portable read/write check.
         marker='年轮安装验收 '+n.digest(str(self.config_path))[:16]
         slug='meetings/nianlun-setup-'+n.digest(str(self.config_path))[:16]
@@ -290,15 +290,15 @@ class Setup:
         if read.returncode or marker not in read.stdout:
             write=subprocess.run(command+['capture','--file',str(source),'--slug',slug,'--request-id',request_id,'--json'],
                 cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=240)
-            if write.returncode: raise n.Error('GBrain 写入验证未通过，未登记为接入成功')
+            if write.returncode: raise n.Error('独立记忆空间写入验证未通过，未登记为接入成功')
             read=subprocess.run(command+['get',slug],cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=120)
-        if read.returncode or marker not in read.stdout: raise n.Error('GBrain 读回未找到测试内容')
+        if read.returncode or marker not in read.stdout: raise n.Error('独立记忆空间读回未找到测试内容')
         search=subprocess.run(command+n.brain_search_args(config,marker.rsplit(' ',1)[-1])+['--json'],cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=120)
         try:hits=json.loads(search.stdout)
         except ValueError:hits=[]
         if isinstance(hits,dict):hits=hits.get('results',hits.get('hits',[]))
         if search.returncode or not isinstance(hits,list) or not any(isinstance(x,dict) and x.get('slug')==slug for x in hits):
-            raise n.Error('GBrain 已存储但检索未验证；尚不能启用生长任务')
+            raise n.Error('独立记忆空间已存储但检索未验证；尚不能启用生长任务')
         n.save(self.config_path,config)
         result={'verified':True,'mode':settings['memory_mode'],'brain_dir':settings['brain_dir'],'slug':slug,
                 'keyless':settings['memory_mode']=='managed','search':'keyword / no-expand'}
@@ -308,7 +308,7 @@ class Setup:
     def configure(self, preferences):
         config=n.load(self.config_path)
         require_idle(config)
-        if not (self.directory/'memory.json').exists(): raise n.Error('请先完成 GBrain 读写验证')
+        if not (self.directory/'memory.json').exists(): raise n.Error('请先完成独立记忆空间读写验证')
         schedule=preferences['schedule'];validate_schedule(schedule)
         # Business time is interpreted by the core, independently of the host's clock.
         old_scheduler=Path(config['growth'].get('state_dir',self.directory))/'scheduler.json'
@@ -387,8 +387,8 @@ class Setup:
             'controller':{'role':'controller','name':'年轮·自动生长控制器','prompt':controller_prompt,
                 'rrule':'FREQ=HOURLY;INTERVAL=1;BYMINUTE=0;BYSECOND=0'},
             'schedule':config['growth']['schedule'],'tasks':[
-                {'role':'growth','name':'年轮·每日生长','prompt':common+'按 collect → 阅读证据和 GBrain → 决策与语义去重 → plan → apply → finish 执行完整生长流程。'},
-                {'role':'report','name':'年轮·阶段汇报','prompt':common+'读取活跃项目最近一周记录、里程碑与 GBrain 历史，生成有依据的阶段汇报；通过 report 上传并回填项目主表链接。'}],
+                {'role':'growth','name':'年轮·每日生长','prompt':common+'按 collect → 阅读证据和项目记忆 → 决策与语义去重 → plan → apply → finish 执行完整生长流程。'},
+                {'role':'report','name':'年轮·阶段汇报','prompt':common+'读取活跃项目最近一周记录、里程碑与项目历史记忆，生成有依据的阶段汇报；通过 report 上传并回填项目主表链接。'}],
             'status':'pending_native_tool','note':'由 Codex 原生 automation_update 创建/更新 heartbeat；此文件不会安装调度。'}
 
     def verify_schedules(self, paths, codex_directory=None):

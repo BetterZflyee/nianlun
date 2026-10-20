@@ -13,11 +13,11 @@ def run(config,args,timeout=180):
 
 def retrieve(config,query,limit=8):
     result=run(config,n.brain_search_args(config,query)+['--json'])
-    if result.returncode:raise n.Error('GBrain 检索失败，请检查连接')
+    if result.returncode:raise n.Error('独立记忆空间检索失败，请检查连接')
     try:hits=json.loads(result.stdout)
-    except ValueError:raise n.Error('GBrain 未返回可解析的检索结果，未把片段当成全文')
+    except ValueError:raise n.Error('独立记忆空间未返回可解析的检索结果，未把片段当成全文')
     if isinstance(hits,dict):hits=hits.get('results',hits.get('hits',[]))
-    if not isinstance(hits,list):raise n.Error('GBrain 检索结构不兼容')
+    if not isinstance(hits,list):raise n.Error('独立记忆空间检索结构不兼容')
     pages=[];seen=set()
     for hit in hits:
         if not isinstance(hit,dict) or not isinstance(hit.get('slug'),str):continue
@@ -57,6 +57,6 @@ def baseline(config):
                 capture=run(config,['capture','--file',str(path),'--slug',slug,'--request-id',str(uuid.uuid5(uuid.NAMESPACE_URL,marker)),'--json'],240)
                 if capture.returncode:raise n.Error('项目基线写入未确认；保留固定请求编号供恢复')
                 read=run(config,['get',slug])
-            if read.returncode or marker not in read.stdout:raise n.Error('项目基线尚未通过 GBrain 回读')
+            if read.returncode or marker not in read.stdout:raise n.Error('项目基线尚未通过独立记忆空间回读')
             result={'project':project['title'],'slug':slug,'verified':True};n.save(receipt_path,result);results.append(result)
         return {'projects':results,'count':len(results),'verified':True}

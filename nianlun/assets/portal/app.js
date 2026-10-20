@@ -46,7 +46,7 @@ const jobNames = {
   snapshot: "刷新项目",
   todos: "读取待办",
   mutate: "保存工作内容",
-  memory_query: "检索 GBrain",
+  memory_query: "检索项目记忆",
   ask: "宿主分析",
   workflow: "执行宿主工作流",
   grow: "运行一次生长",
@@ -58,7 +58,7 @@ const jobNames = {
   create_resource: "创建云端资源",
   table_plan: "预览表格方案",
   tables_apply: "初始化 / 绑定表格",
-  memory_connect: "接入 GBrain",
+  memory_connect: "接入独立记忆空间",
   configure: "保存运行配置",
   setup_doctor: "检查接入",
   harness_status: "检查 AI 宿主",
@@ -260,7 +260,7 @@ async function navigate(next, reload = true) {
       content.replaceChildren(
         empty(
           "先连接你的工作空间",
-          "接入钉钉 AI 表格和 GBrain 后，项目内容会出现在这里。",
+          "接入钉钉 AI 表格和独立记忆空间后，项目内容会出现在这里。",
           btn("开始接入", () => navigate("setup"), "primary"),
         ),
       );
@@ -526,7 +526,7 @@ function renderProject(root) {
     el("h3", { text: "和项目聊一聊" }),
     el("p", {
       class: "aside-note",
-      text: "所选 AI 宿主会结合当前项目和 GBrain 历史，帮你梳理变化、卡点和下一步。",
+      text: "所选 AI 宿主会结合当前项目和历史记忆，帮你梳理变化、卡点和下一步。",
     }),
   );
   const question = el("textarea", {
@@ -951,7 +951,7 @@ function renderMemory(root) {
   root.replaceChildren(
     heading(
       "让经验，有处可寻。",
-      "检索你自己的 GBrain，找回项目背后的讨论、判断与经验。",
+      "检索你自己的独立记忆空间，找回项目背后的讨论、判断与经验。",
     ),
   );
   const query = el("input", {
@@ -987,14 +987,14 @@ function renderMemory(root) {
             toast(
               "已将 " +
                 r.value.count +
-                " 个项目的当前档案存入 GBrain，并完成回读。",
+                " 个项目的当前档案存入独立记忆空间，并完成回读。",
             );
           }),
         ),
       ),
       el("p", {
         class: "aside-note",
-        text: "记忆保存在你接入的 GBrain 中。年轮不会创建另一份知识库。",
+        text: "项目记忆保存在你自己的独立记忆空间中，可跨 AI 宿主持续使用。",
       }),
     ]),
   );
@@ -1478,7 +1478,7 @@ async function renderRuns(root, generation) {
   root.replaceChildren(
     heading(
       "每一步，都看得见。",
-      "执行状态与写后验证会保留在本机，业务内容仍以 AI 表格和 GBrain 为准。",
+      "执行状态与写后验证会保留在本机，业务内容仍以 AI 表格和独立记忆空间为准。",
       [btn("刷新记录", () => navigate("runs"))],
     ),
   );
@@ -1603,7 +1603,7 @@ function renderSetup(root) {
     setupStep(
       1,
       "安装环境与钉钉授权",
-      "依赖只安装到你的个人目录。已有的 DWS 和 GBrain 会先检测并复用。",
+      "依赖只安装到你的个人目录。已有的钉钉连接工具和记忆引擎会先检测并复用。",
       [
         el("div", { class: "actions" }, [
           btn("检测环境", (event) =>
@@ -1854,11 +1854,11 @@ function renderSetup(root) {
     ),
   );
   const brainMode = select([
-    ["new", "创建年轮专用 GBrain（推荐）"],
-    ["existing", "连接已有 GBrain"],
+    ["new", "创建独立记忆空间（推荐）"],
+    ["existing", "连接已有独立记忆空间"],
   ], boot.memory_connected ? 'existing' : 'new');
-  const brainDir = el("input", { value: boot.memory?.directory || "", placeholder: "已有 GBrain 的工作目录" });
-  const brainHome = el("input", { value: boot.memory?.home || "", placeholder: "GBrain 配置目录（可选）" });
+  const brainDir = el("input", { value: boot.memory?.directory || "", placeholder: "已有独立记忆空间的工作目录" });
+  const brainHome = el("input", { value: boot.memory?.home || "", placeholder: "独立记忆空间配置目录（可选）" });
   const existing = el("div", { hidden: !boot.memory_connected }, [
     formField("工作目录", brainDir),
     formField("配置目录", brainHome),
@@ -1867,16 +1867,23 @@ function renderSetup(root) {
   const brainStatus = el("p", {
     class: "subtle",
     text: boot.memory_connected
-      ? "当前已有 GBrain 连接；重新接入前请确认所选目录。"
+      ? "已连接独立记忆空间；重新接入前请确认所选目录。"
       : "",
   });
   root.append(
     setupStep(
       3,
-      "接入你的 GBrain",
-      "没有安装也可以继续。年轮会安装所需程序并创建个人记忆库，不需要额外的模型 API Key。",
+      "接入你的独立记忆空间",
+      "年轮会准备所需的记忆引擎，并创建属于你的独立记忆空间，不需要额外的模型 API Key。",
       [
         formField("记忆库", brainMode),
+        el("details", {}, [
+          el("summary", { text: "已有记忆空间的兼容说明" }),
+          el("p", {
+            class: "subtle",
+            text: "当前记忆引擎为 GBrain。连接已有空间需选择兼容的 GBrain 工作目录；其他记忆工具的目录目前不能直接接入。创建新空间时，年轮会准备所需依赖。",
+          }),
+        ]),
         existing,
         btn(
           "安装 / 连接并验证",
@@ -1893,7 +1900,7 @@ function renderSetup(root) {
                   progress,
                 );
                 brainStatus.textContent =
-                  "✓ GBrain 已完成初始化、写入、回读与检索验证。";
+                  "✓ 独立记忆空间已完成初始化、写入、回读与检索验证。";
                 boot = await api("/api/bootstrap");
               }),
             ),
@@ -2128,9 +2135,9 @@ function renderSetup(root) {
               withButton(event.currentTarget, async (progress) => {
                 const r = await run("setup_doctor", {}, progress);
                 scheduleState.textContent = r.value.ready
-                  ? "✓ 表格、GBrain 和宿主调度全部验证通过。"
+                  ? "✓ 表格、独立记忆空间和宿主调度全部验证通过。"
                   : "接入未全部完成：" +
-                    (!r.value.memory?.verified ? "GBrain 待读写验证；" : "") +
+                    (!r.value.memory?.verified ? "独立记忆空间待读写验证；" : "") +
                     (!r.value.scheduler?.active ? "宿主定时任务待同步。" : "");
               }),
             ),
@@ -2206,7 +2213,7 @@ function showLaunchHelp() {
         }
       }, "primary"),
       status,
-      el("p", { class: "subtle", text: "项目仍在你的 AI 表格里，记忆仍在你的 GBrain 里。" }),
+      el("p", { class: "subtle", text: "项目仍在你的 AI 表格里，记忆仍在你的独立记忆空间里。" }),
     ]),
   );
 }

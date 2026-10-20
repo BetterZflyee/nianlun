@@ -517,9 +517,9 @@ def finish(config,folder,decision_file):
         status['in_flight']={'step':'brain','slug':slug,'source_file':str(path),'request_id':request_id};n.save(status_path,status)
         r=subprocess.run(n.brain_command(config)+['capture','--file',str(path),'--slug',slug,'--request-id',request_id,'--json'],env=n.brain_env(config),cwd=brain,capture_output=True,text=True, encoding='utf-8',timeout=240)
         n.save(folder/'brain-capture.json',r.stdout)
-        if r.returncode:raise n.Error('GBrain 原生 capture 未确认；保留来源与 request_id 供对账')
+        if r.returncode:raise n.Error('独立记忆空间原生 capture 未确认；保留来源与 request_id 供对账')
         check=subprocess.run(n.brain_command(config)+['get',slug],env=n.brain_env(config),cwd=brain,capture_output=True,text=True, encoding='utf-8',timeout=120)
-        if check.returncode or d['summary'] not in check.stdout:raise n.Error('GBrain 回读未验证')
+        if check.returncode or d['summary'] not in check.stdout:raise n.Error('独立记忆空间回读未验证')
         status['brain']={'slug':slug,'verified':True};status.pop('in_flight');n.save(status_path,status)
     if switches.get('digest') and notify and not status.get('digest'):
         status['in_flight']={'step':'digest','idempotency_key':str(uuid.uuid5(uuid.NAMESPACE_URL,'nianlun-digest:'+b['run_id']))};n.save(status_path,status)
@@ -624,7 +624,7 @@ def publish_report(config,project,since,until,summary_file=None):
 
 
 def main():
-    p=argparse.ArgumentParser(description='年轮生长闭环：Harness 理解，DWS 执行，GBrain 记忆')
+    p=argparse.ArgumentParser(description='年轮生长闭环：Harness 理解，DWS 执行，独立记忆空间记忆')
     p.add_argument('--config',default=os.environ.get('NIANLUN_CONFIG',str(Path.home()/'.config/nianlun/config.json')))
     sub=p.add_subparsers(dest='cmd',required=True)
     c=sub.add_parser('collect');c.add_argument('--since');c.add_argument('--until')

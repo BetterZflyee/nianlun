@@ -41,7 +41,7 @@ def export(config_path, provider, home):
     n.save(folder/'connection.json',info)
     body=f'''---
 name: nianlun
-description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格和 GBrain，管理进展、本人待办和阶段汇报。
+description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格和独立记忆空间，管理进展、本人待办和阶段汇报。
 ---
 
 # 年轮 · {harness.PROVIDERS[provider]['name']} 入口
@@ -54,7 +54,7 @@ description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格
 定时任务必须通过本宿主的真实计划能力配置、回读核验；若本宿主不提供定时或本机执行能力，明确显示待接入，不声称已启用。任何时候只允许一个定时宿主负责同一安装。
 '''
     n.save(folder/'skills/nianlun/SKILL.md',body)
-    message=f'请在 {harness.PROVIDERS[provider]["name"]} 中接入年轮。先读取 {folder / "connection.json"} 和 {folder / "skills/nianlun/SKILL.md"}，沿用已有 AI 表格、GBrain、授权来源和动作。接入后检查待处理交接。不要自动切换定时任务的负责宿主。'
+    message=f'请在 {harness.PROVIDERS[provider]["name"]} 中接入年轮。先读取 {folder / "connection.json"} 和 {folder / "skills/nianlun/SKILL.md"}，沿用已有 AI 表格、独立记忆空间、授权来源和动作。接入后检查待处理交接。不要自动切换定时任务的负责宿主。'
     n.save(folder/'接入说明.md',message+'\n')
     return {'provider':provider,'directory':str(folder),'text':message,'verified':False}
 

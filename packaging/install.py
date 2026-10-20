@@ -64,7 +64,7 @@ def register_entry(root,home):
         stage=Path(tmp)
         for name in ('nianlun','nianlun-setup'):
             folder=stage/name;folder.mkdir()
-            (folder/'SKILL.md').write_text('---\nname: '+name+'\ndescription: 年轮跨宿主项目记忆与接入向导；数据保存在用户自己的 AI 表格和 GBrain。\n---\n\n读取年轮安装记录：'+str(home/'install.json')+'。用 python_bin 执行 core/scripts 中的程序；先阅读 core/SKILL.md 与 core/references/host-contract.md。初始化时再读 core/references/setup-wizard.md。不要依赖 Codex 的安装目录，不改宿主全局设置或权限。\n',encoding='utf-8')
+            (folder/'SKILL.md').write_text('---\nname: '+name+'\ndescription: 年轮跨宿主项目记忆与接入向导；数据保存在用户自己的 AI 表格和独立记忆空间。\n---\n\n读取年轮安装记录：'+str(home/'install.json')+'。用 python_bin 执行 core/scripts 中的程序；先阅读 core/SKILL.md 与 core/references/host-contract.md。初始化时再读 core/references/setup-wizard.md。不要依赖 Codex 的安装目录，不改宿主全局设置或权限。\n',encoding='utf-8')
             if name=='nianlun':
                 for script in ('launch','scheduler','setup','growth','nianlun','host'):
                     file=folder/'scripts'/(script+'.py');file.parent.mkdir(exist_ok=True)
@@ -92,7 +92,7 @@ def main():
             if not setup.is_dir():setup=PACKAGE/'nianlun-setup'
             core_status=register(CORE,core,home);setup_status=register(setup,setup_core,home)
             config=str(Path.home()/'.config/nianlun/config.json')
-            result={'version':'0.5.2','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
+            result={'version':'0.5.3','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
                     'scheduler_entry':old.get('scheduler_entry') or (str(Path(old['skills']['nianlun']['path'])/'scripts/scheduler.py') if old.get('skills') else str(core/'scripts/scheduler.py')),
                     'skills':{'nianlun':{'path':str(core),'status':core_status},'nianlun-setup':{'path':str(setup_core),'status':setup_status}},
                     'host_entries':dict(old.get('host_entries',{}))}
@@ -107,7 +107,7 @@ def main():
             n.save(home/'install.json',{**result,'ready':False})
             if not args.register_only:
                 result['dependencies']=deps.install(home)
-            result.update(ready=not args.register_only,next='双击“打开年轮”，在页面完成钉钉、表格、GBrain 与宿主接入')
+            result.update(ready=not args.register_only,next='双击“打开年轮”，在页面完成钉钉、表格、独立记忆空间与宿主接入')
             n.save(home/'install.json',result)
         print(json.dumps(result,ensure_ascii=False,indent=2))
         print('\n年轮程序已安装。双击“打开年轮”进入工作台。')

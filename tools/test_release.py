@@ -40,6 +40,7 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             archive = builder.build(root / 'first')
+            self.assertTrue(archive.name.isascii())
             second = builder.build(root / 'second')
             self.assertEqual(archive.read_bytes(), second.read_bytes())
             with zipfile.ZipFile(archive) as z:

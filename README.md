@@ -26,7 +26,7 @@ flowchart LR
 
 ## 安装
 
-从 [Releases](https://github.com/BetterZflyee/nianlun/releases) 下载 `年轮安装版-v0.5.2-Mac-Windows.zip`，解压后：
+从 [Releases](https://github.com/BetterZflyee/nianlun/releases) 下载 `nianlun-v0.5.2-mac-windows.zip`，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、DWS 和 GBrain，不要求预装 Python 或 GBrain。

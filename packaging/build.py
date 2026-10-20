@@ -60,7 +60,8 @@ def build(output=None):
                 raise RuntimeError('\n'.join(issues))
             checks[name] = hashlib.sha256(data).hexdigest()
         (package / 'SHA256SUMS.json').write_text(json.dumps(checks, ensure_ascii=False, indent=2), encoding='utf-8')
-        archive = output / f'年轮安装版-v{VERSION}-Mac-Windows.zip'
+        # GitHub strips non-ASCII characters from uploaded asset names.
+        archive = output / f'nianlun-v{VERSION}-mac-windows.zip'
         with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for path in sorted(package.rglob('*')):
                 if not path.is_file():

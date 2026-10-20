@@ -3,7 +3,7 @@
 1. 关联本次解决的 Issues，更新 CHANGELOG 与 README 的版本和验证边界。
 2. 同步安装器、页面服务和包装元数据中的版本；运行两组测试、发布检查和 JavaScript 语法检查。
 3. 等待目标提交的 CI 全部通过；检查 `git ls-files` 和本次 diff，只包含源码、文档、测试与安装材料。
-4. 运行 `python packaging/build.py`。构建只读取允许的目录，拒绝可识别的凭据及私人绝对路径，输出 ZIP 与 SHA-256。包内每个文件另有 `SHA256SUMS.json`。
+4. 运行 `python packaging/build.py`。构建只读取允许的目录，拒绝可识别的凭据及私人绝对路径，输出 ZIP 与 SHA-256。发布附件使用英文文件名，避免 GitHub 改写名称；包内保留中文目录，每个文件另有 `SHA256SUMS.json`。
 5. 在临时用户目录验证 `install.py --register-only --home <临时目录>`，确认核心注册不依赖 Codex，重复注册可用。完整联网安装另外验收，不使用维护者生产表格作为 CI 夹具。
 6. 从通过检查的提交打 `vX.Y.Z` 标签。在 GitHub 创建预发布 Release，附 ZIP、`.sha256`、变更和未验证事项。检查下载与哈希后再对外说明可用。
 

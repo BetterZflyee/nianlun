@@ -1,0 +1,22 @@
+# Personal workspaces and generated releases must never enter source control.
+/local/
+/work/
+/deliverables/
+/*.zip
+/*.png
+/*.jpg
+/.DS_Store
+**/.DS_Store
+**/__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+config.json
+install.json
+session.json
+*.log
+*.pem
+*.key
+*.db
+*.sqlite*

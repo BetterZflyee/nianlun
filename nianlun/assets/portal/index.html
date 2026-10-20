@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>年轮 · 工作台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <a class="brand" href="./" id="brand"
+          ><span class="rings" aria-hidden="true">◎</span
+          ><span>年轮<small>每一段工作，都有来处</small></span></a
+        >
+        <div class="workspace-label">我的工作空间</div>
+        <nav aria-label="主导航">
+          <button data-nav="projects" class="active">
+            ◫ <span>项目工作台</span></button
+          ><button data-nav="todos">✓ <span>我的待办</span></button
+          ><button data-nav="memory">◉ <span>项目记忆</span></button
+          ><button data-nav="skills">◇ <span>能力中心</span></button
+          ><button data-nav="workflows">▷ <span>工作流</span></button
+          ><button data-nav="runs">↻ <span>执行记录</span></button
+          ><button data-nav="setup">⚙ <span>接入与运行</span></button>
+        </nav>
+        <div class="sidebar-foot">
+          <span class="status-dot"></span><span id="connection">连接本机中</span
+          ><small
+            >AI 表格存数据 · GBrain 存记忆<br />本机 Harness 负责思考</small
+          >
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <div id="breadcrumb">工作空间 / 项目工作台</div>
+          <div class="top-actions">
+            <span id="identity"></span
+            ><button id="refresh" class="icon-button">↻ 刷新</button
+            ><a id="base-link" target="_blank" rel="noreferrer" hidden
+              >打开 AI 表格 ↗</a
+            >
+          </div>
+        </header>
+        <div id="notice" role="status" hidden></div>
+        <section id="content" aria-live="polite"></section>
+      </main>
+    </div>
+    <dialog id="modal">
+      <div class="dialog-head">
+        <h2 id="dialog-title"></h2>
+        <button id="dialog-close" aria-label="关闭">×</button>
+      </div>
+      <div id="dialog-content"></div>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>

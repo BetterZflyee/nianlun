@@ -1,0 +1,4 @@
+interface:
+  display_name: "年轮"
+  short_description: "以 DWS 和 AI 表格为底座，把沟通积累成可追溯的项目记忆与阶段性汇报"
+  default_prompt: "使用 $nianlun 打开我的项目记忆，查看最新进展和待确认的里程碑。"

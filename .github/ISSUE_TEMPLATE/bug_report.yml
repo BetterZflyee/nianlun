@@ -1,0 +1,27 @@
+name: 故障报告
+description: 提交可复现的问题（请先脱敏）
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: 请勿上传令牌、个人配置、真实表格 ID 或完整会话日志。安全漏洞按 SECURITY.md 私下报告。
+  - type: input
+    id: environment
+    attributes:
+      label: 版本与环境
+      description: 年轮版本、操作系统、AI 宿主和 CLI 版本。
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤与实际结果
+      description: 使用虚构数据描述；日志只保留脱敏的相关错误行。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true

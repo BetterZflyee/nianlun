@@ -91,8 +91,8 @@ def main():
             setup=PACKAGE/'skills/nianlun-setup'
             if not setup.is_dir():setup=PACKAGE/'nianlun-setup'
             core_status=register(CORE,core,home);setup_status=register(setup,setup_core,home)
-            config=str(Path.home()/'.config/nianlun/config.json')
-            result={'version':'0.5.3','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
+            config=old.get('config') or str(Path.home()/'.config/nianlun/config.json')
+            result={'version':'2.1.0','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
                     'scheduler_entry':old.get('scheduler_entry') or (str(Path(old['skills']['nianlun']['path'])/'scripts/scheduler.py') if old.get('skills') else str(core/'scripts/scheduler.py')),
                     'skills':{'nianlun':{'path':str(core),'status':core_status},'nianlun-setup':{'path':str(setup_core),'status':setup_status}},
                     'host_entries':dict(old.get('host_entries',{}))}
@@ -107,7 +107,9 @@ def main():
             n.save(home/'install.json',{**result,'ready':False})
             if not args.register_only:
                 result['dependencies']=deps.install(home)
-            result.update(ready=not args.register_only,next='双击“打开年轮”，在页面完成钉钉、表格、独立记忆空间与宿主接入')
+            elif old.get('dependencies'):
+                result['dependencies']=old['dependencies']
+            result.update(ready=bool(old.get('ready')) if args.register_only else True,next='双击“打开年轮”，在页面完成钉钉、表格、独立记忆空间与宿主接入')
             n.save(home/'install.json',result)
         print(json.dumps(result,ensure_ascii=False,indent=2))
         print('\n年轮程序已安装。双击“打开年轮”进入工作台。')

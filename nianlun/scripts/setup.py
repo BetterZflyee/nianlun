@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '0.5.3'
+VERSION = '2.1.0'
 
 
 def options(*names):
@@ -29,7 +29,8 @@ TEMPLATE = {
     'projects': {
         'title': ('项目名称', 'text', {}), 'status': ('状态', 'singleSelect', options('待启动','进行中','已完成','暂停')),
         'priority': ('等级','singleSelect',options('P0','P1','P2')), 'description': ('一句话描述','text',{}),
-        'goal': ('项目目标','text',{}), 'risk': ('风险卡点','text',{}), 'report': ('阶段性汇报链接','text',{})},
+        'goal': ('项目目标','text',{}), 'deadline': ('目标日期','date',{}), 'notes': ('备注','text',{}),
+        'risk': ('风险卡点','text',{}), 'report': ('阶段性汇报链接','text',{})},
     'milestones': {
         'title': ('里程碑','text',{}), 'date': ('截止日期','date',{}),
         'status': ('状态','singleSelect',options('待核','进行中','已完成','已延期')),
@@ -317,12 +318,15 @@ class Setup:
             if old.get('active') and old.get('mode')!='controller':
                 raise n.Error('旧版任务需要先在 Codex 迁移到页面控制器，才能从这里暂停')
         sources=preferences.get('sources',{})
-        if not {'minutes','mentions','direct','codex'}<=set(sources) or set(sources)-{'minutes','mentions','direct','codex','inbox','portal','lark_minutes'} or any(type(v)!=bool for v in sources.values()):
+        if not {'minutes','mentions','direct','codex'}<=set(sources) or set(sources)-{'minutes','mentions','direct','codex','inbox','portal','lark_minutes','groups','mail'} or any(type(v)!=bool for v in sources.values()):
             raise n.Error('请明确选择各项信息来源')
         switches=preferences.get('switches',{})
-        if set(switches)!={'table_writes','todos','completion','gbrain','digest','reports'} or any(type(v)!=bool for v in switches.values()):
+        required={'table_writes','todos','completion','gbrain','digest','reports'}
+        if not required<=set(switches) or set(switches)-required-{'milestone_planning','continuous_reports'} or any(type(v)!=bool for v in switches.values()):
             raise n.Error('请明确选择各项自动操作开关')
         if switches['completion'] and not switches['table_writes']: raise n.Error('自动完成待办需要同时允许同步项目记录')
+        if switches.get('milestone_planning') and not switches['table_writes']:raise n.Error('自动倒排需要开启项目写入')
+        if switches.get('continuous_reports') and not switches['reports']:raise n.Error('生长后更新汇报需要开启阶段汇报')
         settings=config['growth']
         lookback=preferences.get('minutes_lookback_hours',settings.get('minutes_lookback_hours',48))
         notification=preferences.get('notification_mode',settings.get('notification_mode','every_run'))
@@ -333,6 +337,21 @@ class Setup:
             lark_command(settings)  # Detect the local executable; enabling never silently installs or switches identity.
         state=Path(settings.get('state_dir',self.config_path.parent/'runtime'));state.mkdir(parents=True,exist_ok=True)
         gw=self.gateway(config['profile']);identity=self_identity(gw)
+        groups=preferences.get('groups',settings.get('groups',[]))
+        if not isinstance(groups,list) or len(groups)>50:raise n.Error('最多选择 50 个采集群')
+        checked=[]
+        for item in groups:
+            if not isinstance(item,dict):raise n.Error('采集群格式错误')
+            old=next((x for x in settings.get('groups',[]) if x.get('id')==item.get('id') and x.get('name')==item.get('name')),None)
+            if old:checked.append(old)
+            else:
+                from project_actions import verified_group
+                checked.append(verified_group(config,gw,{'search_id':item.get('search_id'),'group_id':item.get('id')}))
+        if sources.get('groups') and not checked:raise n.Error('请先搜索并选择要采集的群')
+        mailbox=preferences.get('mailbox',settings.get('mailbox',''))
+        if sources.get('mail'):
+            accounts=gw.call(['mail','mailbox','list']).get('emailAccounts',[])
+            if not mailbox or sum(x.get('email')==mailbox for x in accounts)!=1:raise n.Error('请从当前身份的邮箱列表中选择一个邮箱')
         folder=preferences.get('report_folder') or settings.get('report_folder')
         if folder and '://' in folder:folder=parse_base(folder)[0]
         if switches['reports'] and not folder: raise n.Error('请先选择或创建阶段汇报文件夹')
@@ -344,6 +363,7 @@ class Setup:
         settings.update(state_dir=str(state),home_output=settings.get('home_output',str(self.config_path.parent/'年轮.html')),report_folder=folder,
             overlap_minutes=settings.get('overlap_minutes',30),minutes_lookback_hours=lookback,notification_mode=notification,
             schedule=schedule,sources=source_settings,switches=switches,
+            groups=checked,group_ids=list(dict.fromkeys(x['id'] for x in checked)),mailbox=mailbox,
             codex_session_dirs=(settings.get('codex_session_dirs') or [str(Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'sessions')]) if sources['codex'] else [],
             inbox_dirs=settings.get('inbox_dirs',[str(state/'inbox')]))
         config['timezone']=schedule['timezone'];n.save(self.config_path,config);n.save(state/'identity.json',identity)

@@ -20,7 +20,8 @@ ROLES = {'projects': '项目主表', 'milestones': '里程碑表', 'sites': '场
 FIELDS = {
  'projects': {'title': ['项目名称'], 'number': ['编号'], 'priority': ['等级'], 'status': ['状态'],
               'description': ['一句话描述'], 'risk': ['风险卡点'], 'notes': ['备注'],
-              'updated': ['最近更新'], 'report': ['阶段性汇报链接', '一页纸链接'], 'goal': ['项目目标']},
+              'updated': ['最近更新'], 'report': ['阶段性汇报链接', '一页纸链接'], 'goal': ['项目目标'],
+              'deadline': ['目标日期','项目截止日期','计划完成日期']},
  'milestones': {'title': ['里程碑'], 'project_ids': ['项目'], 'date': ['截止日期'], 'status': ['状态'],
                 'description': ['交付内容'], 'benefit': ['预期效益'], 'notes': ['备注'], 'attachments': ['附件']},
  'sites': {'title': ['场地名称'], 'code': ['场地编码', '场地代码'], 'project_ids': ['项目'],
@@ -220,7 +221,7 @@ def normalized(config, role, records):
             v = r['cells'].get(f['fieldId'])
             if k.endswith('_ids'):
                 item[k] = (v or {}).get('linkedRecordIds', [])
-            elif k in ('date', 'updated'):
+            elif k in ('date', 'updated','deadline'):
                 item[k] = read_date(v, config)
             elif k == 'attachments':
                 item[k] = v or []

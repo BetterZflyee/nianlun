@@ -112,6 +112,17 @@ class FinishTests(unittest.TestCase):
     def test_quiet_empty_round_does_not_send_and_commits_cursor(self):
         result=self.finish();self.assertFalse(result['notify']);self.gw.call.assert_not_called()
         self.assertEqual(n.load(self.p/'checkpoint.json')['channels']['minutes'],{'until':self.bundle['until']})
+    def test_manual_project_backfill_preserves_scheduled_cursor_and_seen_scope(self):
+        checkpoint={'channels':{'minutes':{'until':'2026-10-20T08:00:00+08:00'}}}
+        n.save(self.p/'checkpoint.json',checkpoint)
+        n.save(self.p/'seen.json',{'previous':'v1'})
+        self.bundle.update(manual=True,selection={'project_ids':['P1']},
+                           sources=[{'id':'backfill','version':'v2'}])
+        n.save(self.p/'evidence.json',self.bundle)
+        self.finish()
+        self.assertEqual(n.load(self.p/'checkpoint.json'),checkpoint)
+        self.assertEqual(n.load(self.p/'seen.json'),{'previous':'v1'})
+        self.assertEqual(n.load(self.p/'scopes'/(n.digest(['P1'])+'.json')),{'backfill':'v2'})
     def test_receipt_stats_override_execution_claims_in_model_analysis(self):
         self.decision['actions']=[{'op':'create_record'}]
         n.save(self.p/'plan.json',{'actions':[{'key':'a','op':'create_record'}]})

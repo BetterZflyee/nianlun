@@ -16,6 +16,7 @@ from pathlib import Path
 from difflib import SequenceMatcher
 import nianlun as n
 import source_state
+import intake
 from file_lock import file_lock
 
 class Gateway:
@@ -38,6 +39,8 @@ class Gateway:
         if r.returncode:
             raise n.Error('DWS ' + ' '.join(args[:2]) + ' 失败；请查同 profile 的真实结果')
         d = n.payload(raw)
+        if isinstance(d,dict) and isinstance(raw.get('meta'),dict):
+            d={**d,'meta':raw['meta']}
         if raw.get('ok') is False or d.get('partial') or d.get('failureCount', 0) or d.get('failedCount', 0):
             raise n.Error('DWS 失败或部分成功，不能记为完成')
         nested=d
@@ -97,12 +100,21 @@ def sanitize(text):
     return '\n'.join('[凭据内容已省略]' if re.search(r'(?i)password|passwd|api[_-]?key|secret|token\s*[:=]|admin\s*/|密码\s*[:：]', line) else line for line in text.splitlines())
 
 
-def collect(config, since=None, until=None):
+def collect(config, since=None, until=None, selection=None):
     r = root(config); gw = Gateway(config); settings = config['growth']
+    selection=intake.selection(config,selection)
     pending = r / 'active.json'
     if pending.exists():
+        if selection is not None:
+            saved=n.load(Path(n.load(pending)['run_dir'])/'evidence.json')
+            if saved.get('selection')!=selection or saved.get('requested_since')!=since or saved.get('requested_until')!=until:
+                raise n.Error('已有未完成的生长任务，请先在执行记录中恢复原任务')
         return {'resumed':True, **n.load(pending)}
     end = instant(until or n.stamp(config), datetime.fromisoformat(n.stamp(config)).tzinfo)
+    if selection is not None:
+        if not since or not until:raise n.Error('手动补采须明确起止时间')
+        manual_start=instant(since,end.tzinfo)
+        if (end-manual_start).total_seconds()>366*86400:raise n.Error('单次补采最多 366 天，请分段执行')
     checkpoint = n.load(r/'checkpoint.json') if (r/'checkpoint.json').exists() else {}
     explicit=instant(since,end.tzinfo) if since else None
     start=source_state.window(settings,checkpoint,'harness',end,explicit)
@@ -111,8 +123,13 @@ def collect(config, since=None, until=None):
     folder = r/'runs'/run_id; folder.mkdir(parents=True)
     bundle = {'format':'nianlun-evidence-v1','run_id':run_id,'since':start.isoformat(),'until':end.isoformat(),
               'binding':n.digest(config),'sources':[], 'coverage':[], 'identity':self_identity(gw)}
+    if selection is not None:
+        bundle.update(selection=selection,requested_since=since,requested_until=until,manual=True)
     bundle['count_semantics']='coverage.count 是扫描数量；sources 只含本轮新增或变化的来源。已处理来源被去重，所以二者数量不同不代表遗漏。'
     old = n.load(r/'seen.json') if (r/'seen.json').exists() else {}
+    if selection and selection['project_ids']:
+        scope_file=r/'scopes'/(n.digest(selection['project_ids'])+'.json')
+        old=n.load(scope_file) if scope_file.exists() else {}
     current_channel='harness'
     def add(channel, sid, name, text, date, url='', **extra):
         if not sid or not isinstance(text,str) or not text.strip(): return
@@ -131,6 +148,12 @@ def collect(config, since=None, until=None):
         except Exception as e:
             bundle['coverage'].append({**info,'status':'partial','count':getattr(e,'count',None),'error':str(e)})
     bundle['tables'] = n.fetch(config,gw.table())
+    if selection and selection['project_ids']:
+        chosen=set(selection['project_ids'])
+        if chosen-{p['id'] for p in bundle['tables']['projects']}:raise n.Error('所选项目已不存在，请刷新')
+        for role in n.ROLES:
+            bundle['tables'][role]=[row for row in bundle['tables'][role]
+                if row['id'] in chosen or chosen.intersection(row.get('project_ids',[]))]
     bundle['todos'] = complete(gw.call(['todo','+get-my-tasks','--all','--status','false']), 'todos')
     def minutes():
         found = complete(gw.call(['minutes','+search','--scope','all','--start',start.isoformat(),'--end',end.isoformat(),'--page-all']), 'minutes')
@@ -180,9 +203,24 @@ def collect(config, since=None, until=None):
                 if error:errors.append(error)
         if errors:raise source_state.Incomplete('; '.join(errors),count)
         return count
-    for name,fn in [('minutes',minutes),('mentions',mentions),('direct',direct)]:
-        if settings.get('sources',{}).get(name,True): section(name,fn)
-    if settings.get('sources',{}).get('lark_minutes',False):
+    allowed=set(selection['channels'] if selection else intake.enabled(settings))
+    def groups():
+        ids=settings.get('group_ids',[])
+        if not ids:raise n.Error('尚未选择采集群聊')
+        count=0;errors=[]
+        for cid in ids:
+            try:
+                rows=complete(gw.call(['chat','+chat-messages','--open-conversation-id',cid,
+                    '--start',start.isoformat(),'--end',end.isoformat(),'--page-all','--page-limit','40','--max-items','3000']),'messages')
+                for item in rows:item.setdefault('conversationId',cid)
+                count+=messages(rows,'groups')
+            except n.Error as exc:errors.append(str(exc))
+        if errors:raise source_state.Incomplete('; '.join(errors),count)
+        return count
+    for name,fn in [('minutes',minutes),('mentions',mentions),('direct',direct),('groups',groups),
+                    ('mail',lambda:intake.mail(gw,settings,start,end,add,instant))]:
+        if name in allowed:section(name,fn)
+    if 'lark_minutes' in allowed:
         section('lark_minutes',lambda:source_state.lark_minutes(settings,start,end,folder,add))
     def sessions():
         count=0
@@ -215,7 +253,7 @@ def collect(config, since=None, until=None):
                         if start<=time<end and x.get('role')=='user':
                             add('harness',x['id'],x['name'],x['text'],time.isoformat());count+=1
         return count
-    section('harness',sessions)
+    if 'harness' in allowed:section('harness',sessions)
     def workbench():
         count=0
         for path in (r/'workbench').glob('request-*.json'):
@@ -231,7 +269,7 @@ def collect(config, since=None, until=None):
             add('workbench',request.get('request_id'),'年轮工作台手动操作',json.dumps(content,ensure_ascii=False),when.isoformat())
             count+=1
         return count
-    section('workbench',workbench)
+    if 'workbench' in allowed:section('workbench',workbench)
     # Exact known todo IDs enable reverse synchronization after a manual completion.
     registry=n.load(r/'links.json') if (r/'links.json').exists() else {}
     bundle['todo_links']=registry
@@ -471,8 +509,11 @@ def execution_result(plan,receipt):
 
 
 def execution_text(counts):
-    return ('已核验：新增记录 {records_created} 条、里程碑 {milestones_created} 项、待办 {todos_created} 条；'
+    text=('已核验：新增记录 {records_created} 条、里程碑 {milestones_created} 项、待办 {todos_created} 条；'
             '完成待办 {todos_completed} 条，直接更新状态 {statuses_updated} 项；复用既有结果 {reused} 项。').format(**counts)
+    if counts.get('planned') or counts.get('reports'):
+        text+='倒排新增或调整 '+str(counts.get('planned',0))+' 个节点，生成 '+str(counts.get('reports',0))+' 份汇报。'
+    return text
 
 
 def finish(config,folder,decision_file):
@@ -490,10 +531,16 @@ def finish(config,folder,decision_file):
     partial=[x for x in b['coverage'] if x['status']!='complete']
     plan=n.load(folder/'plan.json') if (folder/'plan.json').exists() else {'actions':[]}
     counts=execution_result(plan,receipt)
+    post=n.load(folder/'postprocess.json') if (folder/'postprocess.json').exists() else {}
+    if post:
+        counts['planned']=sum(len(p['changed']) for p in post.get('planning',{}).get('projects',[]))
+        counts['reports']=sum(not r.get('already_present') for r in post.get('reports',[]))
     status['execution']=counts
     text='# 年轮 · 生长记录\n\n'+b['since']+' 至 '+b['until']+'\n\n## 执行结果（写后回读）\n\n'+execution_text(counts)
     text+='\n\n## 项目研判（写入前生成，不作为执行回执）\n\n'+d['summary']
     if d.get('pending'):text+='\n\n待确认：\n'+'\n'.join('- '+str(x) for x in d['pending'])
+    if post.get('planning',{}).get('pending'):text+='\n\n倒排所需信息：\n'+'\n'.join(post['planning']['pending'])
+    if post.get('reports'):text+='\n\n自动阶段汇报：\n'+'\n'.join(r['url'] for r in post['reports'])
     text+='\n\n采集覆盖：\n'+'\n'.join('- '+source_state.LABELS.get(x['channel'],'待办回读')+'：'+('完整' if x['status']=='complete' else '部分覆盖')+('；'+x['error'] if x.get('error') else '') for x in b['coverage'])
     text+='\n\n[项目工作台]('+config['base_url']+')\n\n本轮新增或变更来源：'+str(len(b['sources']))+' 条；完整证据与动作回执保存在本地运行目录。'
     # Preserve the exact body used by a partially delivered legacy run across an upgrade/retry.
@@ -502,8 +549,8 @@ def finish(config,folder,decision_file):
     else:n.save(summary_path,text)
     switches=config['growth']['switches']
     notice_path=root(config)/'notice.json';previous_notice=n.load(notice_path) if notice_path.exists() else {}
-    signature=n.digest({'pending':d.get('pending',[]),'gaps':[{'channel':x['channel'],'error':x.get('error')} for x in partial]})
-    actual=sum(counts[key] for key in ('records_created','milestones_created','statuses_updated','todos_created','todos_completed'))
+    signature=n.digest({'pending':d.get('pending',[])+post.get('planning',{}).get('pending',[]),'gaps':[{'channel':x['channel'],'error':x.get('error')} for x in partial]})
+    actual=sum(counts.get(key,0) for key in ('records_created','milestones_created','statuses_updated','todos_created','todos_completed','planned','reports'))
     changed=actual>0 or signature!=previous_notice.get('signature',n.digest({'pending':[],'gaps':[]}))
     notify=config['growth'].get('notification_mode','every_run')=='every_run' or changed
     if switches.get('gbrain') and not status.get('brain'):
@@ -536,13 +583,16 @@ def finish(config,folder,decision_file):
             if delivery.get('result',{}).get('sendStatus')=='SUCCESS':status['digest']['status']='delivered'
             else:raise n.Error('钉钉摘要已提交，但投递结果未确认；保留发送句柄，不重复发')
             n.save(status_path,status)
-    seen=n.load(root(config)/'seen.json') if (root(config)/'seen.json').exists() else {}
+    selected=b.get('selection',{}).get('project_ids',[])
+    seen_path=root(config)/'scopes'/(n.digest(selected)+'.json') if selected else root(config)/'seen.json'
+    seen=n.load(seen_path) if seen_path.exists() else {}
     for s in b['sources']:
         if s['id'] not in d.get('deferred_source_ids',[]):seen[s['id']]=s['version']
-    n.save(root(config)/'seen.json',seen)
+    n.save(seen_path,seen)
     # Incomplete sources retain their window for the next run; don't silently drop missing pages.
     checkpoint=root(config)/'checkpoint.json'
-    n.save(checkpoint,source_state.advance(b,d,n.load(checkpoint) if checkpoint.exists() else {}))
+    if not b.get('manual'):
+        n.save(checkpoint,source_state.advance(b,d,n.load(checkpoint) if checkpoint.exists() else {}))
     health_path=root(config)/'source-health.json'
     n.save(health_path,source_state.health(b,n.load(health_path) if health_path.exists() else {}))
     n.save(notice_path,{'signature':signature,'run_id':b['run_id']})
@@ -586,18 +636,22 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
-def publish_report(config,project,since,until,summary_file=None):
+def publish_report(config,project,since,until,summary_file=None,expected_facts=None):
     from render_report import render
+    from planning import evidence
     gw=Gateway(config);self_identity(gw);state=n.fetch(config,gw.table());p=n.select_projects(state,[project])[0]
+    if not state['complete']:raise n.Error('表格读取不完整，未发布汇报')
+    if expected_facts is not None and n.digest(evidence(state,p['id']))!=expected_facts:
+        raise n.Error('生成期间项目事实已变化，请重新生成本期汇报')
     if not config['growth']['switches'].get('reports'):raise n.Error('阶段汇报开关关闭')
     date=datetime.strptime(until,'%Y-%m-%d');datetime.strptime(since,'%Y-%m-%d')
     if since>until:raise n.Error('时间范围错误')
     summary=Path(summary_file).read_text(encoding='utf-8') if summary_file else ''
     html,md,_=render(state,[p],since,until,'年轮 · 阶段性汇报',summary)
-    key=n.digest({'project':p['id'],'since':since,'until':until,'summary':summary})[:16]
+    key=n.digest({'project':p['id'],'since':since,'until':until,'summary':summary,'facts':evidence(state,p['id'])})[:16]
     folder=root(config)/'reports'/key;folder.mkdir(parents=True,exist_ok=True)
     receipt_file=folder/'receipt.json';receipt=n.load(receipt_file) if receipt_file.exists() else {}
-    if receipt.get('status')=='verified':return receipt
+    if receipt.get('status')=='verified':return {**receipt,'report_id':key,'already_present':True}
     if receipt.get('in_flight'):
         if receipt['in_flight'].get('step')!='upload':raise n.Error('报告存在待核验步骤')
         receipt=reconcile_report_upload(config,gw,folder,receipt)
@@ -619,7 +673,7 @@ def publish_report(config,project,since,until,summary_file=None):
     if now.get('report') not in (receipt['previous_link'],receipt['url']):raise n.Error('主表汇报链接被其他人更新')
     f=config['tables']['projects']['fields']['report']['fieldId']
     table_write(config,gw,'projects',{f:receipt['url']},p['id'])
-    receipt.update(status='verified',project_id=p['id']);n.save(receipt_file,receipt)
+    receipt.update(status='verified',project_id=p['id'],report_id=key);n.save(receipt_file,receipt)
     return receipt
 
 

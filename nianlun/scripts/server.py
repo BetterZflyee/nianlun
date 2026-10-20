@@ -27,13 +27,15 @@ import flow
 import codex_session
 import memory
 import source_state
+import planning
+import project_actions
 import nianlun as n
 from setup import Setup, default_home
 from workbench import Workbench, text
 from file_lock import file_lock
 
 ASSETS=n.SKILL/'assets/portal'
-READ_OPS={'snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status'}
+READ_OPS={'snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes'}
 
 
 class Application:
@@ -58,15 +60,19 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=n.load(scheduler) if scheduler and scheduler.exists() else {'active':False}
-        return {'version':'0.5.3','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.1.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
             'preferences':{'schedule':growth.get('schedule'),'sources':{'inbox':bool(growth.get('inbox_dirs')),'portal':bool(growth.get('codex_session_dirs')),**growth.get('sources',{}),'codex':bool(growth.get('codex_session_dirs'))},
                 'switches':growth.get('switches',{}),'report_folder':growth.get('report_folder'),
+                'groups':growth.get('groups',[]),'mailbox':growth.get('mailbox',''),
                 'minutes_lookback_hours':growth.get('minutes_lookback_hours',48),'notification_mode':growth.get('notification_mode','every_run')},
-            'settings':{k:v for k,v in self.settings.items() if k in ('codex_bin','enabled_skills')},
+            'settings':{k:v for k,v in self.settings.items() if k in ('codex_bin','enabled_skills','skill_roots')},
             'harness':harness.describe(harness.selection(self.config,self.settings.get('codex_bin'))),
             'hosts':harness.PROVIDERS,'config_path':str(self.config)}
+
+    def capabilities(self):
+        return harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin')),self.settings.get('skill_roots',[]))
 
     def persist_job(self, job):
         if job['op'] not in READ_OPS:
@@ -155,7 +161,18 @@ class Application:
             def phase(message):
                 with self.guard:
                     self.jobs[jid]['phase']=message;self.persist_job(self.jobs[jid])
-            return flow.grow(self.config,choice,phase)
+            return flow.grow(self.config,choice,phase,data.get('since'),data.get('until'),data.get('selection'))
+        if op=='group_search':return project_actions.groups(n.load(self.config),data.get('query'))
+        if op=='mailboxes':
+            config,gw,_=self.work.connection()
+            return {'emails':[x['email'] for x in gw.call(['mail','mailbox','list']).get('emailAccounts',[]) if x.get('email')]}
+        if op=='send_report':
+            config=n.load(self.config)
+            with g.locked(config):return project_actions.send_report(config,data)
+        if op=='plan_milestones':
+            config=n.load(self.config)
+            with g.locked(config):
+                return planning.run(config,[data['project_id']],choice,g.root(config)/'milestone-plans')
         if op=='snapshot':return self.work.snapshot()
         if op=='todos':return self.work.todos()
         if op=='mutate':return self.work.mutate(data)
@@ -165,9 +182,13 @@ class Application:
             return harness.status(selected)
         if op=='harness_connect':return host.connect(self.config,data.get('provider',choice['provider']),data.get('mode'),data.get('binary'))
         if op=='capabilities':
-            return {'skills':harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin'))),'enabled':self.settings.get('enabled_skills',[])}
+            return {'skills':self.capabilities(),'enabled':self.settings.get('enabled_skills',[]),'roots':self.settings.get('skill_roots',[])}
+        if op=='capability_roots':
+            roots=harness.skill_roots(data.get('roots'))
+            self.settings['skill_roots']=roots;n.save(self.settings_path,self.settings)
+            return {'roots':roots,'skills':self.capabilities()}
         if op=='capability_toggle':
-            skill=next((s for s in harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin'))) if s['id']==data.get('id')),None)
+            skill=next((s for s in self.capabilities() if s['id']==data.get('id')),None)
             if not skill:raise n.Error('此能力已不存在，请重新扫描')
             enabled=set(self.settings.get('enabled_skills',[]))
             if data.get('enabled') is True:enabled.add(skill['id'])
@@ -183,7 +204,7 @@ class Application:
                        for k,v in state.items()}
             skilltext=''
             if data.get('skill_id'):
-                skill=next((s for s in harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin'))) if s['id']==data['skill_id']),None)
+                skill=next((s for s in self.capabilities() if s['id']==data['skill_id']),None)
                 if not skill or skill['id'] not in self.settings.get('enabled_skills',[]):raise n.Error('请先启用这项能力')
                 skilltext=Path(skill['path']).read_text(encoding='utf-8')[:30000]
             memory_text=''
@@ -205,7 +226,7 @@ class Application:
             if since>until:raise n.Error('结束日期不能早于开始日期')
             with g.locked(config):
                 g.self_identity(g.Gateway(config))
-                return g.publish_report(config,data['project_id'],since,until)
+                return flow.report_projects(config,[data['project_id']],since,until,choice)[0]
         raise n.Error('未知工作台操作')
 
     def workflow(self,jid,data,export_only=False):
@@ -215,7 +236,7 @@ class Application:
         question=text(data.get('question'),'工作要求',20000,True)
         skill=None
         if data.get('skill_id'):
-            skill=next((s for s in harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin'))) if s['id']==data['skill_id']),None)
+            skill=next((s for s in self.capabilities() if s['id']==data['skill_id']),None)
             if not skill or skill['id'] not in self.settings.get('enabled_skills',[]):raise n.Error('请先启用这项能力')
         config,gw,identity=self.work.connection()
         snapshot=self.work.snapshot()
@@ -313,7 +334,7 @@ class Application:
 
 
 OPERATIONS=READ_OPS|{'mutate','setup_dependencies','setup_login','create_resource','table_plan','tables_apply',
-    'memory_connect','configure','setup_doctor','harness_connect','capability_toggle','ask','report','grow','workflow','memory_baseline','scheduler_check','host_export','resume','workflow_request'}
+    'memory_connect','configure','setup_doctor','harness_connect','capability_toggle','capability_roots','ask','report','send_report','plan_milestones','grow','workflow','memory_baseline','scheduler_check','host_export','resume','workflow_request'}
 
 
 class HTTPServer(ThreadingHTTPServer):

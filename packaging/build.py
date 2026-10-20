@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 from release_guard import check_file, check_source
 
-VERSION = '0.5.3'
+VERSION = '2.1.0'
 LAUNCHERS = ('安装年轮.command', '打开年轮.command')
 
 
@@ -32,6 +32,9 @@ def build(output=None):
             shutil.copyfile(ROOT / 'packaging' / name, package / name)
         for name in ('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md'):
             shutil.copyfile(ROOT / name, package / name)
+        (package/'docs').mkdir()
+        for name in ('USER_GUIDE.md','PRODUCT_RELEASE_2.1.md','VERSIONING.md','VALIDATION_2.1.md'):
+            shutil.copyfile(ROOT/'docs'/name,package/'docs'/name)
         ignore = shutil.ignore_patterns('__pycache__', '*.pyc', 'test_*.py', '.DS_Store')
         shutil.copytree(ROOT / 'packaging/hosts', package / 'hosts', ignore=ignore)
         shutil.copytree(ROOT / 'nianlun', package / 'skills/nianlun', ignore=ignore)

@@ -8,10 +8,13 @@
     "overlap_minutes": 30,
     "minutes_lookback_hours": 48,
     "notification_mode": "every_run",
-    "sources": {"minutes": true, "mentions": true, "direct": true, "lark_minutes": false},
+    "sources": {"minutes": true, "mentions": true, "direct": true, "lark_minutes": false, "groups": false, "mail": false},
+    "groups": [],
+    "group_ids": [],
+    "mailbox": "",
     "codex_session_dirs": ["/your/codex/sessions"],
     "inbox_dirs": ["/your/harness/exported-human-messages"],
-    "switches": {"table_writes": true, "todos": true, "completion": true, "gbrain": true, "digest": true, "reports": true},
+    "switches": {"table_writes": true, "todos": true, "completion": true, "gbrain": true, "digest": true, "reports": true, "milestone_planning": false, "continuous_reports": false},
     "schedule": {"timezone": "Asia/Singapore", "growth_hours": [10, 12, 14, 16, 18, 20], "report_weekday": "TH", "report_hour": 9}
   }
 }

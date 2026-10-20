@@ -27,6 +27,7 @@ const fieldLabels = {
   title: "名称",
   description: "详情",
   goal: "项目目标",
+  deadline: "目标日期",
   risk: "风险卡点",
   priority: "优先级",
   status: "状态",
@@ -51,6 +52,11 @@ const jobNames = {
   workflow: "执行宿主工作流",
   grow: "运行一次生长",
   report: "生成阶段汇报",
+  plan_milestones: "倒排里程碑",
+  send_report: "发送项目汇报",
+  group_search: "搜索项目群",
+  mailboxes: "读取本人邮箱",
+  capability_roots: "保存能力目录",
   setup_dependencies: "安装运行环境",
   setup_login: "钉钉授权",
   profiles: "读取账号",
@@ -445,6 +451,8 @@ function renderProject(root) {
         project.description || "在这里推进项目，记录每一步的来龙去脉。",
         [
           btn("编辑项目", () => editRow("projects", project)),
+          btn("获取项目进度", () => growthDialog(project)),
+          btn("倒排里程碑", () => milestoneDialog(project)),
           btn("生成汇报", () => reportDialog(project), "primary"),
         ],
       ),
@@ -718,7 +726,7 @@ async function renderTodos(root, generation) {
               class: "subtle",
               text: todo.link?.record_ids?.length
                 ? "完成后，将同步关联的项目记录为“已解决”。"
-                : "这项待办没有关联年轮项目记录，只更新钉钉待办状态。",
+                : "这项待办没有关联年轮项目记录，只更新丰声待办（DWS）状态。",
             }),
             el("div", { class: "form-actions" }, [
               btn("取消", () => $("#modal").close()),
@@ -781,16 +789,33 @@ async function renderTodos(root, generation) {
   search.oninput = filter;
   scope.onchange = filter;
 }
-function growthDialog() {
+function growthDialog(project = null) {
+  if (!project?.id) project = null;
+  const end = new Date(), begin = new Date(end.getTime() - 86400000);
+  const local = (d) => new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0,16);
+  const since = el("input", {type:"datetime-local", value:local(begin), required:true});
+  const until = el("input", {type:"datetime-local", value:local(end), required:true});
+  const labels = {minutes:"AI 听记",mentions:"群聊 @我",direct:"单聊",groups:"已选择的群聊",mail:"已选择的邮箱",lark_minutes:"飞书妙记",harness:"宿主人类会话",workbench:"工作台操作"};
+  const checks = {};
+  const channels = el("div", {class:"two-cols"});
+  for (const [key,label] of Object.entries(labels)) {
+    const enabled = ["harness","workbench"].includes(key) || (boot.preferences.sources?.[key] ?? ["minutes","mentions","direct"].includes(key));
+    const input = el("input", {type:"checkbox", checked:enabled, disabled:!enabled});
+    checks[key] = input;
+    channels.append(el("label", {class:"check"}, [input,label + (enabled ? "" : "（尚未启用）")]));
+  }
   const status = el("div", { class: "ai-answer" });
+  const requestId = crypto.randomUUID();
+  let submitted = null;
   const go = btn(
-    "按当前配置运行",
+    "采集并更新项目",
     (event) =>
       quiet(
         withButton(event.currentTarget, async (progress) => {
           const result = await run(
             "grow",
-            { request_id: crypto.randomUUID() },
+            submitted ||= {request_id:requestId,since:new Date(since.value).toISOString(),until:new Date(until.value).toISOString(),
+              selection:{channels:Object.keys(checks).filter(k=>checks[k].checked),project_ids:project ? [project.id] : []}},
             (message) => {
               progress(message);
               status.textContent = message;
@@ -814,12 +839,67 @@ function growthDialog() {
     "让年轮生长一次",
     el("div", {}, [
       el("p", {
-        text: "按“接入与运行”中已开启的来源与操作，采集信息、检索项目记忆、理解进度、执行同步并发送本人摘要。未完成的轮次会先恢复。",
+        text: (project ? "更新「"+project.title+"」。" : "更新全部项目。")+"选择时间和渠道，补采信息后自动更新进度、里程碑、记忆与汇报。具体动作遵循已开启的运行开关；手动补采不会跳过定时任务窗口。",
       }),
+      el("div",{class:"two-cols"},[formField("从",since),formField("到",until)]),
+      channels,
       el("div", { class: "form-actions" }, [go]),
       status,
     ]),
   );
+}
+function milestoneDialog(project) {
+  const goal = el("textarea",{value:project.goal || project.description || "",required:true});
+  const dateMatch = project.notes?.match(/年轮目标日期[：:]\s*(\d{4}-\d{2}-\d{2})/);
+  const target = el("input",{type:"date",value:project.deadline || dateMatch?.[1] || "",required:true});
+  const status = el("div",{class:"ai-answer"});
+  let saved = false;
+  const requestId = crypto.randomUUID(), planId = crypto.randomUUID();
+  const go = btn("保存目标并倒排",e=>quiet(withButton(e.currentTarget,async progress=>{
+    if (!goal.value.trim() || !target.value) throw new Error("请填写项目目标和目标日期");
+    if (!saved) {
+      const fields = data.fields.projects, values = {};
+      values[fields.goal ? "goal" : "description"] = goal.value;
+      if (fields.deadline) values.deadline = target.value;
+      else if (fields.notes) values.notes = (project.notes || "").replace(/年轮目标日期[：:]\s*\d{4}-\d{2}-\d{2}/g,"").trim()+"\n年轮目标日期："+target.value;
+      else throw new Error("请在 AI 表格添加“目标日期”日期字段，并在接入向导重新绑定。");
+      await run("mutate",{op:"update",role:"projects",record_id:project.id,revision:project.revision,values,request_id:requestId},progress);
+      saved = true; goal.disabled = target.disabled = true;
+    }
+    const r = (await run("plan_milestones",{project_id:project.id,request_id:planId},progress)).value;
+    status.textContent = r.pending?.length ? r.pending.join("\n") : "倒排完成，已回读验证。新增或调整 "+r.projects.reduce((sum,p)=>sum+p.changed.length,0)+" 个节点；人工节点和已完成节点保留。";
+    data = (await run("snapshot")).value;renderProject($("#content"));
+  })),"primary");
+  dialog("目标日期 → 里程碑",el("div",{},[
+    el("p",{text:"给出目标和截止时间，年轮按交付顺序倒排。节点是计划，不会因为到期而自动标为完成。开启“自动倒排里程碑”后，会随新进展继续调整。"}),
+    formField("项目目标",goal),formField("目标日期",target),go,status]));
+}
+
+function groupPicker(onSelect) {
+  const query=el("input",{placeholder:"输入群名称关键词"}), matches=el("div",{}), status=el("p",{class:"subtle"});
+  const search=btn("搜索群聊",e=>quiet(withButton(e.currentTarget,async()=>{
+    const r=(await run("group_search",{query:query.value})).value;
+    matches.replaceChildren(...r.groups.map(group=>btn(group.name,()=>onSelect({...group,search_id:r.search_id}))));
+    status.textContent=r.groups.length ? "请选择具体群聊。" : "没有匹配群聊。";
+  })));
+  return el("div",{},[el("div",{class:"actions"},[query,search]),status,matches]);
+}
+
+function reportSendDialog(project, report) {
+  let group=null, submitted=null;
+  const chosen=el("p",{text:"尚未选择发送群"}), status=el("p",{}), message=el("textarea",{
+    value:project.title+" · 阶段汇报\n"+report.since+" — "+report.until+"\n\n"+report.summary+"\n\n完整汇报："+report.url,rows:12});
+  const picker=groupPicker(value=>{group=value;chosen.textContent="发送到："+value.name;});
+  const go=btn("发送到所选群",e=>quiet(withButton(e.currentTarget,async progress=>{
+    if(!group)throw new Error("请先选择接收群");
+    submitted ||= {request_id:crypto.randomUUID(),project_id:project.id,report_id:report.report_id,
+      search_id:group.search_id,group_id:group.id,message:message.value};
+    message.disabled=true;
+    const r=(await run("send_report",submitted,progress)).value;
+    status.textContent="已确认投递到："+r.group.name;
+    go.disabled=true;
+  })),"primary");
+  dialog("发送项目汇报",el("div",{},[picker,chosen,formField("消息预览",message),go,status]));
 }
 function todoDialog() {
   const title = el("input", {
@@ -878,7 +958,7 @@ function todoDialog() {
         (message) => (save.textContent = message),
       );
       $("#modal").close();
-      toast("已创建到本人的钉钉待办");
+      toast("已创建到本人的丰声待办（DWS）");
       navigate("todos");
     } catch (e) {
       error.textContent = e.message;
@@ -911,12 +991,13 @@ function reportDialog(project) {
   });
   const form = el("form", {}, [
     el("p", {
-      text: "根据所选时间范围的真实记录与里程碑生成汇报，上传到你的钉钉文件夹，并回填项目主表链接。",
+      text: "自动结合进度、里程碑和项目记忆形成结论、偏差、风险与下一步，上传并回填主表。无需先手工补写；生成后可预览并通过 DWS CLI 发送到项目群。",
     }),
     el("div", { class: "two-cols" }, [
       formField("开始日期", since),
       formField("结束日期", until),
     ]),
+    btn("本月",()=>{since.value=new Date(today.getFullYear(),today.getMonth(),1).toLocaleDateString("en-CA");until.value=today.toLocaleDateString("en-CA");}),
     error,
     el("div", { class: "form-actions" }, [save]),
   ]);
@@ -924,7 +1005,7 @@ function reportDialog(project) {
     event.preventDefault();
     save.disabled = true;
     try {
-      await run(
+      const report = (await run(
         "report",
         {
           project_id: project.id,
@@ -933,11 +1014,15 @@ function reportDialog(project) {
           request_id: crypto.randomUUID(),
         },
         (message) => (save.textContent = message),
-      );
+      )).value;
       $("#modal").close();
       toast("阶段汇报已上传，项目链接已更新");
       data = (await run("snapshot")).value;
       renderProject($("#content"));
+      dialog("汇报已生成 · "+project.title,el("div",{},[
+        el("div",{class:"ai-answer",text:report.summary}),
+        el("a",{href:report.url,target:"_blank",rel:"noopener",text:"打开完整汇报 ↗"}),
+        btn("发送到项目群",()=>reportSendDialog(project,report),"primary")]));
     } catch (e) {
       error.textContent = e.message;
     } finally {
@@ -951,7 +1036,7 @@ function renderMemory(root) {
   root.replaceChildren(
     heading(
       "让经验，有处可寻。",
-      "检索你自己的独立记忆空间，找回项目背后的讨论、判断与经验。",
+      "生长过程中自动更新项目记忆，保留每轮依据。你可以随时检索，无需日常手工维护。",
     ),
   );
   const query = el("input", {
@@ -980,7 +1065,7 @@ function renderMemory(root) {
   root.append(
     el("div", { class: "panel" }, [
       form,
-      btn("把现有项目存入记忆", (event) =>
+      btn("补存接入前的项目基线（可选）", (event) =>
         quiet(
           withButton(event.currentTarget, async (progress) => {
             const r = await run("memory_baseline", {}, progress);
@@ -998,6 +1083,7 @@ function renderMemory(root) {
       }),
     ]),
   );
+
 }
 async function renderSkills(root, generation) {
   const result = (await run("capabilities")).value;
@@ -1014,6 +1100,12 @@ async function renderSkills(root, generation) {
       text: "这里列出当前适配器可读取的本机 Skill。工作流按宿主能力在页面执行或回宿主接续；授权沿用该宿主的机制。",
     }),
   );
+  const roots=el("textarea",{rows:3,value:(result.roots || []).join("\n"),placeholder:"每行一个 Skill 文件夹绝对路径，可来自 Codex、Claude 或自己的技能目录"});
+  root.append(formField("额外 Skill 文件夹",roots,"读取文件夹内的 SKILL.md 或其直接子目录。扫描后自行选择启用，工作流沿用当前宿主权限。"),
+    btn("保存并重新扫描",e=>quiet(withButton(e.currentTarget,async()=>{
+      await run("capability_roots",{roots:roots.value.split("\n").map(x=>x.trim()).filter(Boolean)});
+      await navigate("skills");
+    }))));
   const grid = el("div", { class: "project-grid" });
   const search = el("input", {
     type: "search",
@@ -2004,6 +2096,8 @@ function renderSetup(root) {
     lark_minutes: "飞书：我拥有的妙记（需已安装并登录飞书 CLI）",
     mentions: "群聊中 @我",
     direct: "我的单聊",
+    groups: "我选择的群聊（不限于 @我）",
+    mail: "我选择的邮箱",
     codex: "本机 Codex 人类会话",
     inbox: "其他宿主主动交付的人类会话",
     portal: "工作台已完成工作流的人类请求",
@@ -2022,6 +2116,8 @@ function renderSetup(root) {
     gbrain: "写入项目记忆",
     digest: "向本人钉钉推送摘要",
     reports: "生成阶段汇报",
+    milestone_planning: "自动按目标日期倒排里程碑",
+    continuous_reports: "每轮生长后自动更新阶段汇报",
   })) {
     const input = el("input", {
       type: "checkbox",
@@ -2034,6 +2130,22 @@ function renderSetup(root) {
     value: preferences.report_folder || "",
     placeholder: "粘贴钉钉文件夹链接，或点击下面创建",
   });
+  let selectedGroups = [...(preferences.groups || [])];
+  const groupList = el("div",{class:"actions"});
+  const paintGroups = () => groupList.replaceChildren(...selectedGroups.map(group=>btn(group.name+" ×",()=>{
+    selectedGroups=selectedGroups.filter(x=>x.id!==group.id);paintGroups();
+  })));
+  paintGroups();
+  const groupSearch = groupPicker(group=>{
+    if(!selectedGroups.some(x=>x.id===group.id))selectedGroups.push(group);
+    paintGroups();
+  });
+  const mailbox = select([["","请选择本人邮箱"],...(preferences.mailbox ? [[preferences.mailbox,preferences.mailbox]] : [])],preferences.mailbox || "");
+  const loadMail = btn("读取我的邮箱",e=>quiet(withButton(e.currentTarget,async()=>{
+    const emails=(await run("mailboxes")).value.emails, old=mailbox.value;
+    mailbox.replaceChildren(el("option",{value:"",text:"请选择本人邮箱"}),...emails.map(email=>el("option",{value:email,text:email})));
+    mailbox.value=emails.includes(old) ? old : "";
+  })));
   const lookback = select([[24,"最近 24 小时"],[48,"最近 48 小时（推荐）"],[72,"最近 72 小时"],[168,"最近 7 天"]], preferences.minutes_lookback_hours || 48);
   const notifyMode = select([["every_run","每轮发送摘要"],["changes","仅有实际动作、新待核事项或覆盖变化时发送"]], preferences.notification_mode || "every_run");
   const scheduleState = el("p", {
@@ -2065,6 +2177,8 @@ function renderSetup(root) {
         ]),
         el("h3", { text: "信息来源" }),
         sourceBox,
+        formField("采集群聊",el("div",{},[groupSearch,groupList]),"只有这里选定的群会进入群聊采集。"),
+        formField("采集邮箱",el("div",{class:"actions"},[mailbox,loadMail])),
         el("h3", { text: "自动操作" }),
         switchBox,
         formField("阶段汇报文件夹", folder),
@@ -2104,6 +2218,8 @@ function renderSetup(root) {
                       },
                       minutes_lookback_hours: Number(lookback.value),
                       notification_mode: notifyMode.value,
+                      groups: selectedGroups,
+                      mailbox: mailbox.value,
                       sources: Object.fromEntries(
                         Object.entries(sources).map(([k, input]) => [
                           k,

@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 import zipfile
+from contextlib import chdir
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -175,7 +176,8 @@ class SetupTests(unittest.TestCase):
                 captures.append(source)
                 return SimpleNamespace(returncode=0,stdout='{}')
             return SimpleNamespace(returncode=0,stdout=summary)
-        with patch.object(growth,'Gateway',return_value=self.cloud.gateway(config)),patch.object(growth.subprocess,'run',side_effect=brain_run):
+        # Windows cannot form a relative path across different drive letters.
+        with chdir(self.home),patch.object(growth,'Gateway',return_value=self.cloud.gateway(config)),patch.object(growth.subprocess,'run',side_effect=brain_run):
             result=growth.finish(config,os.path.relpath(run),run/'decision.json')
         self.assertEqual(result['status'],'complete');self.assertEqual(len(captures),1)
 

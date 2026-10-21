@@ -13,3 +13,11 @@
 | lark-cli（可选） | 飞书妙记采集 | https://github.com/larksuite/cli |
 
 Codex、Claude Code、WorkBuddy、DeepSeek Harness 由用户自行提供并登录；本仓库不分发这些宿主。产品名称用于说明兼容目标，不表示其官方认可。
+
+## Three.js 0.186.1
+
+The local knowledge constellation uses Three.js (MIT), © 2010–2026 Three.js authors.
+Upstream: https://github.com/mrdoob/three.js. Source package: npm `three@0.186.1`.
+The two browser ESM build files were minified with esbuild 0.28.2; the core import was
+renamed to the local `.min.js` filename. No CDN, telemetry, or remote font is used.
+Full license: `nianlun/assets/portal/vendor/three-LICENSE.txt`.

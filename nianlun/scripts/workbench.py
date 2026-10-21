@@ -51,9 +51,9 @@ class Workbench:
         state.update(identity=identity)
         return state
 
-    def todos(self):
+    def todos(self, completed=False):
         config, gw, _ = self.connection()
-        rows = g.complete(gw.call(['todo','+get-my-tasks','--all','--status','false']), 'todos')
+        rows = g.complete(gw.call(['todo','+get-my-tasks','--all','--status','true' if completed else 'false']), 'todos')
         path = g.root(config)/'links.json'
         links = n.load(path) if path.exists() else {}
         # Return only fields needed by the page, never task API credentials or attachment tokens.
@@ -69,7 +69,7 @@ class Workbench:
             return {'project_id':matches[0]['id'],'record_ids':[],'inferred_from':'title_prefix'}
         return {'complete':True, 'todos':[{
             'id':str(row['taskId']), 'title':row['subject'], 'due':row.get('dueTime'),
-            'priority':row.get('priority'), 'link':associate(row)} for row in rows]}
+            'priority':row.get('priority'), 'completed':completed, 'link':associate(row)} for row in rows]}
 
     def cells(self, config, state, role, values, creating):
         if role not in n.ROLES or not isinstance(values, dict):

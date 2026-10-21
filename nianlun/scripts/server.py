@@ -38,7 +38,7 @@ from workbench import Workbench, text
 from file_lock import file_lock
 
 ASSETS=n.SKILL/'assets/portal'
-READ_OPS={'snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
+READ_OPS={'todo_detail','memory_catalog','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
 
 
 class Application:
@@ -63,7 +63,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.2.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.3.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
             'preferences':{'schedule':growth.get('schedule'),'sources':{'inbox':bool(growth.get('inbox_dirs')),'portal':bool(growth.get('codex_session_dirs')),**growth.get('sources',{}),'codex':bool(growth.get('codex_session_dirs'))},
@@ -100,6 +100,7 @@ class Application:
         if op not in OPERATIONS:raise n.Error('不支持的操作')
         if not isinstance(data,dict):raise n.Error('表单内容无效')
         with self.guard:
+            if getattr(self,'closing',False):raise n.Error('本机服务正在退出，请重新打开年轮')
             # A browser retry with the same write request reuses the original job.
             key=data.get('request_id')
             if key:
@@ -222,7 +223,14 @@ class Application:
             with g.locked(config):
                 return planning.run(config,[data['project_id']],choice,g.root(config)/'milestone-plans')
         if op=='snapshot':return self.work.snapshot()
-        if op=='todos':return self.work.todos()
+        if op=='todos':return self.work.todos(completed=data.get('completed') is True)
+        if op=='todo_detail':
+            import explorer
+            return explorer.todo_detail(self.work,data.get('task_id'),data.get('completed') is True)
+        if op in ('memory_catalog','memory_page'):
+            import explorer
+            if not hasattr(self,'memory_explorer'):self.memory_explorer=explorer.MemoryExplorer(self.config)
+            return self.memory_explorer.catalog(data.get('offset',0)) if op=='memory_catalog' else self.memory_explorer.page(data.get('slug'))
         if op=='mutate':return self.work.mutate(data)
         if op=='bulk_mutate':return self.work.bulk(data,lambda message:self.phase(jid,message))
         if op=='memory_query':return self.work.memory_query(data.get('query'))
@@ -475,7 +483,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(404,{'error':'文件不存在或不属于该工作流'})
             if file.stat().st_size>200*1024*1024:return self.respond(413,{'error':'文件较大，请从本机产物目录打开'})
             return self.respond(200,file.read_bytes(),'application/octet-stream')
-        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js'}
+        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/constellation.js':'constellation.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
         if path in files:
             file=ASSETS/files[path]
             return self.respond(200,file.read_bytes(),mimetypes.guess_type(str(file))[0]+'; charset=utf-8')
@@ -484,12 +492,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed(api=True,write=True):return
         path=urlsplit(self.path).path
-        if path not in ('/api/actions','/api/workflow-control'):return self.respond(404,{'error':'操作不存在'})
+        if path not in ('/api/actions','/api/workflow-control','/api/shutdown'):return self.respond(404,{'error':'操作不存在'})
         try:
             size=int(self.headers.get('Content-Length','0'))
             if not 0<size<=1048576:raise n.Error('表单内容过大或为空')
             if self.headers.get_content_type()!='application/json':raise n.Error('请求须为 JSON')
             body=json.loads(self.rfile.read(size))
+            if path=='/api/shutdown':
+                with self.server.app.guard:
+                    if any(j.get('status') in ('running','queued') for j in self.server.app.jobs.values()):
+                        return self.respond(409,{'error':'还有正在执行或排队的任务，完成后再退出本机服务'})
+                    self.server.app.closing=True
+                    self.respond(200,{'stopped':True})
+                    threading.Thread(target=self.server.shutdown,daemon=True).start()
+                return
             if path=='/api/workflow-control':return self.respond(200,self.server.app.control(body))
             self.respond(202,self.server.app.submit(body['op'],body.get('data',{})))
         except (ValueError,KeyError,TypeError,n.Error) as exc:

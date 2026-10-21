@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '2.2.0'
+VERSION = '2.3.0'
 
 
 def options(*names):

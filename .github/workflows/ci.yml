@@ -44,6 +44,10 @@ jobs:
       - name: Package and registration tests
         run: python -m unittest discover -s tools -p "test_*.py"
       - name: JavaScript syntax
-        run: node --check nianlun/assets/portal/app.js
+        run: |
+          node --check nianlun/assets/portal/app.js
+          node --check nianlun/assets/portal/workspace.js
+          node --check nianlun/assets/portal/studio.js
+          node --check nianlun/assets/portal/constellation.js
       - name: Build installer
         run: python packaging/build.py

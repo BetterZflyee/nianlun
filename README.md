@@ -4,7 +4,7 @@
 
 年轮是一套可接入不同 AI 宿主的本地项目管理工具。它通过 DWS CLI 连接你自己的钉钉 AI 表格，用独立记忆空间保存长期记忆，由已登录的 AI 宿主分析信息。界面、采集、去重和写后核验由年轮负责。
 
-代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.2.0 发布候选版**；各平台的验证范围见下表。
+代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.3.0 发布候选版**；各平台的验证范围见下表。
 
 ## 能做什么
 
@@ -24,7 +24,11 @@ flowchart LR
   Core --> Todo[本人钉钉待办与摘要]
 ```
 
-## 2.2 工作台迭代
+## 2.3 工作台重构
+
+项目关系收成紧凑概览；待办可读完整详情并批量处理；记忆先展示本地 Three.js 星空图，再搜索和阅读。能力按用途分类，工作流呈现完整路径，执行记录提供状态筛选与详情抽屉。侧栏可查看版本并退出服务，为回退保留原绑定与执行回执。详见 [2.3 发布说明](docs/PRODUCT_RELEASE_2.3.md)、[验收记录](docs/VALIDATION_2.3.md) 和 [开源参考](docs/UI_RESEARCH_2.3.md)。
+
+## 2.2 工作台迭代（历史）
 
 项目关系树与桑基关联视图、记录状态快改、待办批量完成、项目记忆图谱、递归能力目录选择、任务进度与通知已接入。DWS 复用已有系统代理，编辑只回读目标记录；DeepSeek 保留清楚可恢复的宿主接续。CDBI 场地来源支持组织分发包接入。详见 [2.2 发布说明](docs/PRODUCT_RELEASE_2.2.md) 和 [验收范围](docs/VALIDATION_2.2.md)。
 
@@ -40,11 +44,11 @@ flowchart LR
 - 汇报生成后可预览并选择项目群，通过 DWS CLI 发送并核验投递；支持按月选择范围。
 - 能力中心支持多个自选 Skill 目录；丰声待办完成状态继续双向回写并验证。
 
-详细步骤见 [产品使用说明书](docs/USER_GUIDE.md)，功能说明见 [2.2 产品发布说明书](docs/PRODUCT_RELEASE_2.2.md)，[2.1 发布叙事](docs/PRODUCT_RELEASE_2.1.md) 保留归档。[版本规则](docs/VERSIONING.md) 规定大版本用于里程碑，小版本承载增量。新增来源与自动动作默认需在页面开启，升级保留原绑定。
+详细步骤见 [产品使用说明书](docs/USER_GUIDE.md)，功能说明见 [2.3 产品发布说明书](docs/PRODUCT_RELEASE_2.3.md)，[2.1 发布叙事](docs/PRODUCT_RELEASE_2.1.md) 保留归档。[版本规则](docs/VERSIONING.md) 规定大版本用于里程碑，小版本承载增量。新增来源与自动动作默认需在页面开启，升级保留原绑定。
 
 ## 安装
 
-2.2 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.2.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
+2.3 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.3.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、钉钉连接工具和记忆引擎，不要求预装 Python 或记忆工具。

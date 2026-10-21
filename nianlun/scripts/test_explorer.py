@@ -54,8 +54,6 @@ class TodoDetail(unittest.TestCase):
         work=self.work({})
         with self.assertRaises(n.Error):explorer.todo_detail(work,'one')
 
-if __name__=='__main__':unittest.main()
-
 class SafeShutdown(unittest.TestCase):
     def test_shutdown_refuses_active_jobs_and_requires_auth(self):
         import http.client,threading
@@ -73,3 +71,5 @@ class SafeShutdown(unittest.TestCase):
             server.app.jobs.clear();self.assertEqual(request('test-session'),200)
             thread.join(3);self.assertFalse(thread.is_alive())
         finally:server.shutdown();server.server_close()
+
+if __name__=='__main__':unittest.main()

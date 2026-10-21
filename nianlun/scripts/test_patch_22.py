@@ -78,7 +78,8 @@ class Skills(unittest.TestCase):
             for path in ('nested/more/skill/SKILL.md','node_modules/dep/SKILL.md'):
                 f=root/path;f.parent.mkdir(parents=True,exist_ok=True);f.write_text('---\nname: nested\ndescription: test\n---\n')
             found=[s for s in harness.capabilities({'provider':'generic'},[tmp]) if s['root']==tmp]
-            self.assertEqual(len(found),1);self.assertIn('/nested/more/',found[0]['path'])
+            self.assertEqual(len(found),1)
+            self.assertEqual(Path(found[0]['path']).resolve().relative_to(root.resolve()).parts, ('nested','more','skill','SKILL.md'))
 
 
 class CDBI(unittest.TestCase):

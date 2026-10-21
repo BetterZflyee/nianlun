@@ -35,7 +35,7 @@
         <header class="topbar">
           <div id="breadcrumb">工作空间 / 项目工作台</div>
           <div class="top-actions">
-            <span id="identity"></span
+            <button id="notifications" class="icon-button" aria-label="任务通知"><svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg> 通知 <span id="notification-count"></span></button><span id="identity"></span
             ><button id="refresh" class="icon-button">↻ 刷新</button
             ><a id="base-link" target="_blank" rel="noreferrer" hidden
               >打开 AI 表格 ↗</a
@@ -54,6 +54,6 @@
       <div id="dialog-content"></div>
     </dialog>
     <div id="toast" role="status" hidden></div>
-    <script src="./app.js" defer></script>
+    <script src="./workspace.js" defer></script><script src="./app.js" defer></script>
   </body>
 </html>

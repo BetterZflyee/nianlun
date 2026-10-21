@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Portable product shell. DWS + AITable own identity and data; the host AI owns reasoning."""
 import argparse
+import dws_transport
 import concurrent.futures
 import hashlib
 import json
@@ -18,7 +19,7 @@ SKILL = Path(__file__).resolve().parents[1]
 ROLES = {'projects': '项目主表', 'milestones': '里程碑表', 'sites': '场地表', 'records': '项目记录表'}
 # Logical names are portable. Actual field IDs are resolved at bind time.
 FIELDS = {
- 'projects': {'title': ['项目名称'], 'number': ['编号'], 'priority': ['等级'], 'status': ['状态'],
+ 'projects': {'title': ['项目名称'], 'number': ['编号','项目编码','项目编号'], 'priority': ['等级'], 'status': ['状态'],
               'description': ['一句话描述'], 'risk': ['风险卡点'], 'notes': ['备注'],
               'updated': ['最近更新'], 'report': ['阶段性汇报链接', '一页纸链接'], 'goal': ['项目目标'],
               'deadline': ['目标日期','项目截止日期','计划完成日期']},
@@ -75,7 +76,7 @@ def brain_search_args(config, query):
 
 
 def brain_env(config):
-    env = os.environ.copy()
+    env = dws_transport.environment()
     settings = config['growth']
     if settings.get('brain_home'):
         env['GBRAIN_HOME'] = str(Path(settings['brain_home']).expanduser().resolve())
@@ -113,15 +114,15 @@ class DWS:
             command += ['--profile', self.profile]
         command += ['aitable', *args, '--format', 'json']
         try:
-            result = self.runner(command, capture_output=True, text=True, encoding='utf-8', timeout=120)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise Error('DWS 不可用或执行超时；写入结果未知时先回读，不自动重试') from exc
-        if result.returncode:
-            raise Error(f'DWS 命令失败（exit {result.returncode}）：aitable {" ".join(args[:2])}；未自动重试')
-        try:
-            return payload(json.loads(result.stdout))
-        except json.JSONDecodeError as exc:
-            raise Error('DWS 未返回有效 JSON，停止执行') from exc
+            result = self.runner(command, capture_output=True, text=True, encoding='utf-8', timeout=120, env=dws_transport.environment())
+        except OSError as exc:
+            raise Error('DWS 程序未能启动，本次未提交') from exc
+        except subprocess.TimeoutExpired as exc:
+            write=any(x in ('create','+record-update') for x in args[:2])
+            raise Error('DWS 写入结果未知，请核验原结果，未自动重试' if write else 'DWS 读取超时，未把缺失结果视为空数据') from exc
+        raw=dws_transport.object_output(result.stdout)
+        if result.returncode or raw is None:raise Error(dws_transport.failure(result,['aitable',*args]))
+        return payload(raw)
 
     def fields(self, base, table):
         result = self.call(['field', 'list', '--base-id', base, '--table-id', table])
@@ -227,22 +228,36 @@ def normalized(config, role, records):
                 item[k] = v or []
             else:
                 item[k] = value(v)
+        if role=='projects':item['active']=project_active(item)
         result.append(item)
     return result
+
+
+def compatible_field(bound, current):
+    if not current or current['type']!=bound['type']:return False
+    before=bound.get('config',{});after=current.get('config',{})
+    if bound['type']!='singleSelect':return before==after
+    # Adding choices preserves every bound value; deletion, renaming and other changes do not.
+    return ({k:v for k,v in before.items() if k!='options'}=={k:v for k,v in after.items() if k!='options'}
+            and all(option in after.get('options',[]) for option in before.get('options',[])))
 
 
 def fetch(config, client, check_schema=True):
     def read(pair):
         role, table = pair
+        fields=table['fields']
         if check_schema:
             actual = {f['fieldId']: f for f in client.fields(config['base_id'], table['id'])}
             for logical, field in table['fields'].items():
                 current = actual.get(field['fieldId'])
-                if not current or current['type'] != field['type'] or current.get('config', {}) != field.get('config', {}):
+                if not compatible_field(field,current):
                     raise Error(f'{table["name"]}.{logical} 结构变化，请重新 bind 后检查')
-        return role, normalized(config, role, client.records(config['base_id'], table['id']))
+            fields={logical:actual[field['fieldId']] for logical,field in table['fields'].items()}
+        return role, normalized(config, role, client.records(config['base_id'], table['id'])), fields
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
-        data = dict(pool.map(read, config['tables'].items()))
+        rows=list(pool.map(read, config['tables'].items()))
+        data={role:records for role,records,fields in rows}
+        data['fields']={role:fields for role,records,fields in rows}
     data.update({'fetched_at': stamp(config), 'base_url': config['base_url'],
                  'table_urls': {role: table_url(config, role) for role in ROLES}, 'complete': True})
     # Dangling relationships stay visible as diagnostics rather than silently vanishing.
@@ -256,9 +271,16 @@ def fetch(config, client, check_schema=True):
     return data
 
 
+INACTIVE_PROJECT_STATUSES = frozenset(('已完成','已暂停','暂停','概念','已取消'))
+
+
+def project_active(project):
+    return project.get('status') not in INACTIVE_PROJECT_STATUSES
+
+
 def select_projects(state, names, all_active=False):
     if all_active:
-        return [p for p in state['projects'] if p['status'] not in ('已完成', '已暂停', '概念')]
+        return [p for p in state['projects'] if project_active(p)]
     chosen = []
     for name in names or []:
         matches = [p for p in state['projects'] if p['title'] == name or p['id'] == name]
@@ -355,9 +377,36 @@ def plan(config, state, candidates):
 
 
 def equivalent(actual, expected):
+    # Clearing an optional date returns JSON null (or an omitted/empty cell), not the text "None".
+    if expected is None:return actual is None or actual=='' or actual==[]
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(actual.get(k) == v for k, v in expected.items())
     return value(actual) == str(expected) or (isinstance(expected, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', expected) and str(actual)[:10] == expected)
+
+
+def reconcile_plan(config, client, document, receipt_path):
+    """Read only from DWS; preserve the receipt unless every original write is proven."""
+    if document.get('binding_hash')!=digest(config) or document.get('action_hash')!=digest(document['actions']) or document.get('candidate_hash')!=digest(document['candidates']):
+        raise Error('原计划校验失败，保留回执')
+    path=Path(receipt_path);old=load(path) if path.exists() else {}
+    if old and old.get('plan_hash')!=document['action_hash']:raise Error('原回执与计划不一致')
+    state=fetch(config,client);results=[]
+    count=min(len(document['actions']),len(old.get('results',[]))+1) if old.get('in_flight') else len(document['actions'])
+    for index,action in enumerate(document['actions'][:count]):
+        rows=state[action['role']]
+        if action['op']=='create_record':
+            matches=[r for r in rows if action['marker'] in r.get('description','')]
+        else:matches=[r for r in rows if r['id']==action['record_id']]
+        if len(matches)!=1 or not all(equivalent(matches[0]['raw_cells'].get(k),v) for k,v in action['cells'].items()):
+            raise Error('原结果尚不能唯一核验：'+action['title']+'；保留待核，未重新提交')
+        known=old.get('in_flight',{}).get('record_id')
+        if index==len(old.get('results',[])) and known and known!=matches[0]['id']:raise Error('来源标记与原返回编号不一致')
+        results.append({'status':'already_present' if action['op']=='create_record' else 'already_applied',
+                        'record_id':matches[0]['id'],'title':action['title']})
+    if old and not path.with_suffix('.before-reconcile.json').exists():save(path.with_suffix('.before-reconcile.json'),old)
+    result={**old,'plan_hash':document['action_hash'],'status':'verified' if count==len(document['actions']) else 'running','results':results,'reconciled_at':stamp(config)}
+    result.pop('in_flight',None);result.pop('error',None);save(path,result)
+    return result
 
 
 def apply_plan(config, client, document, receipt_path):
@@ -367,6 +416,9 @@ def apply_plan(config, client, document, receipt_path):
         raise Error('计划内容被修改，请由候选重新生成计划')
     if document.get('candidate_hash') != digest(document.get('candidates')):
         raise Error('候选在计划生成后被修改，请重新生成计划')
+    if Path(receipt_path).exists() and load(receipt_path).get('in_flight'):
+        recovered=reconcile_plan(config,client,document,receipt_path)
+        if recovered['status']=='verified':return recovered
     state = fetch(config, client)
     fresh = plan(config, state, document['candidates'])
     if len(fresh['actions']) != len(document['actions']):
@@ -435,12 +487,15 @@ def build_home(state, output, config=None):
         runtime = Path(config['growth']['state_dir']).expanduser()
         receipts = sorted(runtime.glob('runs/*/finish.json'), key=lambda p: p.stat().st_mtime, reverse=True)
         latest = load(receipts[0]) if receipts else {}
+        import run_control
+        from setup import default_home
+        snapshot_status=run_control.status(config,default_home(),None)
         state['growth'] = {'schedule': config['growth'].get('schedule', {}),
                            'status': latest.get('status', '尚未运行'), 'last_run': latest.get('finished_at', ''),
                            'memory_verified': latest.get('brain', {}).get('verified', False),
                            'digest_status': latest.get('digest', {}).get('status', '尚未推送'),
                            'switches': config['growth'].get('switches', {}),
-                           'scheduler': load(runtime/'scheduler.json') if (runtime/'scheduler.json').exists() else {}}
+                           'scheduler': snapshot_status}
     template = (SKILL / 'assets/home.html').read_text(encoding='utf-8')
     css = (SKILL / 'assets/style.css').read_text(encoding='utf-8')
     script = (SKILL / 'assets/home.js').read_text(encoding='utf-8')

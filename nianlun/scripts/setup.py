@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '2.1.0'
+VERSION = '2.2.0'
 
 
 def options(*names):
@@ -37,7 +37,7 @@ TEMPLATE = {
         'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':False}),
         'description': ('交付内容','text',{}), 'benefit': ('预期效益','text',{}), 'notes': ('备注','text',{})},
     'sites': {
-        'title': ('场地名称','text',{}), 'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':True}),
+        'title': ('场地名称','text',{}), 'code': ('场地编码','text',{}), 'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':True}),
         'status': ('场地状态','singleSelect',options('待启动','进行中','已完成')), 'notes': ('当前卡点','text',{})},
     'records': {
         'title': ('标题','text',{}), 'description': ('详情','text',{}), 'date': ('日期','date',{}),
@@ -411,25 +411,26 @@ class Setup:
                 {'role':'report','name':'年轮·阶段汇报','prompt':common+'读取活跃项目最近一周记录、里程碑与项目历史记忆，生成有依据的阶段汇报；通过 report 上传并回填项目主表链接。'}],
             'status':'pending_native_tool','note':'由 Codex 原生 automation_update 创建/更新 heartbeat；此文件不会安装调度。'}
 
-    def verify_schedules(self, paths, codex_directory=None):
+    def verify_schedules(self, paths, codex_directory=None, allow_paused=False, persist=True):
         import tomllib
         config=n.load(self.config_path);request=self.schedule_request(config);schedule=request['schedule']
         expected={
             'growth':{'FREQ':'DAILY','BYHOUR':','.join(map(str,schedule['growth_hours'])),'BYMINUTE':'0','BYSECOND':'0'},
             'report':{'FREQ':'WEEKLY','BYDAY':schedule['report_weekday'],'BYHOUR':str(schedule['report_hour']),'BYMINUTE':'0','BYSECOND':'0'},
             'controller':{'FREQ':'HOURLY','INTERVAL':'1','BYMINUTE':'0','BYSECOND':'0'}}
-        found={};codex=Path(codex_directory or os.environ.get('CODEX_HOME',Path.home()/'.codex')).resolve()/'automations'
+        found={};native_active=True;codex=Path(codex_directory or os.environ.get('CODEX_HOME',Path.home()/'.codex')).resolve()/'automations'
         for value in paths:
             path=Path(value).expanduser().resolve()
             if not path.is_relative_to(codex) or path.name!='automation.toml': raise n.Error('只回读 Codex 原生任务配置，不接受自制成功回执')
             task=tomllib.loads(path.read_text(encoding='utf-8'))
             role=next((x['role'] for x in request['tasks']+[request['controller']] if task.get('prompt')==x['prompt']),None)
-            if not role or role in found or task.get('kind')!='heartbeat' or task.get('status')!='ACTIVE' or not task.get('target_thread_id'):
+            if not role or role in found or task.get('kind')!='heartbeat' or task.get('status') not in (('ACTIVE','PAUSED') if allow_paused else ('ACTIVE',)) or not task.get('target_thread_id'):
                 raise n.Error('任务内容、状态或关联会话未核验')
             rule=dict(part.split('=',1) for part in task['rrule'].removeprefix('RRULE:').split(';'))
             if any(set(rule.get(k,'').split(','))!=set(v.split(',')) for k,v in expected[role].items()):
                 raise n.Error('实际运行时间与向导选择不同')
             if set(rule)-set(expected[role])-{'INTERVAL'} or rule.get('INTERVAL','1')!='1': raise n.Error('任务存在额外时间限制')
+            native_active=native_active and task['status']=='ACTIVE'
             found[role]=task['id']
         if set(found) not in ({'growth','report'},{'controller'}): raise n.Error('原生调度尚未全部验证，或新旧任务重复启用')
         for other in codex.glob('*/automation.toml'):
@@ -439,11 +440,11 @@ class Setup:
         receipt=Path(config['growth']['state_dir'])/'scheduler.json'
         previous=n.load(receipt) if receipt.exists() else {}
         mode='controller' if 'controller' in found else 'legacy'
-        result={'active':schedule.get('enabled',True),'registered':True,'mode':mode,'owner':'codex',
+        result={'active':native_active and schedule.get('enabled',True),'native_active':native_active,'registered':True,'mode':mode,'owner':'codex',
                 'activated_at':previous.get('activated_at') or n.stamp(config),
                 'harness':'Codex / GPT','timezone':schedule['timezone'],
                 'automation_ids':list(found.values()),'verified_at':n.stamp(config),'marker':request['marker']}
-        n.save(Path(config['growth']['state_dir'])/'scheduler.json',result)
+        if persist:n.save(Path(config['growth']['state_dir'])/'scheduler.json',result)
         return result
 
     def doctor(self):
@@ -454,14 +455,8 @@ class Setup:
                                  env=n.brain_env(config),capture_output=True,text=True,encoding='utf-8',timeout=120)
             memory={**memory,'verified':check.returncode==0 and '年轮安装验收' in check.stdout}
         runtime=Path(config.get('growth',{}).get('state_dir',self.directory/'not-configured'))
-        scheduler=n.load(runtime/'scheduler.json') if (runtime/'scheduler.json').exists() else {'active':False}
-        if (scheduler.get('active') or scheduler.get('registered')) and scheduler.get('owner','codex')=='codex':
-            codex=Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'automations'
-            try:
-                scheduler=self.verify_schedules([codex/task/'automation.toml' for task in scheduler.get('automation_ids',[])])
-            except (n.Error,OSError,ValueError):
-                scheduler={**scheduler,'active':False,'status':'needs_verification'}
-                n.save(runtime/'scheduler.json',scheduler)
+        import run_control
+        scheduler=run_control.status(config,self.home,self.config_path)
         result={'tables':{'complete':state['complete'],'counts':{r:len(state[r]) for r in n.ROLES}},
                 'memory':memory,'scheduler':scheduler,'ready':bool(state['complete'] and memory.get('verified') and scheduler.get('registered',scheduler.get('active')))}
         result['workspace_ready']=bool(state['complete'] and memory.get('verified'))

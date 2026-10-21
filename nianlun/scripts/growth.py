@@ -17,6 +17,7 @@ from difflib import SequenceMatcher
 import nianlun as n
 import source_state
 import intake
+import dws_transport
 from file_lock import file_lock
 
 class Gateway:
@@ -27,17 +28,16 @@ class Gateway:
         if self.config.get('profile'):
             cmd += ['--profile', self.config['profile']]
         try:
-            r = subprocess.run(cmd + args + ['--format', 'json'], cwd=cwd, capture_output=True, text=True, encoding='utf-8', timeout=180)
-            output=r.stdout.strip()
-            # Some DWS write leaves print a plain progress line before their JSON envelope.
-            start=output.find('{')
-            raw = json.loads(output[start:] if start>=0 else output)
-        except (OSError, ValueError, subprocess.TimeoutExpired) as e:
-            raise n.Error('DWS 未返回可核验结果；写入可能已提交，不自动重发') from e
-        if partial and isinstance(raw, dict) and ('chats' in raw or 'items' in raw):
-            return raw
-        if r.returncode:
-            raise n.Error('DWS ' + ' '.join(args[:2]) + ' 失败；请查同 profile 的真实结果')
+            r = subprocess.run(cmd + args + ['--format', 'json'], cwd=cwd, capture_output=True, text=True, encoding='utf-8', timeout=180, env=dws_transport.environment())
+        except OSError as e:
+            raise n.Error('DWS 程序未能启动，本次未提交；请检查本机安装与路径') from e
+        except subprocess.TimeoutExpired as e:
+            raise n.Error('DWS ' + ('写入结果未知；可能已提交，请核验原结果，不自动重发' if dws_transport.is_write(args) else '读取超时；本次等待已结束，请检查网络与代理')) from e
+        raw=dws_transport.object_output(r.stdout)
+        if r.returncode or raw is None:
+            # Partial listing envelopes remain usable only when the caller explicitly requests them.
+            if partial and isinstance(raw,dict) and ('chats' in raw or 'items' in raw):return raw
+            raise n.Error(dws_transport.failure(r,args))
         d = n.payload(raw)
         if isinstance(d,dict) and isinstance(raw.get('meta'),dict):
             d={**d,'meta':raw['meta']}
@@ -100,8 +100,9 @@ def sanitize(text):
     return '\n'.join('[凭据内容已省略]' if re.search(r'(?i)password|passwd|api[_-]?key|secret|token\s*[:=]|admin\s*/|密码\s*[:：]', line) else line for line in text.splitlines())
 
 
-def collect(config, since=None, until=None, selection=None):
+def collect(config, since=None, until=None, selection=None, progress=lambda message:None):
     r = root(config); gw = Gateway(config); settings = config['growth']
+    progress('正在核验钉钉组织身份与原轮次')
     selection=intake.selection(config,selection)
     pending = r / 'active.json'
     if pending.exists():
@@ -142,11 +143,15 @@ def collect(config, since=None, until=None, selection=None):
         nonlocal start,current_channel
         current_channel=channel;start=source_state.window(settings,checkpoint,channel,end,explicit)
         info={'channel':channel,'since':start.isoformat(),'until':end.isoformat()}
+        label=source_state.LABELS.get(channel,channel);progress('正在采集：'+label)
         try:
             count = fn()
             bundle['coverage'].append({**info,'status':'complete','count':count})
+            progress(label+'：已扫描 '+str(count)+' 条')
         except Exception as e:
             bundle['coverage'].append({**info,'status':'partial','count':getattr(e,'count',None),'error':str(e)})
+            progress(label+'：部分覆盖，已保留缺口；'+str(e))
+    progress('正在读取 AI 表格中的项目、里程碑和记录')
     bundle['tables'] = n.fetch(config,gw.table())
     if selection and selection['project_ids']:
         chosen=set(selection['project_ids'])
@@ -154,11 +159,13 @@ def collect(config, since=None, until=None, selection=None):
         for role in n.ROLES:
             bundle['tables'][role]=[row for row in bundle['tables'][role]
                 if row['id'] in chosen or chosen.intersection(row.get('project_ids',[]))]
+    progress('正在读取本人待办')
     bundle['todos'] = complete(gw.call(['todo','+get-my-tasks','--all','--status','false']), 'todos')
     def minutes():
         found = complete(gw.call(['minutes','+search','--scope','all','--start',start.isoformat(),'--end',end.isoformat(),'--page-all']), 'minutes')
         errors=[]
-        for m in found:
+        for index,m in enumerate(found,1):
+            progress('AI 听记：正在读取第 '+str(index)+' / '+str(len(found))+' 份摘要')
             try:
                 detail=gw.call(['minutes','+detail','--id',m['taskUuid'],'--artifacts','summary'])
                 s=detail.get('summary',{}).get('result',{}).get('fullSummary','')
@@ -338,6 +345,14 @@ def validate(config,bundle,decision):
                     raise n.Error('状态目标不属于指定项目')
                 if a.get('match')!='unique':raise n.Error('状态变更必须唯一匹配')
             a['table_plan']=n.plan(config,bundle['tables'],[c])
+            if op=='create_record' and not a['table_plan']['actions'][0].get('skip_existing'):
+                normalized_title=lambda value:re.sub(r'\s+','',value).casefold()
+                duplicates=[r for r in bundle['tables']['records'] if p['id'] in r.get('project_ids',[])
+                    and r.get('status') not in ('已解决','已关闭','已取消')
+                    and normalized_title(r.get('title',''))==normalized_title(a['title'])]
+                duplicates += [x for x in actions if x['op']=='create_record' and x['project']==a['project']
+                    and normalized_title(x['title'])==normalized_title(a['title'])]
+                if duplicates:raise n.Error('同项目已有同名未关闭记录。复用原记录并核对状态，不重复新增')
         elif op=='create_milestone':
             if not a.get('title') or not a.get('description'):raise n.Error('缺里程碑标题/交付内容')
             datetime.strptime(a['date'],'%Y-%m-%d')
@@ -409,7 +424,8 @@ def apply(config,folder,plan_file):
     receipt_path=folder/'receipt.json'
     receipt=n.load(receipt_path) if receipt_path.exists() else {'status':'running','results':{},'run_id':bundle['run_id'],'plan_hash':n.digest(plan),'decision_hash':n.digest(plan['decision'])}
     if receipt.get('plan_hash')!=n.digest(plan):raise n.Error('本轮已有执行回执，不允许改计划后混用')
-    if receipt.get('in_flight'):raise n.Error('上次写入结果待对账；先核验 in_flight，不重放')
+    if receipt.get('in_flight') and not receipt['in_flight'].get('resume_records'):
+        raise n.Error('上次写入结果待核验；请到执行记录核验原结果，再继续剩余步骤')
     try:
         for a in plan['actions']:
             key=a['key']
@@ -420,7 +436,8 @@ def apply(config,folder,plan_file):
                 todos=complete(gw.call(['todo','+get-my-tasks','--all','--status','false']),'todos')
                 if similar_todos(a['project'],a['title'],todos):
                     raise n.Error('执行前发现同项目相近待办；未提交，请核验是否由其他任务创建')
-            receipt['in_flight']={'key':key,'op':op,'action':a};n.save(receipt_path,receipt)
+            if receipt.get('in_flight',{}).get('key')!=key:
+                receipt['in_flight']={'key':key,'op':op,'action':a};n.save(receipt_path,receipt)
             if op in ('create_record','update_status'):
                 result=n.apply_plan(config,gw.table(),a['table_plan'],folder/(key+'.receipt.json'))
             elif op=='create_milestone':
@@ -458,6 +475,7 @@ def apply(config,folder,plan_file):
             elif op=='complete_todo':
                 tid=a['task_id'];d=gw.call(['todo','+get','--task-id',tid])
                 already_done=d.get('isDone') is True
+                if receipt['in_flight'].get('resume_records') and not already_done:raise n.Error('原待办完成状态又发生变化，未再次关闭；请核验')
                 if d.get('subject')!=a['expected_title']:raise n.Error('待办标题发生变化')
                 if not d.get('isDone'):
                     current=complete(gw.call(['todo','+get-my-tasks','--all','--status','false']),'todos')
@@ -470,7 +488,10 @@ def apply(config,folder,plan_file):
                 result={'task_id':tid,'record_ids':[],'verified':True,'already_done':already_done}
                 for rid in a['record_ids']:
                     c={'op':'update_status','role':'records','record_id':rid,'status':'已解决'}
-                    p=n.plan(config,bundle['tables'],[c]);n.apply_plan(config,gw.table(),p,folder/(key+'-'+rid+'.json'))
+                    pp=folder/(key+'-'+rid+'.plan.json')
+                    p=n.load(pp) if pp.exists() else n.plan(config,bundle['tables'],[c])
+                    if not pp.exists():n.save(pp,p)
+                    n.apply_plan(config,gw.table(),p,folder/(key+'-'+rid+'.json'))
                     result['record_ids'].append(rid)
             receipt['results'][key]=result;receipt.pop('in_flight');n.save(receipt_path,receipt)
         receipt['status']='verified';n.save(receipt_path,receipt)
@@ -569,8 +590,8 @@ def finish(config,folder,decision_file):
         if check.returncode or d['summary'] not in check.stdout:raise n.Error('独立记忆空间回读未验证')
         status['brain']={'slug':slug,'verified':True};status.pop('in_flight');n.save(status_path,status)
     if switches.get('digest') and notify and not status.get('digest'):
-        status['in_flight']={'step':'digest','idempotency_key':str(uuid.uuid5(uuid.NAMESPACE_URL,'nianlun-digest:'+b['run_id']))};n.save(status_path,status)
         if len(text)>14000:raise n.Error('推送内容过长，请在执行动作之前缩短总结')
+        status['in_flight']={'step':'digest','idempotency_key':str(uuid.uuid5(uuid.NAMESPACE_URL,'nianlun-digest:'+b['run_id']))};n.save(status_path,status)
         send=gw.call(['chat','+messages-send','--user',b['identity']['user_id'],'--text',text,
                       '--idempotency-key',status['in_flight']['idempotency_key'],'--yes'])
         status['digest']={'receipt':send,'status':'submitted'};status.pop('in_flight');n.save(status_path,status)
@@ -636,7 +657,7 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
-def publish_report(config,project,since,until,summary_file=None,expected_facts=None):
+def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None):
     from render_report import render
     from planning import evidence
     gw=Gateway(config);self_identity(gw);state=n.fetch(config,gw.table());p=n.select_projects(state,[project])[0]
@@ -648,7 +669,13 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     if since>until:raise n.Error('时间范围错误')
     summary=Path(summary_file).read_text(encoding='utf-8') if summary_file else ''
     html,md,_=render(state,[p],since,until,'年轮 · 阶段性汇报',summary)
-    key=n.digest({'project':p['id'],'since':since,'until':until,'summary':summary,'facts':evidence(state,p['id'])})[:16]
+    if memory_sources:
+        md=md.replace('数据源：钉钉 AI 表格。','数据源：钉钉 AI 表格与独立记忆空间。')
+        md+='\n\n## 独立记忆空间依据\n\n'+'\n'.join('- '+x['title']+' · '+x['slug']+('（全文）' if x.get('full_page') else '（部分内容）') for x in memory_sources)
+        from html import escape
+        html=html.replace('</header>','<p>另结合独立记忆空间的 '+str(len(memory_sources))+' 篇相关页面；命中范围并非全部历史。</p><ul>'+''.join('<li>'+escape(x['title']+' · '+x['slug'])+'</li>' for x in memory_sources)+'</ul></header>')
+    key=n.digest({'project':p['id'],'since':since,'until':until,'summary':summary,'facts':evidence(state,p['id']),
+        **({'method':report_method.get('name')} if report_method else {})})[:16]
     folder=root(config)/'reports'/key;folder.mkdir(parents=True,exist_ok=True)
     receipt_file=folder/'receipt.json';receipt=n.load(receipt_file) if receipt_file.exists() else {}
     if receipt.get('status')=='verified':return {**receipt,'report_id':key,'already_present':True}
@@ -658,6 +685,9 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     if 'previous_link' not in receipt:
         receipt['previous_link']=p.get('report');n.save(receipt_file,receipt)
     safe=re.sub(r'[^\w\u4e00-\u9fff-]','-',p['title']);filename='阶段性汇报-'+safe+'-'+until+'-'+key[:8]+'.html'
+    if report_method and not receipt.get('node_id'):
+        import report_style
+        html=report_style.render(report_method,md,folder,p['title']+' · 阶段汇报')
     n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
     if not receipt.get('node_id'):
         receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)

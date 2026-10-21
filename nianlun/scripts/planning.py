@@ -6,6 +6,7 @@ from pathlib import Path
 import nianlun as n
 import growth as g
 import harness
+import memory
 from workbench import Workbench
 
 SCHEMA={'type':'object','properties':{
@@ -19,7 +20,7 @@ SCHEMA={'type':'object','properties':{
 
 def evidence(state, project_id):
     # Exclude our own report link and read clocks so writing a report cannot trigger another report.
-    return {role:[{k:v for k,v in row.items() if k not in ('raw_cells','revision','report','updated')}
+    return {role:[{k:v for k,v in row.items() if k not in ('raw_cells','revision','report','updated','active')}
         for row in sorted(state[role],key=lambda r:r['id'])
         if row['id']==project_id or project_id in row.get('project_ids',[])] for role in n.ROLES}
 
@@ -68,7 +69,7 @@ def run(config, project_ids, choice, folder):
         project=next((p for p in state['projects'] if p['id']==pid),None)
         if not project:raise n.Error('项目不存在')
         target=deadline(project);goal=project.get('goal') or project.get('description')
-        if project.get('status') in ('已完成','暂停','已暂停','已取消'):continue
+        if not n.project_active(project):continue
         if not target or not goal:
             pending.append(project['title']+'：需要项目目标和目标日期，才能倒排');continue
         facts=evidence(state,pid)
@@ -80,6 +81,14 @@ def run(config, project_ids, choice, folder):
         plan_path=directory/'plan.json';receipt_path=directory/'receipt.json'
         if receipt_path.exists() and n.load(receipt_path).get('status')=='verified':
             results.append({**n.load(receipt_path)['result'],'changed':[],'already_present':True});continue
+        context_file=directory/'memory.json'
+        if context_file.exists():history=n.load(context_file)
+        else:
+            history=memory.retrieve(config,project['title'],limit=6) if config['growth'].get('brain_dir') else {'pages':[],'text':''}
+            n.save(context_file,history)
+        notes=re.sub(r'年轮目标日期[：:]\s*\d{4}-\d{2}-\d{2}','',project.get('notes','')).strip()
+        if not (facts['records'] or facts['milestones'] or history.get('pages') or notes):
+            pending.append(project['title']+'：只有目标和日期，缺少交付依据。先采集项目资料或接入已有项目记忆，再规划节点。');continue
         if not plan_path.exists():
             existing=[m for m in state['milestones'] if pid in m.get('project_ids',[])]
             answer=harness.reason('为项目按目标截止日倒排 1 至 12 个可交付里程碑。只规划，不使用工具。'
@@ -87,8 +96,9 @@ def run(config, project_ids, choice, folder):
                 '已有年轮倒排节点用原 marker 最后一段作为 key，保证重排时身份稳定。'
                 '日期以 days_before_deadline 表示，0 表示最终交付，依赖节点日期不能晚于后续。'
                 '计划不是已完成事实；交付物要可验收。不得凭空承诺负责人、收益或完成情况。'
+                '只根据已有记录、文档和记忆拆解可验证的交付物。每个节点的 description 必须指出参考的记录或页面；无法支持的阶段不编造。'
                 '\n目标：'+goal+'\n截止日期：'+target.isoformat()+'\n项目事实：'+json.dumps(facts,ensure_ascii=False)+
-                '\n现有全部节点：'+json.dumps(existing,ensure_ascii=False),directory/'harness',choice,SCHEMA)
+                '\n独立记忆空间依据：'+history.get('text','')+'\n现有全部节点：'+json.dumps(existing,ensure_ascii=False),directory/'harness',choice,SCHEMA)
             nodes=validate(answer,target)
             n.save(plan_path,{'nodes':nodes,'rationale':answer.get('rationale',''),'existing':existing})
         plan=n.load(plan_path)

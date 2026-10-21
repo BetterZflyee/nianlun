@@ -28,7 +28,7 @@ class PlanningTests(unittest.TestCase):
         self.config['growth']['switches']={'table_writes':True,'reports':True}
         self.config['growth']['report_folder']='test-folder'
         n.save(self.path,self.config)
-        req=self.create();req['values'].update(goal='交付试点',deadline='2026-11-30')
+        req=self.create();req['values'].update(goal='交付试点',deadline='2026-11-30',notes='已确认交付范围：联调验收后正式交付，验收须保留联调记录与验收包')
         self.pid=self.work.mutate(req)['record_id']
         self.patch=patch('planning.g.Gateway',side_effect=self.cloud.gateway);self.patch.start();self.addCleanup(self.patch.stop)
 

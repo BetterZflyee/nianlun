@@ -127,7 +127,13 @@ def capabilities(preferred=None,extra_roots=None):
     # Other hosts discover their own native skills; never scan a guessed private directory.
     for root in roots:
         if not root.exists():continue
-        files=sorted(root.glob('*/SKILL.md'))
+        # Existing installations often expose direct skill folders as symlinks.
+        # Include those entry points without recursively following directory cycles.
+        files=list(root.glob('*/SKILL.md'))
+        for directory,dirs,names in os.walk(root,followlinks=False):
+            dirs[:]=[d for d in dirs if d not in ('.git','node_modules','__pycache__','.venv','venv')]
+            if 'SKILL.md' in names:files.append(Path(directory)/'SKILL.md')
+        files.sort()
         if (root/'SKILL.md').is_file():files.insert(0,root/'SKILL.md')
         for file in files:
             real=file.resolve()

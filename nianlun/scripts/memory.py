@@ -1,5 +1,6 @@
 """Read verified GBrain pages and import a dated baseline from the user's own tables."""
 import json
+import concurrent.futures
 import subprocess
 import uuid
 from pathlib import Path
@@ -18,19 +19,21 @@ def retrieve(config,query,limit=8):
     except ValueError:raise n.Error('独立记忆空间未返回可解析的检索结果，未把片段当成全文')
     if isinstance(hits,dict):hits=hits.get('results',hits.get('hits',[]))
     if not isinstance(hits,list):raise n.Error('独立记忆空间检索结构不兼容')
-    pages=[];seen=set()
+    selected=[];seen=set()
     for hit in hits:
         if not isinstance(hit,dict) or not isinstance(hit.get('slug'),str):continue
-        slug=hit['slug']
-        key=(hit.get('source_id'),slug)
+        key=(hit.get('source_id'),hit['slug'])
         if key in seen:continue
-        seen.add(key)
-        if len(pages)>=limit:break
+        seen.add(key);selected.append(hit)
+        if len(selected)>=limit:break
+    def read_page(hit):
+        slug=hit['slug']
         read=run(config,['get',slug]+(['--source',hit['source_id']] if hit.get('source_id') else []))
-        pages.append({'slug':slug,'title':hit.get('title') or slug,'source_id':hit.get('source_id'),
+        return {'slug':slug,'title':hit.get('title') or slug,'source_id':hit.get('source_id'),
             'text':read.stdout[:60000] if read.returncode==0 else hit.get('chunk_text',''),
             'full_page':read.returncode==0 and len(read.stdout)<=60000,
-            'note':('正文超过展示上限' if len(read.stdout)>60000 else '') if read.returncode==0 else '全文回读失败，仅展示检索片段'})
+            'note':('正文超过展示上限' if len(read.stdout)>60000 else '') if read.returncode==0 else '全文回读失败，仅展示检索片段'}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:pages=list(pool.map(read_page,selected))
     text='\n\n'.join('# '+p['title']+'\n'+('（'+p['note']+'）\n' if p['note'] else '')+p['text'] for p in pages)
     return {'query':query,'pages':pages,'text':text,'matched':bool(pages),'exhaustive':False,
             'mode':'keyword' if 'keyword-only' in result.stderr or config['growth'].get('memory_mode')=='managed' else 'hybrid'}

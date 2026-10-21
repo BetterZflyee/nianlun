@@ -91,6 +91,9 @@ def main():
     p.add_argument('--config',default=str(Path.home()/'.config/nianlun/config.json'))
     sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('status');sub.add_parser('grow');sub.add_parser('health')
+    sub.add_parser('pause');sub.add_parser('unpause');sub.add_parser('recovery-status')
+    rec=sub.add_parser('reconcile');rec.add_argument('--run-id',required=True)
+    resume=sub.add_parser('resume-growth');resume.add_argument('--run-id',required=True)
     pending=sub.add_parser('pending');pending.add_argument('--id')
     answer=sub.add_parser('answer');answer.add_argument('--id',required=True);answer.add_argument('--response',required=True)
     select=sub.add_parser('connect');select.add_argument('--provider',choices=harness.PROVIDERS,required=True);select.add_argument('--mode',choices=('cli','delegated'));select.add_argument('--binary')
@@ -100,7 +103,19 @@ def main():
     own=sub.add_parser('schedule-owner');own.add_argument('--provider',choices=harness.PROVIDERS,required=True)
     args=p.parse_args()
     try:
-        if args.command=='health':
+        if args.command in ('pause','unpause'):
+            import run_control
+            result=run_control.set_paused(n.load(args.config),args.command=='pause')
+        elif args.command=='recovery-status':
+            import recovery
+            result=recovery.overview(n.load(args.config))
+        elif args.command=='reconcile':
+            import recovery
+            result=recovery.reconcile(n.load(args.config),args.run_id)
+        elif args.command=='resume-growth':
+            import scheduler
+            result=scheduler.resume_growth(args.config,args.run_id)
+        elif args.command=='health':
             import source_state
             result=source_state.runtime_status(n.load(args.config))
         elif args.command=='status':result={'selected':harness.status(harness.selection(args.config)),'hosts':harness.PROVIDERS}

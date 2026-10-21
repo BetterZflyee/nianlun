@@ -41,9 +41,22 @@ const fieldLabels = {
   report: "阶段汇报链接",
 };
 const jobNames = {
+  bulk_mutate: "批量处理",
+  memory_project: "展开项目记忆",
+  capability_bulk: "批量配置能力",
+  pick_directory: "选择能力目录",
+  report_method: "设置汇报方法",
+  cdbi_import: "导入场地",
+  cdbi_preview: "预览场地",
+  cdbi_install: "安装 CDBI",
   host_export: "准备宿主入口",
   workflow_request: "准备工作流交接",
   resume: "继续原任务",
+  schedule_pause: "调整本机暂停状态",
+  reconcile_growth: "核验原结果",
+  resume_growth: "继续原轮次",
+  recovery_status: "读取原轮次状态",
+  growth_status: "读取采集覆盖",
   snapshot: "刷新项目",
   todos: "读取待办",
   mutate: "保存工作内容",
@@ -52,7 +65,7 @@ const jobNames = {
   workflow: "执行宿主工作流",
   grow: "运行一次生长",
   report: "生成阶段汇报",
-  plan_milestones: "倒排里程碑",
+  plan_milestones: "基于资料规划里程碑",
   send_report: "发送项目汇报",
   group_search: "搜索项目群",
   mailboxes: "读取本人邮箱",
@@ -125,31 +138,23 @@ async function api(path, body) {
   return value;
 }
 async function run(op, values = {}, progress) {
-  const { job_id } = await api("/api/actions", { op, data: values });
-  if (progress) progress("已提交，正在执行…");
-  for (;;) {
-    const job = await api("/api/jobs/" + job_id);
-    if (job.status === "succeeded") return { value: job.result, job: job_id };
-    if (job.status === "waiting_harness")
-      throw new Error("任务已保留，等待 AI 宿主接续。请到「执行记录」复制接续请求，处理后继续原任务。");
-    if (["failed", "interrupted"].includes(job.status))
-      throw new Error(job.error || "执行中断");
-    if (progress)
-      progress(
-        job.status === "queued"
-          ? "已排队，等待上一项操作完成…"
-          : job.phase || "正在执行 " + (jobNames[op] || op) + "…",
-      );
-    await new Promise((r) => setTimeout(r, 900));
+  const { job_id } = await api('/api/actions', {op, data:values});
+  let panel;
+  if (['ask','report','grow','plan_milestones','bulk_mutate','resume_growth'].includes(op)) {
+    const job=await api('/api/jobs/'+job_id);panel=taskPanel(job);
+    const target=$('#modal').open?$('#dialog-content'):$('#content');
+    target.append(panel);panel.scrollIntoView({block:'nearest',behavior:'smooth'});
   }
+  return pollJob(job_id,progress,panel);
 }
+
 async function withButton(button, action) {
   const old = button.textContent;
   button.disabled = true;
   try {
     return await action((message) => (button.textContent = message));
   } catch (e) {
-    notice(e.message);
+    if(e.job?.status!=="waiting_harness")notice(e.message);
     throw e;
   } finally {
     button.disabled = false;
@@ -220,6 +225,7 @@ async function initialize() {
       $("#base-link").href = boot.base_url;
       $("#base-link").hidden = false;
     }
+    setupNotifications();
     await navigate(boot.configured ? "projects" : "setup");
   } catch (e) {
     notice(e.message);
@@ -259,6 +265,8 @@ async function navigate(next, reload = true) {
   loading(content);
   try {
     if (view === "setup") {
+      boot = await api("/api/bootstrap");
+      if (generation !== viewVersion) return;
       renderSetup(content);
       return;
     }
@@ -300,7 +308,7 @@ async function navigate(next, reload = true) {
 }
 function renderProjects(root) {
   const active = data.projects.filter(
-    (p) => !["已完成", "已暂停", "暂停"].includes(p.status),
+    (p) => p.active === true,
   );
   const open = data.records.filter((r) => r.status !== "已解决");
   const milestones = data.milestones.filter((r) => r.status !== "已完成");
@@ -448,11 +456,11 @@ function renderProject(root) {
     el("div", { class: "detail-title" }, [
       heading(
         project.title,
-        project.description || "在这里推进项目，记录每一步的来龙去脉。",
+        (project.number ? "项目编码："+project.number+" · " : "")+(project.description || "在这里推进项目，记录每一步的来龙去脉。"),
         [
           btn("编辑项目", () => editRow("projects", project)),
           btn("获取项目进度", () => growthDialog(project)),
-          btn("倒排里程碑", () => milestoneDialog(project)),
+          btn("规划里程碑", () => milestoneDialog(project)),
           btn("生成汇报", () => reportDialog(project), "primary"),
         ],
       ),
@@ -483,7 +491,7 @@ function renderProject(root) {
         }),
       );
   }
-  left.append(summary);
+  root.append(summary,projectGraph(project));
   const tabs = el("div", { class: "tabs" });
   for (const role of ["records", "milestones", "sites"])
     tabs.append(
@@ -505,9 +513,11 @@ function renderProject(root) {
         text: rows.length + " 条" + roleNames[tab],
       }),
       btn("+ 新增" + roleNames[tab], () => editRow(tab)),
+      tab==="sites" ? btn("从 CDBI 获取场地",()=>cdbiSites(project)) : null,
     ]),
   );
   const entries = el("div", { class: "panel" });
+  const quick=tab==="records" ? quickRecords(rows,entries) : null;
   for (const row of [...rows].sort((a, b) =>
     (b.date || "").localeCompare(a.date || ""),
   )) {
@@ -515,10 +525,10 @@ function renderProject(root) {
       el("article", { class: "entry" }, [
         el("div", { class: "entry-top" }, [
           el("h3", { text: row.title }),
-          btn("编辑", () => editRow(tab, row)),
+          quick ? quick(row) : btn("编辑", () => editRow(tab, row)),
         ]),
         el("p", { text: row.description || row.notes || "暂无详细说明" }),
-        el("small", { text: row.date || "" }),
+        el("small", { text: [projectLabel(project),row.number||row.code,row.date].filter(Boolean).join(" · ") }),
         badge(row.status || row.kind || "已记录"),
       ]),
     );
@@ -667,7 +677,7 @@ function editRow(role, row) {
           continue;
         values[key] = value;
       }
-      await run(
+      const saved = await run(
         "mutate",
         {
           request_id: rid,
@@ -681,7 +691,8 @@ function editRow(role, row) {
       );
       $("#modal").close();
       toast("已写入 AI 表格，并完成回读验证");
-      data = (await run("snapshot")).value;
+      applyRow(saved.value);
+      if(!data)data=(await run("snapshot")).value;
       selected ? renderProject($("#content")) : renderProjects($("#content"));
     } catch (e) {
       error.textContent = e.message;
@@ -691,103 +702,6 @@ function editRow(role, row) {
     }
   };
   dialog((row ? "编辑" : "新增") + roleNames[role], form);
-}
-async function renderTodos(root, generation) {
-  const result = (await run("todos")).value;
-  if (generation !== viewVersion) return;
-  root.replaceChildren(
-    heading(
-      "把下一步，落到行动。",
-      "这里显示当前钉钉组织下，由你执行的未完成待办。",
-      [btn("+ 新建我的待办", todoDialog, "primary")],
-    ),
-  );
-  const search = el("input", {
-    type: "search",
-    class: "search",
-    placeholder: "搜索待办标题",
-    "aria-label": "搜索待办",
-  });
-  const scope = select([
-    ["all", "全部本人待办"],
-    ["linked", "已关联年轮项目"],
-  ]);
-  root.append(el("div", { class: "toolbar" }, [search, scope]));
-  const panel = el("div", { class: "panel" });
-  for (const todo of result.todos) {
-    const complete = btn(
-      "✓",
-      () =>
-        dialog(
-          "完成这项待办？",
-          el("div", {}, [
-            el("p", { text: todo.title }),
-            el("p", {
-              class: "subtle",
-              text: todo.link?.record_ids?.length
-                ? "完成后，将同步关联的项目记录为“已解决”。"
-                : "这项待办没有关联年轮项目记录，只更新丰声待办（DWS）状态。",
-            }),
-            el("div", { class: "form-actions" }, [
-              btn("取消", () => $("#modal").close()),
-              btn(
-                "确认完成",
-                (event) =>
-                  quiet(
-                    withButton(event.currentTarget, async (progress) => {
-                      await run(
-                        "mutate",
-                        {
-                          request_id: crypto.randomUUID(),
-                          op: "complete_todo",
-                          task_id: todo.id,
-                          title: todo.title,
-                        },
-                        progress,
-                      );
-                      $("#modal").close();
-                      toast("已完成并验证");
-                      data = null;
-                      await navigate("todos");
-                    }),
-                  ),
-                "primary",
-              ),
-            ]),
-          ]),
-        ),
-      "complete",
-    );
-    complete.setAttribute("aria-label", "完成 " + todo.title);
-    panel.append(
-      el(
-        "div",
-        { class: "todo-row", "data-associated": todo.link ? "yes" : "no" },
-        [
-          complete,
-          el("div", { class: "todo-text" }, [
-            el("strong", { text: todo.title }),
-            el("small", {
-              text: todo.link
-                ? "已关联项目 · " + todo.link.record_ids.length + " 条记录"
-                : "来自钉钉 · 未关联年轮项目",
-            }),
-          ]),
-        ],
-      ),
-    );
-  }
-  if (!result.todos.length)
-    panel.append(empty("当前没有未完成待办", "新的待办会同步到你的钉钉。"));
-  root.append(panel);
-  function filter() {
-    for (const row of panel.querySelectorAll(".todo-row"))
-      row.hidden =
-        !row.textContent.toLowerCase().includes(search.value.toLowerCase()) ||
-        (scope.value === "linked" && row.dataset.associated !== "yes");
-  }
-  search.oninput = filter;
-  scope.onchange = filter;
 }
 function growthDialog(project = null) {
   if (!project?.id) project = null;
@@ -855,7 +769,7 @@ function milestoneDialog(project) {
   const status = el("div",{class:"ai-answer"});
   let saved = false;
   const requestId = crypto.randomUUID(), planId = crypto.randomUUID();
-  const go = btn("保存目标并倒排",e=>quiet(withButton(e.currentTarget,async progress=>{
+  const go = btn("保存并基于资料规划",e=>quiet(withButton(e.currentTarget,async progress=>{
     if (!goal.value.trim() || !target.value) throw new Error("请填写项目目标和目标日期");
     if (!saved) {
       const fields = data.fields.projects, values = {};
@@ -870,8 +784,8 @@ function milestoneDialog(project) {
     status.textContent = r.pending?.length ? r.pending.join("\n") : "倒排完成，已回读验证。新增或调整 "+r.projects.reduce((sum,p)=>sum+p.changed.length,0)+" 个节点；人工节点和已完成节点保留。";
     data = (await run("snapshot")).value;renderProject($("#content"));
   })),"primary");
-  dialog("目标日期 → 里程碑",el("div",{},[
-    el("p",{text:"给出目标和截止时间，年轮按交付顺序倒排。节点是计划，不会因为到期而自动标为完成。开启“自动倒排里程碑”后，会随新进展继续调整。"}),
+  dialog("基于项目资料规划里程碑",el("div",{},[
+    el("p",{text:"结合项目记录、文档记忆和已有节点规划交付顺序。只有目标和日期时不会强行编排；请先采集资料或接入项目记忆。节点是计划，到期不等于完成。"}),
     formField("项目目标",goal),formField("目标日期",target),go,status]));
 }
 
@@ -1001,6 +915,7 @@ function reportDialog(project) {
     error,
     el("div", { class: "form-actions" }, [save]),
   ]);
+  const requestId=crypto.randomUUID();let submitted=null;
   form.onsubmit = async (event) => {
     event.preventDefault();
     save.disabled = true;
@@ -1011,10 +926,11 @@ function reportDialog(project) {
           project_id: project.id,
           since: since.value,
           until: until.value,
-          request_id: crypto.randomUUID(),
+          request_id: requestId,
         },
         (message) => (save.textContent = message),
       )).value;
+      if(!form.isConnected || !$("#modal").open){toast("阶段汇报已完成，请从通知查看");return;}
       $("#modal").close();
       toast("阶段汇报已上传，项目链接已更新");
       data = (await run("snapshot")).value;
@@ -1032,59 +948,6 @@ function reportDialog(project) {
   };
   dialog("生成阶段汇报 · " + project.title, form);
 }
-function renderMemory(root) {
-  root.replaceChildren(
-    heading(
-      "让经验，有处可寻。",
-      "生长过程中自动更新项目记忆，保留每轮依据。你可以随时检索，无需日常手工维护。",
-    ),
-  );
-  const query = el("input", {
-    placeholder: "输入项目名、问题或你记得的关键词",
-    required: true,
-  });
-  const result = el("div", { class: "ai-answer" });
-  const submit = el("button", {
-    type: "submit",
-    class: "primary",
-    text: "检索记忆",
-  });
-  const form = el("form", {}, [
-    el("div", { class: "toolbar" }, [query, submit]),
-    result,
-  ]);
-  form.onsubmit = (event) => {
-    event.preventDefault();
-    quiet(
-      withButton(submit, async (progress) => {
-        const r = await run("memory_query", { query: query.value }, progress);
-        result.textContent = r.value.text || "没有找到相关记忆。";
-      }),
-    );
-  };
-  root.append(
-    el("div", { class: "panel" }, [
-      form,
-      btn("补存接入前的项目基线（可选）", (event) =>
-        quiet(
-          withButton(event.currentTarget, async (progress) => {
-            const r = await run("memory_baseline", {}, progress);
-            toast(
-              "已将 " +
-                r.value.count +
-                " 个项目的当前档案存入独立记忆空间，并完成回读。",
-            );
-          }),
-        ),
-      ),
-      el("p", {
-        class: "aside-note",
-        text: "项目记忆保存在你自己的独立记忆空间中，可跨 AI 宿主持续使用。",
-      }),
-    ]),
-  );
-
-}
 async function renderSkills(root, generation) {
   const result = (await run("capabilities")).value;
   if (generation !== viewVersion) return;
@@ -1101,7 +964,10 @@ async function renderSkills(root, generation) {
     }),
   );
   const roots=el("textarea",{rows:3,value:(result.roots || []).join("\n"),placeholder:"每行一个 Skill 文件夹绝对路径，可来自 Codex、Claude 或自己的技能目录"});
-  root.append(formField("额外 Skill 文件夹",roots,"读取文件夹内的 SKILL.md 或其直接子目录。扫描后自行选择启用，工作流沿用当前宿主权限。"),
+  root.append(btn("选择 Skill 根目录…",e=>quiet(withButton(e.currentTarget,async()=>{
+    const chosen=(await run("pick_directory")).value.path;if(!chosen)return;
+    await run("capability_roots",{roots:[...new Set([...(result.roots||[]),chosen])]});await navigate("skills");
+  }))),el("details",{},[el("summary",{text:"手动输入路径（备用）"}),formField("额外 Skill 文件夹",roots,"递归扫描根目录下的 SKILL.md，跳过依赖目录和版本库。扫描后选择启用，工作流沿用当前宿主权限。")]),
     btn("保存并重新扫描",e=>quiet(withButton(e.currentTarget,async()=>{
       await run("capability_roots",{roots:roots.value.split("\n").map(x=>x.trim()).filter(Boolean)});
       await navigate("skills");
@@ -1125,6 +991,8 @@ async function renderSkills(root, generation) {
       el("small", { text: result.skills.length + " 项本机能力" }),
     ]),
   );
+  const chosenSkills=new Set();
+  root.append(el("div",{class:"toolbar"},[btn("选择当前搜索结果",()=>{grid.querySelectorAll(".skill-card").forEach(c=>{if(!c.hidden){c.querySelector("input").checked=true;chosenSkills.add(c.dataset.skill);}});}),btn("启用所选能力",e=>quiet(withButton(e.currentTarget,async()=>{await run("capability_bulk",{ids:[...chosenSkills],enabled:true});navigate("skills");}))),btn("关闭所选能力",e=>quiet(withButton(e.currentTarget,async()=>{await run("capability_bulk",{ids:[...chosenSkills],enabled:false});navigate("skills");})))]));
   for (const skill of result.skills) {
     const enabled = result.enabled.includes(skill.id);
     const toggle = btn(
@@ -1139,11 +1007,13 @@ async function renderSkills(root, generation) {
       enabled ? "secondary" : "primary",
     );
     grid.append(
-      el("div", { class: "skill-card" }, [
+      el("div", { class: "skill-card", "data-skill":skill.id }, [
+        el("label",{class:"check"},[el("input",{type:"checkbox",onchange:e=>{e.target.checked?chosenSkills.add(skill.id):chosenSkills.delete(skill.id);}}),"选择"]),
         el("h3", { text: skill.name }),
         el("p", { text: skill.description || "本机已安装的 Skill" }),
         el("div", { class: "actions" }, [
           toggle,
+          ...(skill.name==="transcript-visual-recap" ? [btn("用于阶段汇报",e=>quiet(withButton(e.currentTarget,async()=>{await run("report_method",{id:skill.id});toast("已设为阶段汇报方法");})))] : []),
           ...(enabled
             ? [
                 btn("分析", () => skillDialog(skill)),
@@ -1223,6 +1093,7 @@ async function renderWorkflows(root, generation) {
     ],
     workflowSkill,
   );
+  skill.multiple=true;skill.size=5;
   const project = select(
     [["", "全部项目背景"], ...data.projects.map((p) => [p.id, p.title])],
     selected || "",
@@ -1240,8 +1111,9 @@ async function renderWorkflows(root, generation) {
       text: boot.harness?.embedded_workflow ? "开始执行" : "交给宿主执行",
     });
   const form = el("form", {}, [
+    el("div",{class:"workflow-steps"},[el("span",{text:"1 选择项目与能力"}),el("span",{text:"2 明确工作要求"}),el("span",{text:boot.harness?.embedded_workflow?"3 页面执行与查看产物":"3 到所选宿主接续"})]),
     el("div", { class: "two-cols" }, [
-      formField("使用的能力", skill),
+      formField("使用的能力（可多选）", skill),
       formField("项目背景", project),
     ]),
     formField("希望完成什么", question),
@@ -1265,6 +1137,7 @@ async function renderWorkflows(root, generation) {
         data: {
           request_id: crypto.randomUUID(),
           question: question.value,
+          skill_ids: [...skill.selectedOptions].map(x=>x.value).filter(Boolean),
           skill_id: skill.value || null,
           project_id: project.value || null,
         },
@@ -1295,7 +1168,7 @@ async function renderWorkflows(root, generation) {
       submit.disabled = false;
     }
   };
-  const jobs = (await api("/api/jobs")).jobs.filter((j) => j.op === "workflow");
+  const jobs = (await api("/api/jobs")).jobs.filter((j) => ["workflow","workflow_request"].includes(j.op));
   history.append(el("h3", { text: "最近的工作流" }));
   for (const job of jobs)
     history.append(
@@ -1351,6 +1224,10 @@ async function downloadArtifact(job, name) {
 }
 
 async function showWorkflow(root, jid, generation) {
+  const existing=await api('/api/jobs/'+jid);
+  if(existing.op==='workflow_request'){
+    root.replaceChildren(el('section',{class:'panel'},[el('h3',{text:'已准备宿主交接'}),el('p',{text:existing.result?.note||existing.error||'正在准备材料'}),el('textarea',{readOnly:true,value:existing.result?.text||''}),btn('复制接续请求',()=>copyRequest(existing.result?.text||''))]));return;
+  }
   const nonce = ++workflowPoll,
     status = el("p", { class: "subtle" }),
     answer = el("div", { class: "ai-answer" }),
@@ -1563,9 +1440,27 @@ function approvalCard(job, approval) {
   card.append(error);
   return card;
 }
+function schedulePanel() {
+  const state = boot.scheduler || {};
+  const panel = el("div", { class: "panel" }, [
+    el("h3", { text: "自动生长运行状态" }),
+    el("p", { text: state.message || "定时任务待核验。" }),
+    el("p", { class: "subtle", text: "核验时间：" + (state.checked_at || "尚未核验") }),
+  ]);
+  if (boot.configured) panel.append(btn(state.local_paused ? "解除本机暂停" : "立即暂停自动生长", (event) => quiet(withButton(event.currentTarget, async (progress) => {
+    const r = await run("schedule_pause", { paused: !state.local_paused }, progress);
+    toast(r.value.message);
+    boot = await api("/api/bootstrap");
+    await navigate(view);
+  })), state.local_paused ? "" : "primary"));
+  panel.append(el("p", { class: "form-help", text: "暂停独立生效，无需保存下面的配置。它停止启动新的定时轮次；原轮次及已提交结果会保留。解除本机暂停不会自动启用已暂停的宿主任务。" }));
+  return panel;
+}
+
 async function renderRuns(root, generation) {
   const { jobs } = await api("/api/jobs");
   const growthState = (await run("growth_status", {})).value;
+  boot = await api("/api/bootstrap");
   if (generation !== viewVersion) return;
   root.replaceChildren(
     heading(
@@ -1574,25 +1469,34 @@ async function renderRuns(root, generation) {
       [btn("刷新记录", () => navigate("runs"))],
     ),
   );
+  root.append(btn("查看运行状态与待完成步骤",()=>navigate("setup")));
   const health = el("div", { class: "panel" }, [el("h3", { text: "自动生长与采集覆盖" })]);
+  const channelsPanel=el("div",{},[el("h4",{text:"来源覆盖"})]),recentPanel=el("div",{},[el("h4",{text:"最近生长结果"})]);
+  health.append(el("div",{class:"coverage-grid"},[channelsPanel,recentPanel]));
   for (const item of Object.values(growthState.channels || {})) {
-    health.append(el("p", { class: item.status === "partial" ? "form-error" : "subtle",
+    channelsPanel.append(el("p", { class: item.status === "partial" ? "form-error" : "subtle",
       text: item.label + " · " + (item.status === "complete" ? "完整" : "部分覆盖") +
         (item.count == null ? "" : " · 扫描 " + item.count + " 条") +
         (item.consecutive_empty ? " · 连续 " + item.consecutive_empty + " 轮为空（空列表不等于故障）" : "") +
+        (item.checked_at ? " · 检查于 " + item.checked_at : "") +
         (item.error ? " · " + item.error : "") }));
   }
   for (const item of growthState.runs || []) {
     const result = item.result || {};
-    health.append(el("article", { class: "log-row" }, [
+    recentPanel.append(el("article", { class: "log-row" }, [
       el("strong", { text: (item.role === "growth" ? "自动生长" : "阶段汇报") + " · " + item.at.replace("T", " ") }),
-      el("p", { class: "subtle", text: item.status === "complete" ? (result.status === "partial" ? "已执行，部分来源待补采" : "已完成") : item.status === "failed" ? "失败，保留原轮次恢复" : item.status === "waiting_harness" ? "等待宿主接续" : "处理中" }),
+      el("p", { class: "subtle", text: item.status === "complete" ? (result.status === "partial" ? "已执行，部分来源待补采" : "已完成") : item.status === "failed" ? "失败，保留原轮次恢复" : item.status === "waiting_harness" ? "等待宿主接续" : item.status === "skipped" ? "已跳过（开关关闭）" : "处理中" }),
       el("p", { text: result.execution ? result.summary : typeof result.actions === "number" ? "历史轮次已核验动作 " + result.actions + " 项；未记录分项统计。" : result.summary || item.error || "执行结果将在回读后记录" }),
     ]));
   }
   if (!Object.keys(growthState.channels || {}).length) health.append(el("p", { class: "subtle", text: "新版来源覆盖统计将在下一轮生长完成后出现。" }));
   root.append(health);
+  const filter=select([["all","全部类型"],["grow","采集与生长"],["report","阶段汇报"],["mutate","项目与待办"],["ask","AI 分析"],["workflow","工作流"]]);
+  const statusFilter=select([["all","全部状态"],["running","执行中"],["waiting_harness","等待宿主"],["succeeded","已完成"],["failed","未完成"]]);
+  root.append(el("div",{class:"toolbar"},[filter,statusFilter]));
   const panel = el("div", { class: "panel" });
+  const filtering=()=>{for(const row of panel.children)row.hidden=(filter.value!=="all"&&!row.dataset.op?.includes(filter.value))||(statusFilter.value!=="all"&&row.dataset.status!==statusFilter.value);};
+  filter.onchange=statusFilter.onchange=filtering;
   for (const job of jobs) {
     const label = {
       queued: "排队中",
@@ -1617,7 +1521,7 @@ async function renderRuns(root, generation) {
       }
     };
     panel.append(
-      el("article", { class: "log-row" }, [
+      el("article", { class: "log-row", "data-op":job.op, "data-status":job.status }, [
         el("div", { class: "entry-top" }, [
           el("strong", { text: jobNames[job.op] || job.op }),
           badge(
@@ -1635,6 +1539,7 @@ async function renderRuns(root, generation) {
             await navigate("runs");
           }))),
         ]) : null,
+        btn("查看任务进度",async()=>{const full=await api("/api/jobs/"+job.id);dialog(jobNames[job.op]||job.op,taskPanel(full));}),
         details,
       ]),
     );
@@ -1665,6 +1570,9 @@ function renderSetup(root) {
       "安装一次，带上自己的钉钉、AI 表格和记忆库。所有设置都在这里完成。",
     ),
   );
+  const operations=el("div",{class:"operations-grid"});root.append(operations);
+  quiet(renderOperationStatus(operations));
+  root.append(cdbiPanel());
   const envStatus = el("p", { class: "subtle" });
   const profile = select([["", "先读取已登录账号"]]);
   const login = btn("登录钉钉", (event) =>
@@ -1715,8 +1623,8 @@ function renderSetup(root) {
           btn("安装 / 修复运行环境", (event) =>
             quiet(
               withButton(event.currentTarget, async (progress) => {
-                await run("setup_dependencies", {}, progress);
-                envStatus.textContent = "运行环境已完成安装与版本核验。";
+                const installed = await run("setup_dependencies", {}, progress);
+                envStatus.textContent = "DWS 与记忆引擎已完成安装与版本核验。" + (installed.value?.cdbi?.available === false ? " CDBI：" + installed.value.cdbi.message : " CDBI 已就绪。");
               }),
             ),
           ),
@@ -2116,7 +2024,7 @@ function renderSetup(root) {
     gbrain: "写入项目记忆",
     digest: "向本人钉钉推送摘要",
     reports: "生成阶段汇报",
-    milestone_planning: "自动按目标日期倒排里程碑",
+    milestone_planning: "基于项目资料自动规划里程碑",
     continuous_reports: "每轮生长后自动更新阶段汇报",
   })) {
     const input = el("input", {
@@ -2150,11 +2058,7 @@ function renderSetup(root) {
   const notifyMode = select([["every_run","每轮发送摘要"],["changes","仅有实际动作、新待核事项或覆盖变化时发送"]], preferences.notification_mode || "every_run");
   const scheduleState = el("p", {
     class: boot.scheduler.active ? "success" : "subtle",
-    text: boot.scheduler.active
-      ? "当前宿主调度已启用。"
-      : boot.scheduler.registered
-        ? "控制器已接入，自动生长已暂停。"
-        : "当前尚未完成宿主调度验证。",
+    text: boot.scheduler.message || "当前尚未完成宿主调度验证。",
   });
   root.append(
     setupStep(
@@ -2242,6 +2146,7 @@ function renderSetup(root) {
                       ? "设置已保存；请完成下方首次定时接入。"
                       : "设置已保存，自动生长已暂停。";
                   boot = await api("/api/bootstrap");
+                  scheduleState.textContent = boot.scheduler.message;
                 }),
               ),
             "primary",
@@ -2251,7 +2156,7 @@ function renderSetup(root) {
               withButton(event.currentTarget, async (progress) => {
                 const r = await run("setup_doctor", {}, progress);
                 scheduleState.textContent = r.value.ready
-                  ? "✓ 表格、独立记忆空间和宿主调度全部验证通过。"
+                  ? "✓ 接入验证通过。" + (r.value.scheduler?.message || "")
                   : "接入未全部完成：" +
                     (!r.value.memory?.verified ? "独立记忆空间待读写验证；" : "") +
                     (!r.value.scheduler?.active ? "宿主定时任务待同步。" : "");
@@ -2340,3 +2245,33 @@ async function copyRequest(text) {
   try { await navigator.clipboard.writeText(text); toast("已复制，到所选宿主粘贴发送。"); }
   catch { dialog("复制以下请求", el("textarea", { readOnly: true, value: text, "aria-label": "接续请求" })); }
 }
+
+async function renderOperationStatus(root){
+  root.append(schedulePanel());
+  if(!boot.configured)return;
+  const recoveryState=(await run("recovery_status")).value;
+  if(!recoveryState.active)root.append(el('div',{class:'panel'},[el('h3',{text:'待完成的原轮次'}),el('p',{text:'当前没有未完成的生长轮次。'}),btn('查看执行历史',()=>navigate('runs'))]));
+  if (recoveryState.active) {
+    const panel = el("div", { class: "panel" }, [
+      el("h3", { text: "原轮次有待完成步骤" }),
+      el("p", { text: "已核验 " + recoveryState.verified_count + " 项动作。核验原结果只回读，不会重新提交；核验后可继续剩余步骤。" }),
+    ]);
+    const names = {create_record:"项目记录",update_status:"状态更新",create_milestone:"里程碑",create_todo:"待办创建",complete_todo:"待办关闭",brain:"记忆",digest:"摘要"};
+    for (const item of recoveryState.items) panel.append(el("p", { text:
+      ({verified:"已核验",unknown:"结果待核验",pending:"尚未完成"}[item.status]) + " · " + (names[item.op] || item.op) + " · " + item.title }));
+    const actions = el("div", { class: "actions" });
+    if (recoveryState.needs_reconciliation) actions.append(btn("核验原结果", (event) => quiet(withButton(event.currentTarget, async (progress) => {
+      const r = await run("reconcile_growth", {run_id:recoveryState.run_id}, progress);
+      toast(r.value.message); await navigate("setup");
+    })), "primary"));
+    else actions.append(btn("继续原轮次剩余步骤", (event) => quiet(withButton(event.currentTarget, async (progress) => {
+      await run("resume_growth", {run_id:recoveryState.run_id}, progress);
+      toast("原轮次已完成；定时任务开关保持原状态。"); await navigate("setup");
+    })), "primary"));
+    panel.append(actions); root.append(panel);
+  }
+
+}
+
+async function renderTodos(root,generation){return renderTodosV22(root,generation);}
+function renderMemory(root){return renderMemoryV22(root);}

@@ -62,3 +62,9 @@ Codex 适配器能把原生工具事件、单次审批和产物展示在页面�
 - Claude Code 官方 CLI 文档：https://code.claude.com/docs/en/cli-reference 与 https://code.claude.com/docs/en/headless 。使用 print、JSON schema、已有登录，工具与无关 MCP 关闭。
 - WorkBuddy 官方连接器文档：https://open.workbuddy.cn/docs/connector 。本版采用已有本地 CLI + Skill 的接入思路；尚未打包、签名或发布 WorkBuddy 市场连接器。
 - DeepSeek Harness 可能是不同实现；本版承诺通用本地契约，不假设某个未验证的 CLI、目录、MCP 或计划任务 API。
+
+## 暂停与原轮次恢复（2.1.1）
+
+使用同一安装记录中的 Python 与配置执行 `host.py pause` 可独立暂停后续定时轮次，不改冻结的业务配置。`unpause` 只解除本机暂停，不启用宿主原生任务。当前轮次与已提交结果保留。
+
+`recovery-status` 返回原轮次编号与动作状态。对结果未知的原轮次执行 `reconcile --run-id <原编号>`，只回读提供方并修复本地回执；成功后执行 `resume-growth --run-id <同一编号>` 继续剩余步骤。不得自行更换编号、新建轮次、删除去重记录或扩大原开关授权。没有可靠原编号、来源标记或投递句柄时保留待核，不猜测成功、不盲目重发。手动恢复不会改变暂停状态。

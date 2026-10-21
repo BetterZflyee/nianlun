@@ -30,7 +30,7 @@ def find_binary(name):
     found = shutil.which(name)
     if found and not found.lower().endswith(('.cmd', '.bat')):
         return str(Path(found).absolute())
-    for directory in (Path.home()/'.bun/bin', Path.home()/'.nodejs/bin', Path('/opt/homebrew/bin'), Path('/usr/local/bin')):
+    for directory in (Path.home()/'.local/bin',Path.home()/'.bun/bin', Path.home()/'.nodejs/bin', Path('/opt/homebrew/bin'), Path('/usr/local/bin')):
         path = directory / (name + ('.exe' if os.name == 'nt' else ''))
         if path.is_file():
             return str(path)
@@ -178,5 +178,10 @@ def install(home, source_gbrain=False):
                 raise n.Error('GBrain 源码启动检查未通过')
     result.update(gbrain_command=brain, versions={'dws':version([dws]), 'gbrain':version(brain)},
                   platform=system+'-'+arch)
+    try:
+        import cdbi_adapter
+        result['cdbi']=cdbi_adapter.install(home)
+        result['cdbi_bin']=result['cdbi']['binary']
+    except n.Error as exc:result['cdbi']={'available':False,'message':str(exc)}
     n.save(registry, result)
     return result

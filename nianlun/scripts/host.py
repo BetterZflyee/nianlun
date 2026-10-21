@@ -41,7 +41,7 @@ def export(config_path, provider, home):
     n.save(folder/'connection.json',info)
     body=f'''---
 name: nianlun
-description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格和 GBrain，管理进展、本人待办和阶段汇报。
+description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格和独立记忆空间，管理进展、本人待办和阶段汇报。
 ---
 
 # 年轮 · {harness.PROVIDERS[provider]['name']} 入口
@@ -54,7 +54,7 @@ description: 年轮项目记忆与自动生长；通过用户自己的 AI 表格
 定时任务必须通过本宿主的真实计划能力配置、回读核验；若本宿主不提供定时或本机执行能力，明确显示待接入，不声称已启用。任何时候只允许一个定时宿主负责同一安装。
 '''
     n.save(folder/'skills/nianlun/SKILL.md',body)
-    message=f'请在 {harness.PROVIDERS[provider]["name"]} 中接入年轮。先读取 {folder / "connection.json"} 和 {folder / "skills/nianlun/SKILL.md"}，沿用已有 AI 表格、GBrain、授权来源和动作。接入后检查待处理交接。不要自动切换定时任务的负责宿主。'
+    message=f'请在 {harness.PROVIDERS[provider]["name"]} 中接入年轮。先读取 {folder / "connection.json"} 和 {folder / "skills/nianlun/SKILL.md"}，沿用已有 AI 表格、独立记忆空间、授权来源和动作。接入后检查待处理交接。不要自动切换定时任务的负责宿主。'
     n.save(folder/'接入说明.md',message+'\n')
     return {'provider':provider,'directory':str(folder),'text':message,'verified':False}
 
@@ -91,6 +91,9 @@ def main():
     p.add_argument('--config',default=str(Path.home()/'.config/nianlun/config.json'))
     sub=p.add_subparsers(dest='command',required=True)
     sub.add_parser('status');sub.add_parser('grow');sub.add_parser('health')
+    sub.add_parser('pause');sub.add_parser('unpause');sub.add_parser('recovery-status')
+    rec=sub.add_parser('reconcile');rec.add_argument('--run-id',required=True)
+    resume=sub.add_parser('resume-growth');resume.add_argument('--run-id',required=True)
     pending=sub.add_parser('pending');pending.add_argument('--id')
     answer=sub.add_parser('answer');answer.add_argument('--id',required=True);answer.add_argument('--response',required=True)
     select=sub.add_parser('connect');select.add_argument('--provider',choices=harness.PROVIDERS,required=True);select.add_argument('--mode',choices=('cli','delegated'));select.add_argument('--binary')
@@ -100,7 +103,19 @@ def main():
     own=sub.add_parser('schedule-owner');own.add_argument('--provider',choices=harness.PROVIDERS,required=True)
     args=p.parse_args()
     try:
-        if args.command=='health':
+        if args.command in ('pause','unpause'):
+            import run_control
+            result=run_control.set_paused(n.load(args.config),args.command=='pause')
+        elif args.command=='recovery-status':
+            import recovery
+            result=recovery.overview(n.load(args.config))
+        elif args.command=='reconcile':
+            import recovery
+            result=recovery.reconcile(n.load(args.config),args.run_id)
+        elif args.command=='resume-growth':
+            import scheduler
+            result=scheduler.resume_growth(args.config,args.run_id)
+        elif args.command=='health':
             import source_state
             result=source_state.runtime_status(n.load(args.config))
         elif args.command=='status':result={'selected':harness.status(harness.selection(args.config)),'hosts':harness.PROVIDERS}

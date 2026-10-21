@@ -27,6 +27,7 @@ const fieldLabels = {
   title: "名称",
   description: "详情",
   goal: "项目目标",
+  deadline: "目标日期",
   risk: "风险卡点",
   priority: "优先级",
   status: "状态",
@@ -40,17 +41,35 @@ const fieldLabels = {
   report: "阶段汇报链接",
 };
 const jobNames = {
+  bulk_mutate: "批量处理",
+  memory_project: "展开项目记忆",
+  capability_bulk: "批量配置能力",
+  pick_directory: "选择能力目录",
+  report_method: "设置汇报方法",
+  cdbi_import: "导入场地",
+  cdbi_preview: "预览场地",
+  cdbi_install: "安装 CDBI",
   host_export: "准备宿主入口",
   workflow_request: "准备工作流交接",
   resume: "继续原任务",
+  schedule_pause: "调整本机暂停状态",
+  reconcile_growth: "核验原结果",
+  resume_growth: "继续原轮次",
+  recovery_status: "读取原轮次状态",
+  growth_status: "读取采集覆盖",
   snapshot: "刷新项目",
   todos: "读取待办",
   mutate: "保存工作内容",
-  memory_query: "检索 GBrain",
+  memory_query: "检索项目记忆",
   ask: "宿主分析",
   workflow: "执行宿主工作流",
   grow: "运行一次生长",
   report: "生成阶段汇报",
+  plan_milestones: "基于资料规划里程碑",
+  send_report: "发送项目汇报",
+  group_search: "搜索项目群",
+  mailboxes: "读取本人邮箱",
+  capability_roots: "保存能力目录",
   setup_dependencies: "安装运行环境",
   setup_login: "钉钉授权",
   profiles: "读取账号",
@@ -58,7 +77,7 @@ const jobNames = {
   create_resource: "创建云端资源",
   table_plan: "预览表格方案",
   tables_apply: "初始化 / 绑定表格",
-  memory_connect: "接入 GBrain",
+  memory_connect: "接入独立记忆空间",
   configure: "保存运行配置",
   setup_doctor: "检查接入",
   harness_status: "检查 AI 宿主",
@@ -120,30 +139,33 @@ async function api(path, body) {
 }
 async function run(op, values = {}, progress) {
   const { job_id } = await api("/api/actions", { op, data: values });
-  if (progress) progress("已提交，正在执行…");
-  for (;;) {
+  let panel;
+  if (
+    [
+      "ask",
+      "report",
+      "grow",
+      "plan_milestones",
+      "bulk_mutate",
+      "resume_growth",
+    ].includes(op)
+  ) {
     const job = await api("/api/jobs/" + job_id);
-    if (job.status === "succeeded") return { value: job.result, job: job_id };
-    if (job.status === "waiting_harness")
-      throw new Error("任务已保留，等待 AI 宿主接续。请到「执行记录」复制接续请求，处理后继续原任务。");
-    if (["failed", "interrupted"].includes(job.status))
-      throw new Error(job.error || "执行中断");
-    if (progress)
-      progress(
-        job.status === "queued"
-          ? "已排队，等待上一项操作完成…"
-          : job.phase || "正在执行 " + (jobNames[op] || op) + "…",
-      );
-    await new Promise((r) => setTimeout(r, 900));
+    panel = taskPanel(job);
+    const target = $("#modal").open ? $("#dialog-content") : $("#content");
+    target.append(panel);
+    panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }
+  return pollJob(job_id, progress, panel);
 }
+
 async function withButton(button, action) {
   const old = button.textContent;
   button.disabled = true;
   try {
     return await action((message) => (button.textContent = message));
   } catch (e) {
-    notice(e.message);
+    if (e.job?.status !== "waiting_harness") notice(e.message);
     throw e;
   } finally {
     button.disabled = false;
@@ -214,6 +236,8 @@ async function initialize() {
       $("#base-link").href = boot.base_url;
       $("#base-link").hidden = false;
     }
+    setupNotifications();
+    studioInit();
     await navigate(boot.configured ? "projects" : "setup");
   } catch (e) {
     notice(e.message);
@@ -234,6 +258,7 @@ async function refresh() {
 }
 async function navigate(next, reload = true) {
   view = next;
+  window.scrollTo({ top: 0, behavior: "instant" });
   const generation = ++viewVersion;
   document
     .querySelectorAll("[data-nav]")
@@ -253,6 +278,8 @@ async function navigate(next, reload = true) {
   loading(content);
   try {
     if (view === "setup") {
+      boot = await api("/api/bootstrap");
+      if (generation !== viewVersion) return;
       renderSetup(content);
       return;
     }
@@ -260,7 +287,7 @@ async function navigate(next, reload = true) {
       content.replaceChildren(
         empty(
           "先连接你的工作空间",
-          "接入钉钉 AI 表格和 GBrain 后，项目内容会出现在这里。",
+          "接入钉钉 AI 表格和独立记忆空间后，项目内容会出现在这里。",
           btn("开始接入", () => navigate("setup"), "primary"),
         ),
       );
@@ -275,10 +302,10 @@ async function navigate(next, reload = true) {
       selected ? renderProject(content) : renderProjects(content);
     }
     if (view === "todos") await renderTodos(content, generation);
-    if (view === "memory") renderMemory(content);
-    if (view === "skills") await renderSkills(content, generation);
-    if (view === "workflows") await renderWorkflows(content, generation);
-    if (view === "runs") await renderRuns(content, generation);
+    if (view === "memory") await renderMemory23(content, generation);
+    if (view === "skills") await renderSkills23(content, generation);
+    if (view === "workflows") await renderWorkflows23(content, generation);
+    if (view === "runs") await renderRuns23(content, generation);
   } catch (e) {
     if (generation === viewVersion) {
       content.replaceChildren(
@@ -293,9 +320,7 @@ async function navigate(next, reload = true) {
   }
 }
 function renderProjects(root) {
-  const active = data.projects.filter(
-    (p) => !["已完成", "已暂停", "暂停"].includes(p.status),
-  );
+  const active = data.projects.filter((p) => p.active === true);
   const open = data.records.filter((r) => r.status !== "已解决");
   const milestones = data.milestones.filter((r) => r.status !== "已完成");
   root.replaceChildren(
@@ -442,9 +467,12 @@ function renderProject(root) {
     el("div", { class: "detail-title" }, [
       heading(
         project.title,
-        project.description || "在这里推进项目，记录每一步的来龙去脉。",
+        (project.number ? "项目编码：" + project.number + " · " : "") +
+          (project.description || "在这里推进项目，记录每一步的来龙去脉。"),
         [
           btn("编辑项目", () => editRow("projects", project)),
+          btn("获取项目进度", () => growthDialog(project)),
+          btn("规划里程碑", () => milestoneDialog(project)),
           btn("生成汇报", () => reportDialog(project), "primary"),
         ],
       ),
@@ -475,7 +503,7 @@ function renderProject(root) {
         }),
       );
   }
-  left.append(summary);
+  root.append(summary, compactRelations(project));
   const tabs = el("div", { class: "tabs" });
   for (const role of ["records", "milestones", "sites"])
     tabs.append(
@@ -497,9 +525,13 @@ function renderProject(root) {
         text: rows.length + " 条" + roleNames[tab],
       }),
       btn("+ 新增" + roleNames[tab], () => editRow(tab)),
+      tab === "sites"
+        ? btn("从 CDBI 获取场地", () => cdbiSites(project))
+        : null,
     ]),
   );
   const entries = el("div", { class: "panel" });
+  const quick = tab === "records" ? quickRecords(rows, entries) : null;
   for (const row of [...rows].sort((a, b) =>
     (b.date || "").localeCompare(a.date || ""),
   )) {
@@ -507,10 +539,14 @@ function renderProject(root) {
       el("article", { class: "entry" }, [
         el("div", { class: "entry-top" }, [
           el("h3", { text: row.title }),
-          btn("编辑", () => editRow(tab, row)),
+          quick ? quick(row) : btn("编辑", () => editRow(tab, row)),
         ]),
         el("p", { text: row.description || row.notes || "暂无详细说明" }),
-        el("small", { text: row.date || "" }),
+        el("small", {
+          text: [projectLabel(project), row.number || row.code, row.date]
+            .filter(Boolean)
+            .join(" · "),
+        }),
         badge(row.status || row.kind || "已记录"),
       ]),
     );
@@ -526,7 +562,7 @@ function renderProject(root) {
     el("h3", { text: "和项目聊一聊" }),
     el("p", {
       class: "aside-note",
-      text: "所选 AI 宿主会结合当前项目和 GBrain 历史，帮你梳理变化、卡点和下一步。",
+      text: "所选 AI 宿主会结合当前项目和历史记忆，帮你梳理变化、卡点和下一步。",
     }),
   );
   const question = el("textarea", {
@@ -610,7 +646,11 @@ function editRow(role, row) {
     } else if (field.type === "singleSelect") {
       input = select(
         (field.config?.options || []).map((o) => o.name),
-        row?.[key] || (key === 'priority' && field.config?.options?.some(o=>o.name==='P1') ? 'P1' : undefined),
+        row?.[key] ||
+          (key === "priority" &&
+          field.config?.options?.some((o) => o.name === "P1")
+            ? "P1"
+            : undefined),
       );
     } else if (
       ["description", "goal", "risk", "notes", "benefit", "solution"].includes(
@@ -659,7 +699,7 @@ function editRow(role, row) {
           continue;
         values[key] = value;
       }
-      await run(
+      const saved = await run(
         "mutate",
         {
           request_id: rid,
@@ -673,7 +713,8 @@ function editRow(role, row) {
       );
       $("#modal").close();
       toast("已写入 AI 表格，并完成回读验证");
-      data = (await run("snapshot")).value;
+      applyRow(saved.value);
+      if (!data) data = (await run("snapshot")).value;
       selected ? renderProject($("#content")) : renderProjects($("#content"));
     } catch (e) {
       error.textContent = e.message;
@@ -684,113 +725,73 @@ function editRow(role, row) {
   };
   dialog((row ? "编辑" : "新增") + roleNames[role], form);
 }
-async function renderTodos(root, generation) {
-  const result = (await run("todos")).value;
-  if (generation !== viewVersion) return;
-  root.replaceChildren(
-    heading(
-      "把下一步，落到行动。",
-      "这里显示当前钉钉组织下，由你执行的未完成待办。",
-      [btn("+ 新建我的待办", todoDialog, "primary")],
-    ),
-  );
-  const search = el("input", {
-    type: "search",
-    class: "search",
-    placeholder: "搜索待办标题",
-    "aria-label": "搜索待办",
+function growthDialog(project = null) {
+  if (!project?.id) project = null;
+  const end = new Date(),
+    begin = new Date(end.getTime() - 86400000);
+  const local = (d) =>
+    new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+  const since = el("input", {
+    type: "datetime-local",
+    value: local(begin),
+    required: true,
   });
-  const scope = select([
-    ["all", "全部本人待办"],
-    ["linked", "已关联年轮项目"],
-  ]);
-  root.append(el("div", { class: "toolbar" }, [search, scope]));
-  const panel = el("div", { class: "panel" });
-  for (const todo of result.todos) {
-    const complete = btn(
-      "✓",
-      () =>
-        dialog(
-          "完成这项待办？",
-          el("div", {}, [
-            el("p", { text: todo.title }),
-            el("p", {
-              class: "subtle",
-              text: todo.link?.record_ids?.length
-                ? "完成后，将同步关联的项目记录为“已解决”。"
-                : "这项待办没有关联年轮项目记录，只更新钉钉待办状态。",
-            }),
-            el("div", { class: "form-actions" }, [
-              btn("取消", () => $("#modal").close()),
-              btn(
-                "确认完成",
-                (event) =>
-                  quiet(
-                    withButton(event.currentTarget, async (progress) => {
-                      await run(
-                        "mutate",
-                        {
-                          request_id: crypto.randomUUID(),
-                          op: "complete_todo",
-                          task_id: todo.id,
-                          title: todo.title,
-                        },
-                        progress,
-                      );
-                      $("#modal").close();
-                      toast("已完成并验证");
-                      data = null;
-                      await navigate("todos");
-                    }),
-                  ),
-                "primary",
-              ),
-            ]),
-          ]),
-        ),
-      "complete",
-    );
-    complete.setAttribute("aria-label", "完成 " + todo.title);
-    panel.append(
-      el(
-        "div",
-        { class: "todo-row", "data-associated": todo.link ? "yes" : "no" },
-        [
-          complete,
-          el("div", { class: "todo-text" }, [
-            el("strong", { text: todo.title }),
-            el("small", {
-              text: todo.link
-                ? "已关联项目 · " + todo.link.record_ids.length + " 条记录"
-                : "来自钉钉 · 未关联年轮项目",
-            }),
-          ]),
-        ],
-      ),
+  const until = el("input", {
+    type: "datetime-local",
+    value: local(end),
+    required: true,
+  });
+  const labels = {
+    minutes: "AI 听记",
+    mentions: "群聊 @我",
+    direct: "单聊",
+    groups: "已选择的群聊",
+    mail: "已选择的邮箱",
+    lark_minutes: "飞书妙记",
+    harness: "宿主人类会话",
+    workbench: "工作台操作",
+  };
+  const checks = {};
+  const channels = el("div", { class: "two-cols" });
+  for (const [key, label] of Object.entries(labels)) {
+    const enabled =
+      ["harness", "workbench"].includes(key) ||
+      (boot.preferences.sources?.[key] ??
+        ["minutes", "mentions", "direct"].includes(key));
+    const input = el("input", {
+      type: "checkbox",
+      checked: enabled,
+      disabled: !enabled,
+    });
+    checks[key] = input;
+    channels.append(
+      el("label", { class: "check" }, [
+        input,
+        label + (enabled ? "" : "（尚未启用）"),
+      ]),
     );
   }
-  if (!result.todos.length)
-    panel.append(empty("当前没有未完成待办", "新的待办会同步到你的钉钉。"));
-  root.append(panel);
-  function filter() {
-    for (const row of panel.querySelectorAll(".todo-row"))
-      row.hidden =
-        !row.textContent.toLowerCase().includes(search.value.toLowerCase()) ||
-        (scope.value === "linked" && row.dataset.associated !== "yes");
-  }
-  search.oninput = filter;
-  scope.onchange = filter;
-}
-function growthDialog() {
   const status = el("div", { class: "ai-answer" });
+  const requestId = crypto.randomUUID();
+  let submitted = null;
   const go = btn(
-    "按当前配置运行",
+    "采集并更新项目",
     (event) =>
       quiet(
         withButton(event.currentTarget, async (progress) => {
           const result = await run(
             "grow",
-            { request_id: crypto.randomUUID() },
+            (submitted ||= {
+              request_id: requestId,
+              since: new Date(since.value).toISOString(),
+              until: new Date(until.value).toISOString(),
+              selection: {
+                channels: Object.keys(checks).filter((k) => checks[k].checked),
+                project_ids: project ? [project.id] : [],
+              },
+            }),
             (message) => {
               progress(message);
               status.textContent = message;
@@ -814,11 +815,182 @@ function growthDialog() {
     "让年轮生长一次",
     el("div", {}, [
       el("p", {
-        text: "按“接入与运行”中已开启的来源与操作，采集信息、检索项目记忆、理解进度、执行同步并发送本人摘要。未完成的轮次会先恢复。",
+        text:
+          (project ? "更新「" + project.title + "」。" : "更新全部项目。") +
+          "选择时间和渠道，补采信息后自动更新进度、里程碑、记忆与汇报。具体动作遵循已开启的运行开关；手动补采不会跳过定时任务窗口。",
       }),
+      el("div", { class: "two-cols" }, [
+        formField("从", since),
+        formField("到", until),
+      ]),
+      channels,
       el("div", { class: "form-actions" }, [go]),
       status,
     ]),
+  );
+}
+function milestoneDialog(project) {
+  const goal = el("textarea", {
+    value: project.goal || project.description || "",
+    required: true,
+  });
+  const dateMatch = project.notes?.match(
+    /年轮目标日期[：:]\s*(\d{4}-\d{2}-\d{2})/,
+  );
+  const target = el("input", {
+    type: "date",
+    value: project.deadline || dateMatch?.[1] || "",
+    required: true,
+  });
+  const status = el("div", { class: "ai-answer" });
+  let saved = false;
+  const requestId = crypto.randomUUID(),
+    planId = crypto.randomUUID();
+  const go = btn(
+    "保存并基于资料规划",
+    (e) =>
+      quiet(
+        withButton(e.currentTarget, async (progress) => {
+          if (!goal.value.trim() || !target.value)
+            throw new Error("请填写项目目标和目标日期");
+          if (!saved) {
+            const fields = data.fields.projects,
+              values = {};
+            values[fields.goal ? "goal" : "description"] = goal.value;
+            if (fields.deadline) values.deadline = target.value;
+            else if (fields.notes)
+              values.notes =
+                (project.notes || "")
+                  .replace(/年轮目标日期[：:]\s*\d{4}-\d{2}-\d{2}/g, "")
+                  .trim() +
+                "\n年轮目标日期：" +
+                target.value;
+            else
+              throw new Error(
+                "请在 AI 表格添加“目标日期”日期字段，并在接入向导重新绑定。",
+              );
+            await run(
+              "mutate",
+              {
+                op: "update",
+                role: "projects",
+                record_id: project.id,
+                revision: project.revision,
+                values,
+                request_id: requestId,
+              },
+              progress,
+            );
+            saved = true;
+            goal.disabled = target.disabled = true;
+          }
+          const r = (
+            await run(
+              "plan_milestones",
+              { project_id: project.id, request_id: planId },
+              progress,
+            )
+          ).value;
+          status.textContent = r.pending?.length
+            ? r.pending.join("\n")
+            : "倒排完成，已回读验证。新增或调整 " +
+              r.projects.reduce((sum, p) => sum + p.changed.length, 0) +
+              " 个节点；人工节点和已完成节点保留。";
+          data = (await run("snapshot")).value;
+          renderProject($("#content"));
+        }),
+      ),
+    "primary",
+  );
+  dialog(
+    "基于项目资料规划里程碑",
+    el("div", {}, [
+      el("p", {
+        text: "结合项目记录、文档记忆和已有节点规划交付顺序。只有目标和日期时不会强行编排；请先采集资料或接入项目记忆。节点是计划，到期不等于完成。",
+      }),
+      formField("项目目标", goal),
+      formField("目标日期", target),
+      go,
+      status,
+    ]),
+  );
+}
+
+function groupPicker(onSelect) {
+  const query = el("input", { placeholder: "输入群名称关键词" }),
+    matches = el("div", {}),
+    status = el("p", { class: "subtle" });
+  const search = btn("搜索群聊", (e) =>
+    quiet(
+      withButton(e.currentTarget, async () => {
+        const r = (await run("group_search", { query: query.value })).value;
+        matches.replaceChildren(
+          ...r.groups.map((group) =>
+            btn(group.name, () =>
+              onSelect({ ...group, search_id: r.search_id }),
+            ),
+          ),
+        );
+        status.textContent = r.groups.length
+          ? "请选择具体群聊。"
+          : "没有匹配群聊。";
+      }),
+    ),
+  );
+  return el("div", {}, [
+    el("div", { class: "actions" }, [query, search]),
+    status,
+    matches,
+  ]);
+}
+
+function reportSendDialog(project, report) {
+  let group = null,
+    submitted = null;
+  const chosen = el("p", { text: "尚未选择发送群" }),
+    status = el("p", {}),
+    message = el("textarea", {
+      value:
+        project.title +
+        " · 阶段汇报\n" +
+        report.since +
+        " — " +
+        report.until +
+        "\n\n" +
+        report.summary +
+        "\n\n完整汇报：" +
+        report.url,
+      rows: 12,
+    });
+  const picker = groupPicker((value) => {
+    group = value;
+    chosen.textContent = "发送到：" + value.name;
+  });
+  const go = btn(
+    "发送到所选群",
+    (e) =>
+      quiet(
+        withButton(e.currentTarget, async (progress) => {
+          if (!group) throw new Error("请先选择接收群");
+          submitted ||= {
+            request_id: crypto.randomUUID(),
+            project_id: project.id,
+            report_id: report.report_id,
+            search_id: group.search_id,
+            group_id: group.id,
+            message: message.value,
+          };
+          message.disabled = true;
+          const r = (await run("send_report", submitted, progress)).value;
+          status.textContent = "已确认投递到：" + r.group.name;
+          go.disabled = true;
+        }),
+      ),
+    "primary",
+  );
+  dialog(
+    "发送项目汇报",
+    el("div", {}, [picker, chosen, formField("消息预览", message), go, status]),
   );
 }
 function todoDialog() {
@@ -878,7 +1050,7 @@ function todoDialog() {
         (message) => (save.textContent = message),
       );
       $("#modal").close();
-      toast("已创建到本人的钉钉待办");
+      toast("已创建到本人的丰声待办（DWS）");
       navigate("todos");
     } catch (e) {
       error.textContent = e.message;
@@ -911,33 +1083,66 @@ function reportDialog(project) {
   });
   const form = el("form", {}, [
     el("p", {
-      text: "根据所选时间范围的真实记录与里程碑生成汇报，上传到你的钉钉文件夹，并回填项目主表链接。",
+      text: "自动结合进度、里程碑和项目记忆形成结论、偏差、风险与下一步，上传并回填主表。无需先手工补写；生成后可预览并通过 DWS CLI 发送到项目群。",
     }),
     el("div", { class: "two-cols" }, [
       formField("开始日期", since),
       formField("结束日期", until),
     ]),
+    btn("本月", () => {
+      since.value = new Date(
+        today.getFullYear(),
+        today.getMonth(),
+        1,
+      ).toLocaleDateString("en-CA");
+      until.value = today.toLocaleDateString("en-CA");
+    }),
     error,
     el("div", { class: "form-actions" }, [save]),
   ]);
+  const requestId = crypto.randomUUID();
+  let submitted = null;
   form.onsubmit = async (event) => {
     event.preventDefault();
     save.disabled = true;
     try {
-      await run(
-        "report",
-        {
-          project_id: project.id,
-          since: since.value,
-          until: until.value,
-          request_id: crypto.randomUUID(),
-        },
-        (message) => (save.textContent = message),
-      );
+      const report = (
+        await run(
+          "report",
+          {
+            project_id: project.id,
+            since: since.value,
+            until: until.value,
+            request_id: requestId,
+          },
+          (message) => (save.textContent = message),
+        )
+      ).value;
+      if (!form.isConnected || !$("#modal").open) {
+        toast("阶段汇报已完成，请从通知查看");
+        return;
+      }
       $("#modal").close();
       toast("阶段汇报已上传，项目链接已更新");
       data = (await run("snapshot")).value;
       renderProject($("#content"));
+      dialog(
+        "汇报已生成 · " + project.title,
+        el("div", {}, [
+          el("div", { class: "ai-answer", text: report.summary }),
+          el("a", {
+            href: report.url,
+            target: "_blank",
+            rel: "noopener",
+            text: "打开完整汇报 ↗",
+          }),
+          btn(
+            "发送到项目群",
+            () => reportSendDialog(project, report),
+            "primary",
+          ),
+        ]),
+      );
     } catch (e) {
       error.textContent = e.message;
     } finally {
@@ -946,131 +1151,6 @@ function reportDialog(project) {
     }
   };
   dialog("生成阶段汇报 · " + project.title, form);
-}
-function renderMemory(root) {
-  root.replaceChildren(
-    heading(
-      "让经验，有处可寻。",
-      "检索你自己的 GBrain，找回项目背后的讨论、判断与经验。",
-    ),
-  );
-  const query = el("input", {
-    placeholder: "输入项目名、问题或你记得的关键词",
-    required: true,
-  });
-  const result = el("div", { class: "ai-answer" });
-  const submit = el("button", {
-    type: "submit",
-    class: "primary",
-    text: "检索记忆",
-  });
-  const form = el("form", {}, [
-    el("div", { class: "toolbar" }, [query, submit]),
-    result,
-  ]);
-  form.onsubmit = (event) => {
-    event.preventDefault();
-    quiet(
-      withButton(submit, async (progress) => {
-        const r = await run("memory_query", { query: query.value }, progress);
-        result.textContent = r.value.text || "没有找到相关记忆。";
-      }),
-    );
-  };
-  root.append(
-    el("div", { class: "panel" }, [
-      form,
-      btn("把现有项目存入记忆", (event) =>
-        quiet(
-          withButton(event.currentTarget, async (progress) => {
-            const r = await run("memory_baseline", {}, progress);
-            toast(
-              "已将 " +
-                r.value.count +
-                " 个项目的当前档案存入 GBrain，并完成回读。",
-            );
-          }),
-        ),
-      ),
-      el("p", {
-        class: "aside-note",
-        text: "记忆保存在你接入的 GBrain 中。年轮不会创建另一份知识库。",
-      }),
-    ]),
-  );
-}
-async function renderSkills(root, generation) {
-  const result = (await run("capabilities")).value;
-  if (generation !== viewVersion) return;
-  root.replaceChildren(
-    heading(
-      "把你的方法，带进来。",
-      "扫描本机已有 Skill，选择需要的分析方法，在同一个工作台中使用。",
-    ),
-  );
-  root.append(
-    el("p", {
-      class: "subtle",
-      text: "这里列出当前适配器可读取的本机 Skill。工作流按宿主能力在页面执行或回宿主接续；授权沿用该宿主的机制。",
-    }),
-  );
-  const grid = el("div", { class: "project-grid" });
-  const search = el("input", {
-    type: "search",
-    class: "search",
-    placeholder: "搜索能力名称或用途",
-    "aria-label": "搜索能力",
-  });
-  search.oninput = () => {
-    for (const card of grid.children)
-      card.hidden = !card.textContent
-        .toLowerCase()
-        .includes(search.value.toLowerCase());
-  };
-  root.append(
-    el("div", { class: "toolbar" }, [
-      search,
-      el("small", { text: result.skills.length + " 项本机能力" }),
-    ]),
-  );
-  for (const skill of result.skills) {
-    const enabled = result.enabled.includes(skill.id);
-    const toggle = btn(
-      enabled ? "已启用 · 关闭" : "启用这项能力",
-      (event) =>
-        quiet(
-          withButton(event.currentTarget, async () => {
-            await run("capability_toggle", { id: skill.id, enabled: !enabled });
-            await navigate("skills");
-          }),
-        ),
-      enabled ? "secondary" : "primary",
-    );
-    grid.append(
-      el("div", { class: "skill-card" }, [
-        el("h3", { text: skill.name }),
-        el("p", { text: skill.description || "本机已安装的 Skill" }),
-        el("div", { class: "actions" }, [
-          toggle,
-          ...(enabled
-            ? [
-                btn("分析", () => skillDialog(skill)),
-                btn(
-                  "运行工作流",
-                  () => {
-                    workflowSkill = skill.id;
-                    currentWorkflow = null;
-                    navigate("workflows");
-                  },
-                  "primary",
-                ),
-              ]
-            : []),
-        ]),
-      ]),
-    );
-  }
-  root.append(grid);
 }
 function skillDialog(skill) {
   const project = select([
@@ -1113,129 +1193,6 @@ function skillDialog(skill) {
   dialog(skill.name, form);
 }
 
-async function renderWorkflows(root, generation) {
-  const catalog = (await run("capabilities")).value;
-  if (generation !== viewVersion) return;
-  root.replaceChildren(
-    heading(
-      "把工作，交给你的方法。",
-      "选择已有能力，描述要完成的工作。支持页面执行的宿主会在这里展示过程；其他宿主通过交接材料继续。",
-    ),
-  );
-  const skill = select(
-    [
-      ["", "由当前宿主选择合适的方法"],
-      ...catalog.skills
-        .filter((s) => catalog.enabled.includes(s.id))
-        .map((s) => [s.id, s.name]),
-    ],
-    workflowSkill,
-  );
-  const project = select(
-    [["", "全部项目背景"], ...data.projects.map((p) => [p.id, p.title])],
-    selected || "",
-  );
-  const question = el("textarea", {
-    required: true,
-    placeholder:
-      "例如：根据这个项目的进展，生成一份可以交给同事的工作交接文档。",
-    "aria-label": "工作流要求",
-  });
-  const error = el("div", { class: "form-error" }),
-    submit = el("button", {
-      type: "submit",
-      class: "primary",
-      text: boot.harness?.embedded_workflow ? "开始执行" : "交给宿主执行",
-    });
-  const form = el("form", {}, [
-    el("div", { class: "two-cols" }, [
-      formField("使用的能力", skill),
-      formField("项目背景", project),
-    ]),
-    formField("希望完成什么", question),
-    el("p", {
-      class: "form-help",
-      text: "产物保存在这项任务的本机目录。发布、发消息或操作外部系统时，请在要求中明确目标与范围。",
-    }),
-    error,
-    el("div", { class: "form-actions" }, [submit]),
-  ]);
-  const detail = el("div"),
-    history = el("div", { class: "panel" });
-  root.append(el("div", { class: "panel" }, [form]), detail, history);
-  form.onsubmit = async (event) => {
-    event.preventDefault();
-    submit.disabled = true;
-    error.textContent = "";
-    try {
-      const response = await api("/api/actions", {
-        op: boot.harness?.embedded_workflow ? "workflow" : "workflow_request",
-        data: {
-          request_id: crypto.randomUUID(),
-          question: question.value,
-          skill_id: skill.value || null,
-          project_id: project.value || null,
-        },
-      });
-      if (!boot.harness?.embedded_workflow) {
-        let prepared;
-        for (;;) {
-          prepared = await api("/api/jobs/" + response.job_id);
-          if (["succeeded", "failed"].includes(prepared.status)) break;
-          await new Promise((r) => setTimeout(r, 900));
-        }
-        if (prepared.status === "failed") throw new Error(prepared.error);
-        detail.replaceChildren(el("div", { class: "panel" }, [
-          el("h3", { text: "到 " + boot.harness.name + " 继续" }),
-          el("p", { text: prepared.result.note }),
-          el("textarea", { readOnly: true, value: prepared.result.text, "aria-label": "工作流接续请求" }),
-          btn("复制接续请求", () => copyRequest(prepared.result.text)),
-        ]));
-        return;
-      }
-      currentWorkflow = response.job_id;
-      workflowSkill = skill.value || null;
-      quiet(showWorkflow(detail, currentWorkflow, generation));
-      toast("工作流已提交，可以在页面处理宿主请求。");
-    } catch (e) {
-      error.textContent = e.message;
-    } finally {
-      submit.disabled = false;
-    }
-  };
-  const jobs = (await api("/api/jobs")).jobs.filter((j) => j.op === "workflow");
-  history.append(el("h3", { text: "最近的工作流" }));
-  for (const job of jobs)
-    history.append(
-      el("div", { class: "log-row" }, [
-        el("div", { class: "entry-top" }, [
-          el("span", { text: job.human_request ? job.human_request.slice(0,70) : job.created_at.replace("T", " ") }),
-          btn(
-            {
-              succeeded: "查看结果",
-              failed: "查看未完成结果",
-              interrupted: "核验中断结果",
-              running: "查看执行中",
-              queued: "查看排队任务",
-            }[job.status] || "查看",
-            () => {
-              currentWorkflow = job.id;
-              quiet(showWorkflow(detail, job.id, generation));
-            },
-          ),
-        ]),
-      ]),
-    );
-  if (!jobs.length)
-    history.append(
-      el("p", {
-        class: "subtle",
-        text: "第一次执行后，过程、授权请求和生成文件会保留在这里。",
-      }),
-    );
-  if (currentWorkflow) quiet(showWorkflow(detail, currentWorkflow, generation));
-}
-
 async function downloadArtifact(job, name) {
   const url =
     "/api/artifacts/" +
@@ -1259,6 +1216,29 @@ async function downloadArtifact(job, name) {
 }
 
 async function showWorkflow(root, jid, generation) {
+  let existing = await api("/api/jobs/" + jid);
+  if (existing.op === "workflow_request") {
+    while (
+      ["queued", "running"].includes(existing.status) &&
+      generation === viewVersion
+    ) {
+      loading(root, existing.phase || "正在准备宿主接续材料…");
+      await new Promise((r) => setTimeout(r, 700));
+      existing = await api("/api/jobs/" + jid);
+    }
+    if (generation !== viewVersion) return;
+    root.replaceChildren(
+      el("section", { class: "panel" }, [
+        el("h3", { text: "已准备宿主交接" }),
+        el("p", {
+          text: existing.result?.note || existing.error || "正在准备材料",
+        }),
+        el("textarea", { readOnly: true, value: existing.result?.text || "" }),
+        btn("复制接续请求", () => copyRequest(existing.result?.text || "")),
+      ]),
+    );
+    return;
+  }
   const nonce = ++workflowPoll,
     status = el("p", { class: "subtle" }),
     answer = el("div", { class: "ai-answer" }),
@@ -1471,91 +1451,45 @@ function approvalCard(job, approval) {
   card.append(error);
   return card;
 }
-async function renderRuns(root, generation) {
-  const { jobs } = await api("/api/jobs");
-  const growthState = (await run("growth_status", {})).value;
-  if (generation !== viewVersion) return;
-  root.replaceChildren(
-    heading(
-      "每一步，都看得见。",
-      "执行状态与写后验证会保留在本机，业务内容仍以 AI 表格和 GBrain 为准。",
-      [btn("刷新记录", () => navigate("runs"))],
-    ),
-  );
-  const health = el("div", { class: "panel" }, [el("h3", { text: "自动生长与采集覆盖" })]);
-  for (const item of Object.values(growthState.channels || {})) {
-    health.append(el("p", { class: item.status === "partial" ? "form-error" : "subtle",
-      text: item.label + " · " + (item.status === "complete" ? "完整" : "部分覆盖") +
-        (item.count == null ? "" : " · 扫描 " + item.count + " 条") +
-        (item.consecutive_empty ? " · 连续 " + item.consecutive_empty + " 轮为空（空列表不等于故障）" : "") +
-        (item.error ? " · " + item.error : "") }));
-  }
-  for (const item of growthState.runs || []) {
-    const result = item.result || {};
-    health.append(el("article", { class: "log-row" }, [
-      el("strong", { text: (item.role === "growth" ? "自动生长" : "阶段汇报") + " · " + item.at.replace("T", " ") }),
-      el("p", { class: "subtle", text: item.status === "complete" ? (result.status === "partial" ? "已执行，部分来源待补采" : "已完成") : item.status === "failed" ? "失败，保留原轮次恢复" : item.status === "waiting_harness" ? "等待宿主接续" : "处理中" }),
-      el("p", { text: result.execution ? result.summary : typeof result.actions === "number" ? "历史轮次已核验动作 " + result.actions + " 项；未记录分项统计。" : result.summary || item.error || "执行结果将在回读后记录" }),
-    ]));
-  }
-  if (!Object.keys(growthState.channels || {}).length) health.append(el("p", { class: "subtle", text: "新版来源覆盖统计将在下一轮生长完成后出现。" }));
-  root.append(health);
-  const panel = el("div", { class: "panel" });
-  for (const job of jobs) {
-    const label = {
-      queued: "排队中",
-      running: "执行中",
-      succeeded: "已完成",
-      failed: "失败",
-      interrupted: "需核验",
-      waiting_harness: "等待宿主",
-    }[job.status];
-    const details = el("details", {}, [el("summary", { text: "查看结果" })]);
-    details.ontoggle = async () => {
-      if (!details.open || details.childElementCount > 1) return;
-      try {
-        const full = await api("/api/jobs/" + job.id);
-        details.append(
-          el("pre", {
-            text: JSON.stringify(full.result || { error: full.error }, null, 2),
-          }),
-        );
-      } catch (e) {
-        details.append(el("p", { text: e.message }));
-      }
-    };
+function schedulePanel() {
+  const state = boot.scheduler || {};
+  const panel = el("div", { class: "panel" }, [
+    el("h3", { text: "自动生长运行状态" }),
+    el("p", { text: state.message || "定时任务待核验。" }),
+    el("p", {
+      class: "subtle",
+      text: "核验时间：" + (state.checked_at || "尚未核验"),
+    }),
+  ]);
+  if (boot.configured)
     panel.append(
-      el("article", { class: "log-row" }, [
-        el("div", { class: "entry-top" }, [
-          el("strong", { text: jobNames[job.op] || job.op }),
-          badge(
-            label,
-            ["failed", "interrupted"].includes(job.status) ? "error" : "",
+      btn(
+        state.local_paused ? "解除本机暂停" : "立即暂停自动生长",
+        (event) =>
+          quiet(
+            withButton(event.currentTarget, async (progress) => {
+              const r = await run(
+                "schedule_pause",
+                { paused: !state.local_paused },
+                progress,
+              );
+              toast(r.value.message);
+              boot = await api("/api/bootstrap");
+              await navigate(view);
+            }),
           ),
-        ]),
-        el("p", { class: "subtle", text: job.created_at.replace("T", " ") }),
-        job.error ? el("p", { class: "form-error", text: job.error }) : null,
-        job.status === "waiting_harness" ? el("div", { class: "actions" }, [
-          btn("复制接续请求", () => copyRequest("请处理年轮等待中的分析请求。配置：" + boot.config_path + "；请求编号：" + job.handoff.id + "。读取年轮 references/host-contract.md，使用 host.py pending --id 读取完整请求，分析后通过 answer 返回；然后继续原任务。保持原来的权限、来源和操作开关。")),
-          btn("宿主已回复，继续", (event) => quiet(withButton(event.currentTarget, async (progress) => {
-            const r = await run("resume", { job_id: job.id }, progress);
-            toast(r.value.status === "succeeded" ? "原任务已完成" : r.value.error || "仍等待宿主接续");
-            await navigate("runs");
-          }))),
-        ]) : null,
-        details,
-      ]),
-    );
-  }
-  if (!jobs.length)
-    panel.append(
-      empty(
-        "还没有执行记录",
-        "操作项目、检索记忆或运行任务后，会在这里留下回执。",
+        state.local_paused ? "" : "primary",
       ),
     );
-  root.append(panel);
+  panel.append(
+    el("p", {
+      class: "form-help",
+      text: "暂停独立生效，无需保存下面的配置。它停止启动新的定时轮次；原轮次及已提交结果会保留。解除本机暂停不会自动启用已暂停的宿主任务。",
+    }),
+  );
+  return panel;
 }
+
 function setupStep(number, title, description, children) {
   return el("section", { class: "panel setup-step" }, [
     el("div", { class: "step-label", text: String(number).padStart(2, "0") }),
@@ -1573,6 +1507,10 @@ function renderSetup(root) {
       "安装一次，带上自己的钉钉、AI 表格和记忆库。所有设置都在这里完成。",
     ),
   );
+  const operations = el("div", { class: "operations-grid" });
+  root.append(operations);
+  quiet(renderOperationStatus(operations));
+  root.append(cdbiPanel());
   const envStatus = el("p", { class: "subtle" });
   const profile = select([["", "先读取已登录账号"]]);
   const login = btn("登录钉钉", (event) =>
@@ -1603,7 +1541,7 @@ function renderSetup(root) {
     setupStep(
       1,
       "安装环境与钉钉授权",
-      "依赖只安装到你的个人目录。已有的 DWS 和 GBrain 会先检测并复用。",
+      "依赖只安装到你的个人目录。已有的钉钉连接工具和记忆引擎会先检测并复用。",
       [
         el("div", { class: "actions" }, [
           btn("检测环境", (event) =>
@@ -1623,8 +1561,12 @@ function renderSetup(root) {
           btn("安装 / 修复运行环境", (event) =>
             quiet(
               withButton(event.currentTarget, async (progress) => {
-                await run("setup_dependencies", {}, progress);
-                envStatus.textContent = "运行环境已完成安装与版本核验。";
+                const installed = await run("setup_dependencies", {}, progress);
+                envStatus.textContent =
+                  "DWS 与记忆引擎已完成安装与版本核验。" +
+                  (installed.value?.cdbi?.available === false
+                    ? " CDBI：" + installed.value.cdbi.message
+                    : " CDBI 已就绪。");
               }),
             ),
           ),
@@ -1853,12 +1795,21 @@ function renderSetup(root) {
       ],
     ),
   );
-  const brainMode = select([
-    ["new", "创建年轮专用 GBrain（推荐）"],
-    ["existing", "连接已有 GBrain"],
-  ], boot.memory_connected ? 'existing' : 'new');
-  const brainDir = el("input", { value: boot.memory?.directory || "", placeholder: "已有 GBrain 的工作目录" });
-  const brainHome = el("input", { value: boot.memory?.home || "", placeholder: "GBrain 配置目录（可选）" });
+  const brainMode = select(
+    [
+      ["new", "创建独立记忆空间（推荐）"],
+      ["existing", "连接已有独立记忆空间"],
+    ],
+    boot.memory_connected ? "existing" : "new",
+  );
+  const brainDir = el("input", {
+    value: boot.memory?.directory || "",
+    placeholder: "已有独立记忆空间的工作目录",
+  });
+  const brainHome = el("input", {
+    value: boot.memory?.home || "",
+    placeholder: "独立记忆空间配置目录（可选）",
+  });
   const existing = el("div", { hidden: !boot.memory_connected }, [
     formField("工作目录", brainDir),
     formField("配置目录", brainHome),
@@ -1867,16 +1818,23 @@ function renderSetup(root) {
   const brainStatus = el("p", {
     class: "subtle",
     text: boot.memory_connected
-      ? "当前已有 GBrain 连接；重新接入前请确认所选目录。"
+      ? "已连接独立记忆空间；重新接入前请确认所选目录。"
       : "",
   });
   root.append(
     setupStep(
       3,
-      "接入你的 GBrain",
-      "没有安装也可以继续。年轮会安装所需程序并创建个人记忆库，不需要额外的模型 API Key。",
+      "接入你的独立记忆空间",
+      "年轮会准备所需的记忆引擎，并创建属于你的独立记忆空间，不需要额外的模型 API Key。",
       [
         formField("记忆库", brainMode),
+        el("details", {}, [
+          el("summary", { text: "已有记忆空间的兼容说明" }),
+          el("p", {
+            class: "subtle",
+            text: "当前记忆引擎为 GBrain。连接已有空间需选择兼容的 GBrain 工作目录；其他记忆工具的目录目前不能直接接入。创建新空间时，年轮会准备所需依赖。",
+          }),
+        ]),
         existing,
         btn(
           "安装 / 连接并验证",
@@ -1893,7 +1851,7 @@ function renderSetup(root) {
                   progress,
                 );
                 brainStatus.textContent =
-                  "✓ GBrain 已完成初始化、写入、回读与检索验证。";
+                  "✓ 独立记忆空间已完成初始化、写入、回读与检索验证。";
                 boot = await api("/api/bootstrap");
               }),
             ),
@@ -1903,45 +1861,113 @@ function renderSetup(root) {
       ],
     ),
   );
-  const hostChoice = select(Object.entries(boot.hosts).map(([key, meta]) => [key, meta.name]), boot.harness.provider);
+  const hostChoice = select(
+    Object.entries(boot.hosts).map(([key, meta]) => [key, meta.name]),
+    boot.harness.provider,
+  );
   const hostMode = select([]);
-  const binaryPath = el("input", { placeholder: "CLI 路径留空自动识别", value: boot.harness.binary || "" });
+  const binaryPath = el("input", {
+    placeholder: "CLI 路径留空自动识别",
+    value: boot.harness.binary || "",
+  });
   const harnessStatus = el("p", { class: "subtle" });
   const hostHelp = el("p", { class: "aside-note" });
   function updateHostModes() {
     const meta = boot.hosts[hostChoice.value];
-    hostMode.replaceChildren(...meta.modes.map((mode) => el("option", { value: mode, text: mode === "cli" ? "由年轮调用已登录的 CLI" : "在宿主中接续" })));
-    if (hostChoice.value === boot.harness.provider) hostMode.value = boot.harness.mode;
+    hostMode.replaceChildren(
+      ...meta.modes.map((mode) =>
+        el("option", {
+          value: mode,
+          text: mode === "cli" ? "由年轮调用已登录的 CLI" : "在宿主中接续",
+        }),
+      ),
+    );
+    if (hostChoice.value === boot.harness.provider)
+      hostMode.value = boot.harness.mode;
     binaryPath.hidden = hostMode.value !== "cli";
     hostHelp.textContent = meta.embedded_workflow
       ? "可在页面运行分析与工具工作流；需要授权时展示宿主请求。"
       : "工具工作流在宿主原生界面执行。接续模式会保留分析请求，返回结果后由年轮继续校验与写入。";
   }
-  hostChoice.onchange = () => { binaryPath.value = ""; updateHostModes(); };
-  hostMode.onchange = () => { binaryPath.hidden = hostMode.value !== "cli"; };
+  hostChoice.onchange = () => {
+    binaryPath.value = "";
+    updateHostModes();
+  };
+  hostMode.onchange = () => {
+    binaryPath.hidden = hostMode.value !== "cli";
+  };
   updateHostModes();
-  const selectedHost = () => ({ provider: hostChoice.value, mode: hostMode.value, binary: binaryPath.value || null });
-  root.append(setupStep(4, "选择 AI 宿主", "年轮管理项目流程，宿主负责理解与执行。使用宿主已有登录，不保存模型账号或密钥。切换宿主不会更换数据，也不会扩大采集范围。", [
-    formField("使用哪个应用", hostChoice), formField("如何协作", hostMode), binaryPath, hostHelp,
-    el("div", { class: "actions" }, [
-      btn("检查连接", (event) => quiet(withButton(event.currentTarget, async (progress) => {
-        const r = await run("harness_status", selectedHost(), progress); harnessStatus.textContent = r.value.message;
-      }))),
-      btn("使用这个宿主", (event) => quiet(withButton(event.currentTarget, async (progress) => {
-        const r = await run("harness_connect", selectedHost(), progress); harnessStatus.textContent = r.value.message;
-        boot = await api("/api/bootstrap"); toast("已保存宿主；定时负责人保持原设置");
-      })), "primary"),
-      btn("准备宿主接入说明", (event) => quiet(withButton(event.currentTarget, async (progress) => {
-        const r = await run("host_export", { provider: hostChoice.value }, progress);
-        dialog("在 " + boot.hosts[hostChoice.value].name + " 接入", el("div", {}, [
-          el("p", { text: "接入材料已准备好。到该应用中发送以下请求；生成文件不代表宿主已启用。" }),
-          el("textarea", { readOnly: true, value: r.value.text }),
-          btn("复制接入请求", () => copyRequest(r.value.text)),
-        ]));
-      }))),
-    ]), harnessStatus,
-  ]));
-  const timerHost = select(Object.entries(boot.hosts).map(([key, meta]) => [key, meta.name]), boot.scheduler.owner || "codex");
+  const selectedHost = () => ({
+    provider: hostChoice.value,
+    mode: hostMode.value,
+    binary: binaryPath.value || null,
+  });
+  root.append(
+    setupStep(
+      4,
+      "选择 AI 宿主",
+      "年轮管理项目流程，宿主负责理解与执行。使用宿主已有登录，不保存模型账号或密钥。切换宿主不会更换数据，也不会扩大采集范围。",
+      [
+        formField("使用哪个应用", hostChoice),
+        formField("如何协作", hostMode),
+        binaryPath,
+        hostHelp,
+        el("div", { class: "actions" }, [
+          btn("检查连接", (event) =>
+            quiet(
+              withButton(event.currentTarget, async (progress) => {
+                const r = await run("harness_status", selectedHost(), progress);
+                harnessStatus.textContent = r.value.message;
+              }),
+            ),
+          ),
+          btn(
+            "使用这个宿主",
+            (event) =>
+              quiet(
+                withButton(event.currentTarget, async (progress) => {
+                  const r = await run(
+                    "harness_connect",
+                    selectedHost(),
+                    progress,
+                  );
+                  harnessStatus.textContent = r.value.message;
+                  boot = await api("/api/bootstrap");
+                  toast("已保存宿主；定时负责人保持原设置");
+                }),
+              ),
+            "primary",
+          ),
+          btn("准备宿主接入说明", (event) =>
+            quiet(
+              withButton(event.currentTarget, async (progress) => {
+                const r = await run(
+                  "host_export",
+                  { provider: hostChoice.value },
+                  progress,
+                );
+                dialog(
+                  "在 " + boot.hosts[hostChoice.value].name + " 接入",
+                  el("div", {}, [
+                    el("p", {
+                      text: "接入材料已准备好。到该应用中发送以下请求；生成文件不代表宿主已启用。",
+                    }),
+                    el("textarea", { readOnly: true, value: r.value.text }),
+                    btn("复制接入请求", () => copyRequest(r.value.text)),
+                  ]),
+                );
+              }),
+            ),
+          ),
+        ]),
+        harnessStatus,
+      ],
+    ),
+  );
+  const timerHost = select(
+    Object.entries(boot.hosts).map(([key, meta]) => [key, meta.name]),
+    boot.scheduler.owner || "codex",
+  );
   const preferences = boot.preferences || {},
     schedule = preferences.schedule || {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -1997,6 +2023,8 @@ function renderSetup(root) {
     lark_minutes: "飞书：我拥有的妙记（需已安装并登录飞书 CLI）",
     mentions: "群聊中 @我",
     direct: "我的单聊",
+    groups: "我选择的群聊（不限于 @我）",
+    mail: "我选择的邮箱",
     codex: "本机 Codex 人类会话",
     inbox: "其他宿主主动交付的人类会话",
     portal: "工作台已完成工作流的人类请求",
@@ -2015,6 +2043,8 @@ function renderSetup(root) {
     gbrain: "写入项目记忆",
     digest: "向本人钉钉推送摘要",
     reports: "生成阶段汇报",
+    milestone_planning: "基于项目资料自动规划里程碑",
+    continuous_reports: "每轮生长后自动更新阶段汇报",
   })) {
     const input = el("input", {
       type: "checkbox",
@@ -2027,15 +2057,64 @@ function renderSetup(root) {
     value: preferences.report_folder || "",
     placeholder: "粘贴钉钉文件夹链接，或点击下面创建",
   });
-  const lookback = select([[24,"最近 24 小时"],[48,"最近 48 小时（推荐）"],[72,"最近 72 小时"],[168,"最近 7 天"]], preferences.minutes_lookback_hours || 48);
-  const notifyMode = select([["every_run","每轮发送摘要"],["changes","仅有实际动作、新待核事项或覆盖变化时发送"]], preferences.notification_mode || "every_run");
+  let selectedGroups = [...(preferences.groups || [])];
+  const groupList = el("div", { class: "actions" });
+  const paintGroups = () =>
+    groupList.replaceChildren(
+      ...selectedGroups.map((group) =>
+        btn(group.name + " ×", () => {
+          selectedGroups = selectedGroups.filter((x) => x.id !== group.id);
+          paintGroups();
+        }),
+      ),
+    );
+  paintGroups();
+  const groupSearch = groupPicker((group) => {
+    if (!selectedGroups.some((x) => x.id === group.id))
+      selectedGroups.push(group);
+    paintGroups();
+  });
+  const mailbox = select(
+    [
+      ["", "请选择本人邮箱"],
+      ...(preferences.mailbox
+        ? [[preferences.mailbox, preferences.mailbox]]
+        : []),
+    ],
+    preferences.mailbox || "",
+  );
+  const loadMail = btn("读取我的邮箱", (e) =>
+    quiet(
+      withButton(e.currentTarget, async () => {
+        const emails = (await run("mailboxes")).value.emails,
+          old = mailbox.value;
+        mailbox.replaceChildren(
+          el("option", { value: "", text: "请选择本人邮箱" }),
+          ...emails.map((email) => el("option", { value: email, text: email })),
+        );
+        mailbox.value = emails.includes(old) ? old : "";
+      }),
+    ),
+  );
+  const lookback = select(
+    [
+      [24, "最近 24 小时"],
+      [48, "最近 48 小时（推荐）"],
+      [72, "最近 72 小时"],
+      [168, "最近 7 天"],
+    ],
+    preferences.minutes_lookback_hours || 48,
+  );
+  const notifyMode = select(
+    [
+      ["every_run", "每轮发送摘要"],
+      ["changes", "仅有实际动作、新待核事项或覆盖变化时发送"],
+    ],
+    preferences.notification_mode || "every_run",
+  );
   const scheduleState = el("p", {
     class: boot.scheduler.active ? "success" : "subtle",
-    text: boot.scheduler.active
-      ? "当前宿主调度已启用。"
-      : boot.scheduler.registered
-        ? "控制器已接入，自动生长已暂停。"
-        : "当前尚未完成宿主调度验证。",
+    text: boot.scheduler.message || "当前尚未完成宿主调度验证。",
   });
   root.append(
     setupStep(
@@ -2049,7 +2128,10 @@ function renderSetup(root) {
         ]),
         formField("运行时区", timezone),
         formField("听记与妙记滚动补采范围", lookback),
-        el("p", { class: "form-help", text: "每轮回看近期会议，补采夜间会议和晚生成的内容。来源编号与内容版本去重，不需要在早上另跑一次昨天。失败渠道独立保留窗口，空列表不会自动认定故障。" }),
+        el("p", {
+          class: "form-help",
+          text: "每轮回看近期会议，补采夜间会议和晚生成的内容。来源编号与内容版本去重，不需要在早上另跑一次昨天。失败渠道独立保留窗口，空列表不会自动认定故障。",
+        }),
         formField("本人钉钉摘要", notifyMode),
         formField("每日生长时间", hours),
         el("div", { class: "two-cols" }, [
@@ -2058,6 +2140,15 @@ function renderSetup(root) {
         ]),
         el("h3", { text: "信息来源" }),
         sourceBox,
+        formField(
+          "采集群聊",
+          el("div", {}, [groupSearch, groupList]),
+          "只有这里选定的群会进入群聊采集。",
+        ),
+        formField(
+          "采集邮箱",
+          el("div", { class: "actions" }, [mailbox, loadMail]),
+        ),
         el("h3", { text: "自动操作" }),
         switchBox,
         formField("阶段汇报文件夹", folder),
@@ -2097,6 +2188,8 @@ function renderSetup(root) {
                       },
                       minutes_lookback_hours: Number(lookback.value),
                       notification_mode: notifyMode.value,
+                      groups: selectedGroups,
+                      mailbox: mailbox.value,
                       sources: Object.fromEntries(
                         Object.entries(sources).map(([k, input]) => [
                           k,
@@ -2119,6 +2212,7 @@ function renderSetup(root) {
                       ? "设置已保存；请完成下方首次定时接入。"
                       : "设置已保存，自动生长已暂停。";
                   boot = await api("/api/bootstrap");
+                  scheduleState.textContent = boot.scheduler.message;
                 }),
               ),
             "primary",
@@ -2128,9 +2222,11 @@ function renderSetup(root) {
               withButton(event.currentTarget, async (progress) => {
                 const r = await run("setup_doctor", {}, progress);
                 scheduleState.textContent = r.value.ready
-                  ? "✓ 表格、GBrain 和宿主调度全部验证通过。"
+                  ? "✓ 接入验证通过。" + (r.value.scheduler?.message || "")
                   : "接入未全部完成：" +
-                    (!r.value.memory?.verified ? "GBrain 待读写验证；" : "") +
+                    (!r.value.memory?.verified
+                      ? "独立记忆空间待读写验证；"
+                      : "") +
                     (!r.value.scheduler?.active ? "宿主定时任务待同步。" : "");
               }),
             ),
@@ -2139,18 +2235,24 @@ function renderSetup(root) {
         scheduleState,
         el("p", {
           class: "aside-note",
-          text: "定时唤醒与 AI 推理可以由不同宿主负责，每个安装只保留一个定时负责人。当前负责人：" + (boot.scheduler.owner || (boot.scheduler.registered ? "codex" : "尚未接入")) + "。Codex 支持原生核验；其他宿主需在其应用内创建并核验周期任务。睡眠后最多补跑最近一天内各一轮。",
+          text:
+            "定时唤醒与 AI 推理可以由不同宿主负责，每个安装只保留一个定时负责人。当前负责人：" +
+            (boot.scheduler.owner ||
+              (boot.scheduler.registered ? "codex" : "尚未接入")) +
+            "。Codex 支持原生核验；其他宿主需在其应用内创建并核验周期任务。睡眠后最多补跑最近一天内各一轮。",
         }),
         el("div", { class: "actions" }, [
           formField("定时接入的目标宿主（仅生成说明）", timerHost),
           btn("复制定时接入请求", (event) =>
             quiet(
               withButton(event.currentTarget, async (progress) => {
-                const r = await run("scheduler_request", { provider: timerHost.value }, progress);
-                await navigator.clipboard.writeText(r.value.text);
-                toast(
-                  "已复制。到目标宿主完成原生接入，并核验实际运行状态。",
+                const r = await run(
+                  "scheduler_request",
+                  { provider: timerHost.value },
+                  progress,
                 );
+                await navigator.clipboard.writeText(r.value.text);
+                toast("已复制。到目标宿主完成原生接入，并核验实际运行状态。");
               }),
             ),
           ),
@@ -2190,23 +2292,35 @@ function showLaunchHelp() {
       }),
       el("ol", {}, [
         el("li", { text: "回到解压后的「年轮安装版」文件夹。" }),
-        el("li", { text: "Mac 双击「打开年轮.command」；Windows 双击「打开年轮.cmd」。" }),
-        el("li", { text: "首次使用请先双击对应的「安装年轮」文件，按向导完成接入。" }),
+        el("li", {
+          text: "Mac 双击「打开年轮.command」；Windows 双击「打开年轮.cmd」。",
+        }),
+        el("li", {
+          text: "首次使用请先双击对应的「安装年轮」文件，按向导完成接入。",
+        }),
       ]),
       el("h2", { text: "也可以让 AI 宿主帮你打开" }),
       prompt,
-      btn("复制打开请求", async () => {
-        try {
-          await navigator.clipboard.writeText(prompt.value);
-          status.textContent = "已复制。回到你的 AI 应用粘贴发送即可。";
-        } catch {
-          prompt.focus();
-          prompt.select();
-          status.textContent = "请复制已选中的文字，回到你的 AI 应用粘贴发送。";
-        }
-      }, "primary"),
+      btn(
+        "复制打开请求",
+        async () => {
+          try {
+            await navigator.clipboard.writeText(prompt.value);
+            status.textContent = "已复制。回到你的 AI 应用粘贴发送即可。";
+          } catch {
+            prompt.focus();
+            prompt.select();
+            status.textContent =
+              "请复制已选中的文字，回到你的 AI 应用粘贴发送。";
+          }
+        },
+        "primary",
+      ),
       status,
-      el("p", { class: "subtle", text: "项目仍在你的 AI 表格里，记忆仍在你的 GBrain 里。" }),
+      el("p", {
+        class: "subtle",
+        text: "项目仍在你的 AI 表格里，记忆仍在你的独立记忆空间里。",
+      }),
     ]),
   );
 }
@@ -2214,6 +2328,105 @@ if (localFile) showLaunchHelp();
 else initialize();
 
 async function copyRequest(text) {
-  try { await navigator.clipboard.writeText(text); toast("已复制，到所选宿主粘贴发送。"); }
-  catch { dialog("复制以下请求", el("textarea", { readOnly: true, value: text, "aria-label": "接续请求" })); }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制，到所选宿主粘贴发送。");
+  } catch {
+    dialog(
+      "复制以下请求",
+      el("textarea", { readOnly: true, value: text, "aria-label": "接续请求" }),
+    );
+  }
+}
+
+async function renderOperationStatus(root) {
+  root.append(schedulePanel());
+  if (!boot.configured) return;
+  const recoveryState = (await run("recovery_status")).value;
+  if (!recoveryState.active)
+    root.append(
+      el("div", { class: "panel" }, [
+        el("h3", { text: "待完成的原轮次" }),
+        el("p", { text: "当前没有未完成的生长轮次。" }),
+        btn("查看执行历史", () => navigate("runs")),
+      ]),
+    );
+  if (recoveryState.active) {
+    const panel = el("div", { class: "panel" }, [
+      el("h3", { text: "原轮次有待完成步骤" }),
+      el("p", {
+        text:
+          "已核验 " +
+          recoveryState.verified_count +
+          " 项动作。核验原结果只回读，不会重新提交；核验后可继续剩余步骤。",
+      }),
+    ]);
+    const names = {
+      create_record: "项目记录",
+      update_status: "状态更新",
+      create_milestone: "里程碑",
+      create_todo: "待办创建",
+      complete_todo: "待办关闭",
+      brain: "记忆",
+      digest: "摘要",
+    };
+    for (const item of recoveryState.items)
+      panel.append(
+        el("p", {
+          text:
+            { verified: "已核验", unknown: "结果待核验", pending: "尚未完成" }[
+              item.status
+            ] +
+            " · " +
+            (names[item.op] || item.op) +
+            " · " +
+            item.title,
+        }),
+      );
+    const actions = el("div", { class: "actions" });
+    if (recoveryState.needs_reconciliation)
+      actions.append(
+        btn(
+          "核验原结果",
+          (event) =>
+            quiet(
+              withButton(event.currentTarget, async (progress) => {
+                const r = await run(
+                  "reconcile_growth",
+                  { run_id: recoveryState.run_id },
+                  progress,
+                );
+                toast(r.value.message);
+                await navigate("setup");
+              }),
+            ),
+          "primary",
+        ),
+      );
+    else
+      actions.append(
+        btn(
+          "继续原轮次剩余步骤",
+          (event) =>
+            quiet(
+              withButton(event.currentTarget, async (progress) => {
+                await run(
+                  "resume_growth",
+                  { run_id: recoveryState.run_id },
+                  progress,
+                );
+                toast("原轮次已完成；定时任务开关保持原状态。");
+                await navigate("setup");
+              }),
+            ),
+          "primary",
+        ),
+      );
+    panel.append(actions);
+    root.append(panel);
+  }
+}
+
+async function renderTodos(root, generation) {
+  return renderTodos23(root, generation);
 }

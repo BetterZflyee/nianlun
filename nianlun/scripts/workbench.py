@@ -48,23 +48,33 @@ class Workbench:
             for row in state[role]:
                 row['revision'] = revision(row)
                 row.pop('raw_cells', None)
-        state.update(identity=identity, fields={r:t['fields'] for r,t in config['tables'].items()})
+        state.update(identity=identity)
         return state
 
-    def todos(self):
+    def todos(self, completed=False):
         config, gw, _ = self.connection()
-        rows = g.complete(gw.call(['todo','+get-my-tasks','--all','--status','false']), 'todos')
+        rows = g.complete(gw.call(['todo','+get-my-tasks','--all','--status','true' if completed else 'false']), 'todos')
         path = g.root(config)/'links.json'
         links = n.load(path) if path.exists() else {}
         # Return only fields needed by the page, never task API credentials or attachment tokens.
+        projects=n.normalized(config,'projects',gw.table().records(config['base_id'],config['tables']['projects']['id']))
+        def associate(row):
+            tid=str(row['taskId'])
+            if links.get(tid):return links[tid]
+            match=re.match(r'^\s*[\[【（(]([^\]】）)]+)[\]】）)]',row.get('subject',''))
+            if not match:return None
+            name=re.sub(r'\s+','',match[1]).casefold()
+            matches=[p for p in projects if re.sub(r'\s+','',p['title']).casefold()==name]
+            if len(matches)!=1:return None
+            return {'project_id':matches[0]['id'],'record_ids':[],'inferred_from':'title_prefix'}
         return {'complete':True, 'todos':[{
             'id':str(row['taskId']), 'title':row['subject'], 'due':row.get('dueTime'),
-            'priority':row.get('priority'), 'link':links.get(str(row['taskId']))} for row in rows]}
+            'priority':row.get('priority'), 'completed':completed, 'link':associate(row)} for row in rows]}
 
     def cells(self, config, state, role, values, creating):
         if role not in n.ROLES or not isinstance(values, dict):
             raise n.Error('未知的表单类型')
-        fields = config['tables'][role]['fields']
+        fields = state.get('fields',{}).get(role,config['tables'][role]['fields'])
         allowed = set(fields) - {'number','updated','owner','attachments','report'}
         if not values or set(values)-allowed:
             raise n.Error('包含不支持的字段')
@@ -97,9 +107,9 @@ class Workbench:
             result[field['fieldId']] = value
         return result
 
-    def mutate(self, data):
+    def mutate(self, data, connection=None):
         key = request_id(data.get('request_id'))
-        config, gw, identity = self.connection()
+        config, gw, identity = connection or self.connection()
         # Use the same lock as growth: manual operations never race an automatic commit.
         with g.locked(config):
             path = g.root(config)/'workbench'/('request-'+key+'.json')
@@ -121,6 +131,19 @@ class Workbench:
                 receipt.update(status='stopped',error=str(exc))
                 n.save(path,receipt)
                 raise
+
+    def bulk(self,data,progress=lambda message:None):
+        key=request_id(data.get('request_id'));items=data.get('items')
+        if not isinstance(items,list) or not 1<=len(items)<=100:raise n.Error('每批选择 1 至 100 项')
+        if any(not isinstance(item,dict) or item.get('op') not in ('update','complete_todo') for item in items):
+            raise n.Error('批量处理只支持更新记录或完成待办')
+        connection=self.connection();results=[]
+        for index,item in enumerate(items):
+            progress('正在处理第 '+str(index+1)+' / '+str(len(items))+' 项')
+            request={**item,'request_id':str(uuid.uuid5(uuid.UUID(key),str(index)))}
+            try:results.append({'ok':True,'result':self.mutate(request,connection)})
+            except Exception as exc:results.append({'ok':False,'index':index,'error':str(exc)})
+        return {'items':results,'succeeded':sum(x['ok'] for x in results),'failed':sum(not x['ok'] for x in results)}
 
     def table_step(self, config, gw, role, cells, rid, step_key, path, receipt):
         steps = receipt['steps']
@@ -152,7 +175,9 @@ class Workbench:
                 '--table-id',config['tables'][role]['id'],'--record-ids',rid]).get('records',[])
             if len(rows)!=1 or rows[0]['recordId']!=rid or not all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):
                 raise n.Error('写入后回读不一致，请核验结果')
-        result = {'record_id':rid,'role':role,'verified':True,'url':n.table_url(config,role)}
+        raw=next(r for r in rows if r['recordId']==rid)
+        public=n.normalized(config,role,[raw])[0];public['revision']=revision(public);public.pop('raw_cells',None)
+        result = {'record_id':rid,'role':role,'verified':True,'url':n.table_url(config,role),'row':public}
         step.update(status='verified',result=result); n.save(path,receipt)
         return result
 
@@ -161,7 +186,20 @@ class Workbench:
         if op in ('create','update'):
             role = data.get('role')
             if role not in n.ROLES: raise n.Error('不支持的子表')
-            state = n.fetch(config,gw.table())
+            values = data.get('values',{})
+            # A scalar edit needs only this record and its live schema. Do not reread four tables
+            # or rerun identity after saving merely to paint the same row in the browser.
+            scalar_update=op=='update' and not any(k.endswith('_ids') for k in values)
+            if scalar_update:
+                table=config['tables'][role]
+                actual={f['fieldId']:f for f in gw.table().fields(config['base_id'],table['id'])}
+                if any(not n.compatible_field(f,actual.get(f['fieldId'])) for f in table['fields'].values()):
+                    raise n.Error('表结构已变化，请重新绑定后再编辑')
+                raw=gw.call(['aitable','+record-query','--base-id',config['base_id'],'--table-id',table['id'],
+                    '--record-ids',text(data.get('record_id'),'记录编号',200,True)]).get('records',[])
+                state={r:[] for r in n.ROLES};state.update(complete=True,fields={role:{k:actual[f['fieldId']] for k,f in table['fields'].items()}})
+                state[role]=n.normalized(config,role,raw)
+            else:state = n.fetch(config,gw.table())
             if not state['complete']:raise n.Error('项目表读取不完整，暂不提交修改，请刷新后重试')
             values = data.get('values',{})
             rid = data.get('record_id') if op=='update' else None
@@ -181,6 +219,7 @@ class Workbench:
             if project_ids is None and rid:
                 project_ids = previous.get('project_ids',[])
             for relation,target in (('site_ids','sites'),('milestone_ids','milestones')):
+                if scalar_update:continue
                 for related in values.get(relation,previous.get(relation,[])):
                     row = next(r for r in state[target] if r['id']==related)
                     if not set(project_ids or []) & set(row.get('project_ids',[])):
@@ -242,7 +281,7 @@ class Workbench:
                 raise n.Error('此待办不在本人未完成列表，请刷新')
             linkpath=g.root(config)/'links.json'; links=n.load(linkpath) if linkpath.exists() else {}
             linked=links.get(tid,{})
-            state=n.fetch(config,gw.table())
+            state=n.fetch(config,gw.table()) if linked.get('record_ids') else {'records':[]}
             target=[]
             for rid in linked.get('record_ids',[]):
                 rows=[r for r in state['records'] if r['id']==rid and linked.get('project_id') in r.get('project_ids',[])]
@@ -269,6 +308,6 @@ class Workbench:
 
     def memory_query(self, query):
         import memory
-        config, _, _ = self.connection()
+        config=n.load(self.config_path)
         query=text(query,'检索词',1000,True)
         return memory.retrieve(config,query)

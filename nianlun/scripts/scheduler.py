@@ -10,6 +10,7 @@ import flow
 import growth as g
 import nianlun as n
 import host_bridge
+import run_control
 from file_lock import file_lock
 
 WEEKDAYS=('MO','TU','WE','TH','FR','SA','SU')
@@ -39,7 +40,7 @@ def tick(config_path, binary=None, now=None, owner='codex'):
     from setup import Setup, default_home
     config_path=Path(config_path).expanduser().resolve();config=n.load(config_path)
     state=Path(config['growth']['state_dir']);schedule=config['growth']['schedule']
-    if schedule.get('enabled',True) is False:return {'status':'paused','runs':[]}
+    if schedule.get('enabled',True) is False or run_control.paused(config):return {'status':'paused','notify':False,'runs':[]}
     receipt_path=state/'scheduler.json'
     if not receipt_path.exists():raise n.Error('控制器尚未接入，请在所选宿主完成定时接入')
     receipt=n.load(receipt_path)
@@ -48,7 +49,8 @@ def tick(config_path, binary=None, now=None, owner='codex'):
     if actual_owner=='codex':
         if receipt.get('mode')!='controller':raise n.Error('当前为旧版固定调度，请先通过 Codex 迁移到页面控制器')
         native=Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'automations'
-        verified=Setup(default_home(),config_path).verify_schedules([native/x/'automation.toml' for x in receipt['automation_ids']])
+        verified=Setup(default_home(),config_path).verify_schedules([native/x/'automation.toml' for x in receipt['automation_ids']],allow_paused=True)
+        if verified.get('native_active') is False:return {'status':'paused','notify':False,'runs':[]}
     else:
         if receipt.get('mode')!='host_managed':raise n.Error('外部宿主控制器尚未选择')
         verified=receipt
@@ -56,6 +58,7 @@ def tick(config_path, binary=None, now=None, owner='codex'):
     activated=datetime.fromisoformat(verified['activated_at'])
     # Separate lock serializes controllers. Individual business steps retain the existing growth lock.
     with file_lock(state/'controller.lock'):
+        if run_control.paused(config):return {'status':'paused','notify':False,'runs':[]}
         ledger_path=state/'controller.json';ledger=n.load(ledger_path) if ledger_path.exists() else {'slots':{}}
         slots=due_slots(schedule,now,activated);runs=[]
         # Finish a delegated slot before starting a newer slot of the same role.
@@ -64,9 +67,11 @@ def tick(config_path, binary=None, now=None, owner='codex'):
                 slots=[x for x in slots if x['role']!=old['role']]
                 slots.insert(0,{k:old[k] for k in ('role','at','key')})
         for slot in slots:
+            if run_control.paused(config):break
             previous=ledger['slots'].get(slot['key'],{})
             if previous.get('status') in ('complete','skipped'):continue
-            item={**slot,'status':'running','started_at':now.isoformat()}
+            item={**slot,'status':'running','started_at':now.isoformat(),'first_started_at':previous.get('first_started_at',previous.get('started_at',now.isoformat())),
+                  'attempts':previous.get('attempts',0)+1}
             ledger['slots'][slot['key']]=item;n.save(ledger_path,ledger)
             try:
                 if slot['role']=='growth':result=flow.grow(config_path,binary)
@@ -81,6 +86,10 @@ def tick(config_path, binary=None, now=None, owner='codex'):
                 item.update(status='waiting_harness',handoff=exc.request)
             except Exception as exc:
                 item.update(status='failed',error=str(exc)[:2000])
+            signature=n.digest({'status':item['status'],'error':item.get('error'),'handoff':item.get('handoff',{}).get('id')})
+            item['notification_key']=signature
+            item['notify']=(signature!=previous.get('notification_key') if item['status'] in ('failed','waiting_harness') else
+                            bool(item.get('result',{}).get('notify',False) or previous.get('status') in ('failed','waiting_harness')))
             item['finished_at']=datetime.now(timezone.utc).isoformat();n.save(ledger_path,ledger);runs.append(item)
         # Keep operational receipts, without making a second store of project data.
         ledger['slots']={k:v for k,v in ledger['slots'].items() if v['status'] not in ('complete','skipped') or datetime.fromisoformat(v['at'])>now-timedelta(days=60)}
@@ -88,7 +97,26 @@ def tick(config_path, binary=None, now=None, owner='codex'):
         if actual_owner!='codex':
             verified['last_observed_wake']=now.isoformat();n.save(receipt_path,verified)
         status='failed' if any(x['status']=='failed' for x in runs) else 'waiting_harness' if any(x['status']=='waiting_harness' for x in runs) else 'processed' if runs else 'idle'
-        return {'status':status,'notify':any(x.get('status') in ('failed','waiting_harness') or x.get('result',{}).get('notify',False) for x in runs),'runs':runs}
+        return {'status':status,'notify':any(x.get('notify',False) for x in runs),'runs':runs}
+
+
+def resume_growth(config_path, run_id, binary=None, progress=lambda value:None):
+    config=n.load(config_path);state=g.root(config)
+    with file_lock(state/'controller.lock'):
+        path=state/'controller.json';ledger=n.load(path) if path.exists() else {'slots':{}}
+        original=next((x for x in sorted(ledger['slots'].values(),key=lambda x:x['at'])
+                       if x['role']=='growth' and x['status'] in ('failed','waiting_harness','running')),None)
+        try:
+            result=flow.grow(config_path,binary,progress,expected_run_id=run_id)
+        except Exception as exc:
+            if original:
+                original.update(status='waiting_harness' if isinstance(exc,host_bridge.Waiting) else 'failed',error=str(exc))
+                n.save(path,ledger)
+            raise
+        if original:
+            original.update(status='complete',result=result,finished_at=n.stamp(config),recovered_manually=True)
+            original.pop('error',None);original.pop('handoff',None);n.save(path,ledger)
+        return result
 
 
 def main():

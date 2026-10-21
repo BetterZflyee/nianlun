@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import nianlun as n
 
-LABELS={'minutes':'钉钉听记','lark_minutes':'飞书妙记','mentions':'群聊 @我',
+LABELS={'minutes':'钉钉听记','lark_minutes':'飞书妙记','mentions':'群聊 @我','groups':'指定群聊','mail':'本人邮箱',
         'direct':'单聊','harness':'宿主人类会话','workbench':'工作台操作'}
 
 

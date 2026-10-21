@@ -25,7 +25,7 @@ class Session:
         self.process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.stderr,
             text=True,encoding='utf-8',bufsize=1,env=harness.runtime_env(),cwd=self.workspace)
         self.reader=threading.Thread(target=self.read,daemon=True);self.reader.start()
-        self.call('initialize',{'clientInfo':{'name':'nianlun','title':'年轮','version':'0.5.2'},
+        self.call('initialize',{'clientInfo':{'name':'nianlun','title':'年轮','version':'2.1.1'},
             'capabilities':{'experimentalApi':True}},timeout=45)
         self.send({'method':'initialized','params':{}})
         return self

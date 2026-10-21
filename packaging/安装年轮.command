@@ -10,7 +10,7 @@ case "$(uname -m)" in
   *) echo '此启动器支持 Apple Silicon 和 Intel Mac。'; exit 1 ;;
 esac
 trap 'echo "安装中断。已有表格和记忆未删除；检查网络后可重新打开安装器。"; read -r -p "按回车关闭"' ERR
-echo '年轮 · 正在准备个人运行环境（无需预装 Python 或 GBrain）'
+echo '年轮 · 正在准备个人运行环境（无需预装 Python 或记忆工具）'
 NIANLUN_UV="$NIANLUN_BOOTSTRAP/$NIANLUN_UV_DIR/uv"
 if [ ! -x "$NIANLUN_UV" ]; then
   curl --fail --location --connect-timeout 20 --max-time 600 "https://github.com/astral-sh/uv/releases/download/0.13.1/$NIANLUN_UV_ASSET" -o "$NIANLUN_BOOTSTRAP/uv.tar.gz"

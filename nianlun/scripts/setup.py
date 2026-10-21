@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '0.5.2'
+VERSION = '2.3.0'
 
 
 def options(*names):
@@ -29,14 +29,15 @@ TEMPLATE = {
     'projects': {
         'title': ('项目名称', 'text', {}), 'status': ('状态', 'singleSelect', options('待启动','进行中','已完成','暂停')),
         'priority': ('等级','singleSelect',options('P0','P1','P2')), 'description': ('一句话描述','text',{}),
-        'goal': ('项目目标','text',{}), 'risk': ('风险卡点','text',{}), 'report': ('阶段性汇报链接','text',{})},
+        'goal': ('项目目标','text',{}), 'deadline': ('目标日期','date',{}), 'notes': ('备注','text',{}),
+        'risk': ('风险卡点','text',{}), 'report': ('阶段性汇报链接','text',{})},
     'milestones': {
         'title': ('里程碑','text',{}), 'date': ('截止日期','date',{}),
         'status': ('状态','singleSelect',options('待核','进行中','已完成','已延期')),
         'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':False}),
         'description': ('交付内容','text',{}), 'benefit': ('预期效益','text',{}), 'notes': ('备注','text',{})},
     'sites': {
-        'title': ('场地名称','text',{}), 'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':True}),
+        'title': ('场地名称','text',{}), 'code': ('场地编码','text',{}), 'project_ids': ('项目','unidirectionalLink',{'target':'projects','multiple':True}),
         'status': ('场地状态','singleSelect',options('待启动','进行中','已完成')), 'notes': ('当前卡点','text',{})},
     'records': {
         'title': ('标题','text',{}), 'description': ('详情','text',{}), 'date': ('日期','date',{}),
@@ -88,7 +89,7 @@ class Setup:
                 'python_bin':sys.executable, 'home':str(self.home), 'config':str(self.config_path),
                 'configured':self.config_path.exists(), 'dependencies':self.runtimes(),
                 'existing_gbrain':(Path.home()/'.gbrain/config.json').exists(),
-                'steps':['环境与钉钉登录','AI 表格初始化或绑定','GBrain 安装与接入','采集与运行时间','验证并启用']}
+                'steps':['环境与钉钉登录','AI 表格初始化或绑定','创建或接入独立记忆空间','采集与运行时间','验证并启用']}
 
     def profiles(self):
         d = self.gateway(None).call(['profile','list'])
@@ -250,9 +251,9 @@ class Setup:
                 'counts':{r:len(snapshot[r]) for r in n.ROLES},'complete':snapshot['complete']}
 
     def memory(self, mode, directory=None, brain_home=None):
-        if mode not in ('new','existing'): raise n.Error('请选择新建或连接已有 GBrain')
+        if mode not in ('new','existing'): raise n.Error('请选择新建或连接已有独立记忆空间')
         command=self.runtimes().get('gbrain_command')
-        if not command: raise n.Error('请先安装 GBrain 运行环境')
+        if not command: raise n.Error('请先安装记忆引擎运行环境')
         config=n.load(self.config_path)
         require_idle(config)
         current=config.get('growth',{})
@@ -266,9 +267,9 @@ class Setup:
             work=Path(directory or memory_home/'workspace').expanduser().resolve()
             settings={'brain_home':str(memory_home),'brain_dir':str(work),'gbrain_command':command,'memory_mode':'managed'}
         else:
-            if not directory: raise n.Error('连接已有 GBrain 时请选择工作目录')
+            if not directory: raise n.Error('连接已有独立记忆空间时请选择工作目录')
             work=Path(directory).expanduser().resolve()
-            if not work.is_dir(): raise n.Error('已有 GBrain 工作目录不存在')
+            if not work.is_dir(): raise n.Error('已有独立记忆空间工作目录不存在')
             settings={'brain_dir':str(work),'gbrain_command':command,'memory_mode':'existing',
                       'brain_home':str(Path(brain_home or Path.home()).expanduser().resolve())}
         config['growth']={**current,**settings};work=Path(settings['brain_dir']); work.mkdir(parents=True,exist_ok=True)
@@ -278,8 +279,8 @@ class Setup:
             r=subprocess.run(command+['init','--pglite','--no-embedding','--non-interactive','--json'],cwd=work,
                 env=env,capture_output=True,text=True, encoding='utf-8',timeout=240)
             if r.returncode or not any(x.get('status')=='success' for x in json_result(r.stdout)):
-                raise n.Error('GBrain 初始化未通过；保留现有文件，不使用 --force 重建。请检查安装与网络。')
-        if not config_file.is_file(): raise n.Error('没有找到选定 GBrain 的配置，请核对记忆库位置')
+                raise n.Error('独立记忆空间初始化未通过；保留现有文件，不使用 --force 重建。请检查安装与网络。')
+        if not config_file.is_file(): raise n.Error('没有找到选定独立记忆空间的配置，请核对记忆库位置')
         # A deterministic, clearly labelled installation page is also the first portable read/write check.
         marker='年轮安装验收 '+n.digest(str(self.config_path))[:16]
         slug='meetings/nianlun-setup-'+n.digest(str(self.config_path))[:16]
@@ -290,15 +291,15 @@ class Setup:
         if read.returncode or marker not in read.stdout:
             write=subprocess.run(command+['capture','--file',str(source),'--slug',slug,'--request-id',request_id,'--json'],
                 cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=240)
-            if write.returncode: raise n.Error('GBrain 写入验证未通过，未登记为接入成功')
+            if write.returncode: raise n.Error('独立记忆空间写入验证未通过，未登记为接入成功')
             read=subprocess.run(command+['get',slug],cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=120)
-        if read.returncode or marker not in read.stdout: raise n.Error('GBrain 读回未找到测试内容')
+        if read.returncode or marker not in read.stdout: raise n.Error('独立记忆空间读回未找到测试内容')
         search=subprocess.run(command+n.brain_search_args(config,marker.rsplit(' ',1)[-1])+['--json'],cwd=work,env=env,capture_output=True,text=True, encoding='utf-8',timeout=120)
         try:hits=json.loads(search.stdout)
         except ValueError:hits=[]
         if isinstance(hits,dict):hits=hits.get('results',hits.get('hits',[]))
         if search.returncode or not isinstance(hits,list) or not any(isinstance(x,dict) and x.get('slug')==slug for x in hits):
-            raise n.Error('GBrain 已存储但检索未验证；尚不能启用生长任务')
+            raise n.Error('独立记忆空间已存储但检索未验证；尚不能启用生长任务')
         n.save(self.config_path,config)
         result={'verified':True,'mode':settings['memory_mode'],'brain_dir':settings['brain_dir'],'slug':slug,
                 'keyless':settings['memory_mode']=='managed','search':'keyword / no-expand'}
@@ -308,7 +309,7 @@ class Setup:
     def configure(self, preferences):
         config=n.load(self.config_path)
         require_idle(config)
-        if not (self.directory/'memory.json').exists(): raise n.Error('请先完成 GBrain 读写验证')
+        if not (self.directory/'memory.json').exists(): raise n.Error('请先完成独立记忆空间读写验证')
         schedule=preferences['schedule'];validate_schedule(schedule)
         # Business time is interpreted by the core, independently of the host's clock.
         old_scheduler=Path(config['growth'].get('state_dir',self.directory))/'scheduler.json'
@@ -317,12 +318,15 @@ class Setup:
             if old.get('active') and old.get('mode')!='controller':
                 raise n.Error('旧版任务需要先在 Codex 迁移到页面控制器，才能从这里暂停')
         sources=preferences.get('sources',{})
-        if not {'minutes','mentions','direct','codex'}<=set(sources) or set(sources)-{'minutes','mentions','direct','codex','inbox','portal','lark_minutes'} or any(type(v)!=bool for v in sources.values()):
+        if not {'minutes','mentions','direct','codex'}<=set(sources) or set(sources)-{'minutes','mentions','direct','codex','inbox','portal','lark_minutes','groups','mail'} or any(type(v)!=bool for v in sources.values()):
             raise n.Error('请明确选择各项信息来源')
         switches=preferences.get('switches',{})
-        if set(switches)!={'table_writes','todos','completion','gbrain','digest','reports'} or any(type(v)!=bool for v in switches.values()):
+        required={'table_writes','todos','completion','gbrain','digest','reports'}
+        if not required<=set(switches) or set(switches)-required-{'milestone_planning','continuous_reports'} or any(type(v)!=bool for v in switches.values()):
             raise n.Error('请明确选择各项自动操作开关')
         if switches['completion'] and not switches['table_writes']: raise n.Error('自动完成待办需要同时允许同步项目记录')
+        if switches.get('milestone_planning') and not switches['table_writes']:raise n.Error('自动倒排需要开启项目写入')
+        if switches.get('continuous_reports') and not switches['reports']:raise n.Error('生长后更新汇报需要开启阶段汇报')
         settings=config['growth']
         lookback=preferences.get('minutes_lookback_hours',settings.get('minutes_lookback_hours',48))
         notification=preferences.get('notification_mode',settings.get('notification_mode','every_run'))
@@ -333,6 +337,21 @@ class Setup:
             lark_command(settings)  # Detect the local executable; enabling never silently installs or switches identity.
         state=Path(settings.get('state_dir',self.config_path.parent/'runtime'));state.mkdir(parents=True,exist_ok=True)
         gw=self.gateway(config['profile']);identity=self_identity(gw)
+        groups=preferences.get('groups',settings.get('groups',[]))
+        if not isinstance(groups,list) or len(groups)>50:raise n.Error('最多选择 50 个采集群')
+        checked=[]
+        for item in groups:
+            if not isinstance(item,dict):raise n.Error('采集群格式错误')
+            old=next((x for x in settings.get('groups',[]) if x.get('id')==item.get('id') and x.get('name')==item.get('name')),None)
+            if old:checked.append(old)
+            else:
+                from project_actions import verified_group
+                checked.append(verified_group(config,gw,{'search_id':item.get('search_id'),'group_id':item.get('id')}))
+        if sources.get('groups') and not checked:raise n.Error('请先搜索并选择要采集的群')
+        mailbox=preferences.get('mailbox',settings.get('mailbox',''))
+        if sources.get('mail'):
+            accounts=gw.call(['mail','mailbox','list']).get('emailAccounts',[])
+            if not mailbox or sum(x.get('email')==mailbox for x in accounts)!=1:raise n.Error('请从当前身份的邮箱列表中选择一个邮箱')
         folder=preferences.get('report_folder') or settings.get('report_folder')
         if folder and '://' in folder:folder=parse_base(folder)[0]
         if switches['reports'] and not folder: raise n.Error('请先选择或创建阶段汇报文件夹')
@@ -344,6 +363,7 @@ class Setup:
         settings.update(state_dir=str(state),home_output=settings.get('home_output',str(self.config_path.parent/'年轮.html')),report_folder=folder,
             overlap_minutes=settings.get('overlap_minutes',30),minutes_lookback_hours=lookback,notification_mode=notification,
             schedule=schedule,sources=source_settings,switches=switches,
+            groups=checked,group_ids=list(dict.fromkeys(x['id'] for x in checked)),mailbox=mailbox,
             codex_session_dirs=(settings.get('codex_session_dirs') or [str(Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'sessions')]) if sources['codex'] else [],
             inbox_dirs=settings.get('inbox_dirs',[str(state/'inbox')]))
         config['timezone']=schedule['timezone'];n.save(self.config_path,config);n.save(state/'identity.json',identity)
@@ -387,29 +407,30 @@ class Setup:
             'controller':{'role':'controller','name':'年轮·自动生长控制器','prompt':controller_prompt,
                 'rrule':'FREQ=HOURLY;INTERVAL=1;BYMINUTE=0;BYSECOND=0'},
             'schedule':config['growth']['schedule'],'tasks':[
-                {'role':'growth','name':'年轮·每日生长','prompt':common+'按 collect → 阅读证据和 GBrain → 决策与语义去重 → plan → apply → finish 执行完整生长流程。'},
-                {'role':'report','name':'年轮·阶段汇报','prompt':common+'读取活跃项目最近一周记录、里程碑与 GBrain 历史，生成有依据的阶段汇报；通过 report 上传并回填项目主表链接。'}],
+                {'role':'growth','name':'年轮·每日生长','prompt':common+'按 collect → 阅读证据和项目记忆 → 决策与语义去重 → plan → apply → finish 执行完整生长流程。'},
+                {'role':'report','name':'年轮·阶段汇报','prompt':common+'读取活跃项目最近一周记录、里程碑与项目历史记忆，生成有依据的阶段汇报；通过 report 上传并回填项目主表链接。'}],
             'status':'pending_native_tool','note':'由 Codex 原生 automation_update 创建/更新 heartbeat；此文件不会安装调度。'}
 
-    def verify_schedules(self, paths, codex_directory=None):
+    def verify_schedules(self, paths, codex_directory=None, allow_paused=False, persist=True):
         import tomllib
         config=n.load(self.config_path);request=self.schedule_request(config);schedule=request['schedule']
         expected={
             'growth':{'FREQ':'DAILY','BYHOUR':','.join(map(str,schedule['growth_hours'])),'BYMINUTE':'0','BYSECOND':'0'},
             'report':{'FREQ':'WEEKLY','BYDAY':schedule['report_weekday'],'BYHOUR':str(schedule['report_hour']),'BYMINUTE':'0','BYSECOND':'0'},
             'controller':{'FREQ':'HOURLY','INTERVAL':'1','BYMINUTE':'0','BYSECOND':'0'}}
-        found={};codex=Path(codex_directory or os.environ.get('CODEX_HOME',Path.home()/'.codex')).resolve()/'automations'
+        found={};native_active=True;codex=Path(codex_directory or os.environ.get('CODEX_HOME',Path.home()/'.codex')).resolve()/'automations'
         for value in paths:
             path=Path(value).expanduser().resolve()
             if not path.is_relative_to(codex) or path.name!='automation.toml': raise n.Error('只回读 Codex 原生任务配置，不接受自制成功回执')
             task=tomllib.loads(path.read_text(encoding='utf-8'))
             role=next((x['role'] for x in request['tasks']+[request['controller']] if task.get('prompt')==x['prompt']),None)
-            if not role or role in found or task.get('kind')!='heartbeat' or task.get('status')!='ACTIVE' or not task.get('target_thread_id'):
+            if not role or role in found or task.get('kind')!='heartbeat' or task.get('status') not in (('ACTIVE','PAUSED') if allow_paused else ('ACTIVE',)) or not task.get('target_thread_id'):
                 raise n.Error('任务内容、状态或关联会话未核验')
             rule=dict(part.split('=',1) for part in task['rrule'].removeprefix('RRULE:').split(';'))
             if any(set(rule.get(k,'').split(','))!=set(v.split(',')) for k,v in expected[role].items()):
                 raise n.Error('实际运行时间与向导选择不同')
             if set(rule)-set(expected[role])-{'INTERVAL'} or rule.get('INTERVAL','1')!='1': raise n.Error('任务存在额外时间限制')
+            native_active=native_active and task['status']=='ACTIVE'
             found[role]=task['id']
         if set(found) not in ({'growth','report'},{'controller'}): raise n.Error('原生调度尚未全部验证，或新旧任务重复启用')
         for other in codex.glob('*/automation.toml'):
@@ -419,11 +440,11 @@ class Setup:
         receipt=Path(config['growth']['state_dir'])/'scheduler.json'
         previous=n.load(receipt) if receipt.exists() else {}
         mode='controller' if 'controller' in found else 'legacy'
-        result={'active':schedule.get('enabled',True),'registered':True,'mode':mode,'owner':'codex',
+        result={'active':native_active and schedule.get('enabled',True),'native_active':native_active,'registered':True,'mode':mode,'owner':'codex',
                 'activated_at':previous.get('activated_at') or n.stamp(config),
                 'harness':'Codex / GPT','timezone':schedule['timezone'],
                 'automation_ids':list(found.values()),'verified_at':n.stamp(config),'marker':request['marker']}
-        n.save(Path(config['growth']['state_dir'])/'scheduler.json',result)
+        if persist:n.save(Path(config['growth']['state_dir'])/'scheduler.json',result)
         return result
 
     def doctor(self):
@@ -434,14 +455,8 @@ class Setup:
                                  env=n.brain_env(config),capture_output=True,text=True,encoding='utf-8',timeout=120)
             memory={**memory,'verified':check.returncode==0 and '年轮安装验收' in check.stdout}
         runtime=Path(config.get('growth',{}).get('state_dir',self.directory/'not-configured'))
-        scheduler=n.load(runtime/'scheduler.json') if (runtime/'scheduler.json').exists() else {'active':False}
-        if (scheduler.get('active') or scheduler.get('registered')) and scheduler.get('owner','codex')=='codex':
-            codex=Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))/'automations'
-            try:
-                scheduler=self.verify_schedules([codex/task/'automation.toml' for task in scheduler.get('automation_ids',[])])
-            except (n.Error,OSError,ValueError):
-                scheduler={**scheduler,'active':False,'status':'needs_verification'}
-                n.save(runtime/'scheduler.json',scheduler)
+        import run_control
+        scheduler=run_control.status(config,self.home,self.config_path)
         result={'tables':{'complete':state['complete'],'counts':{r:len(state[r]) for r in n.ROLES}},
                 'memory':memory,'scheduler':scheduler,'ready':bool(state['complete'] and memory.get('verified') and scheduler.get('registered',scheduler.get('active')))}
         result['workspace_ready']=bool(state['complete'] and memory.get('verified'))

@@ -103,7 +103,19 @@ def codex_reason(prompt, directory, preferred=None, schema=None, timeout=900):
 ANSWER_SCHEMA={'type':'object','properties':{'answer':{'type':'string'}},'required':['answer'],'additionalProperties':False}
 
 
-def capabilities(preferred=None):
+def skill_roots(values):
+    if not isinstance(values,list) or len(values)>20:raise n.Error('最多指定 20 个 Skill 文件夹')
+    roots=[]
+    for value in values:
+        if not isinstance(value,str):raise n.Error('Skill 文件夹须为绝对路径')
+        path=Path(value).expanduser()
+        if not path.is_absolute() or not path.is_dir():raise n.Error('Skill 文件夹不存在或不是绝对路径：'+value)
+        real=str(path.resolve())
+        if real not in roots:roots.append(real)
+    return roots
+
+
+def capabilities(preferred=None,extra_roots=None):
     items=[];seen=set()
     codex=Path(os.environ.get('CODEX_HOME',Path.home()/'.codex'))
     provider=normalize(preferred)['provider']
@@ -111,10 +123,19 @@ def capabilities(preferred=None):
     if provider=='codex':
         roots += [codex/'skills',codex/'skills/.system'] + list((codex/'plugins/cache').glob('*/*/*/skills'))
     elif provider=='claude':roots.append(Path(os.environ.get('CLAUDE_CONFIG_DIR',Path.home()/'.claude'))/'skills')
+    roots += [Path(p) for p in (extra_roots or [])]
     # Other hosts discover their own native skills; never scan a guessed private directory.
     for root in roots:
         if not root.exists():continue
-        for file in sorted(root.glob('*/SKILL.md')):
+        # Existing installations often expose direct skill folders as symlinks.
+        # Include those entry points without recursively following directory cycles.
+        files=list(root.glob('*/SKILL.md'))
+        for directory,dirs,names in os.walk(root,followlinks=False):
+            dirs[:]=[d for d in dirs if d not in ('.git','node_modules','__pycache__','.venv','venv')]
+            if 'SKILL.md' in names:files.append(Path(directory)/'SKILL.md')
+        files.sort()
+        if (root/'SKILL.md').is_file():files.insert(0,root/'SKILL.md')
+        for file in files:
             real=file.resolve()
             if real in seen:continue
             seen.add(real)
@@ -133,7 +154,7 @@ def capabilities(preferred=None):
                             block.append(continuation.strip())
                         description=' '.join(block)
             items.append({'id':n.digest(str(real))[:24],'name':name,'description':description[:500],
-                'path':str(real),'mode':'workflow'})
+                'path':str(real),'root':str(root),'mode':'workflow'})
     return items
 
 

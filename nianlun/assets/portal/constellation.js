@@ -109,7 +109,10 @@ export function mount(host, { nodes, edges, onSelect }) {
     world.add(mesh);
     meshes.push(mesh);
     map.set(node.id, mesh);
-    const label = document.createElement("span");
+    const label = document.createElement("button");
+    label.type = "button";
+    label.setAttribute("aria-label", "查看记忆节点 " + node.title);
+    label.onclick = () => onSelect(node.id);
     label.className =
       "constellation-label" + (node.kind === "group" ? " group" : "");
     const groupTitle = groups.find((g) => g.group === node.group)?.title;
@@ -237,6 +240,25 @@ export function mount(host, { nodes, edges, onSelect }) {
           rect.y < r.y + r.h + 8 &&
           rect.y + rect.h > r.y - 8,
       );
+      if (important && collision) {
+        for (const offset of [20, -20, 40, -40, 60, -60]) {
+          const proposed = { ...rect, y: rect.y + offset };
+          if (proposed.y < 90 || proposed.y > height - 70) continue;
+          if (
+            !occupied.some(
+              (r) =>
+                proposed.x < r.x + r.w + 12 &&
+                proposed.x + proposed.w > r.x - 12 &&
+                proposed.y < r.y + r.h + 8 &&
+                proposed.y + proposed.h > r.y - 8,
+            )
+          ) {
+            rect.y = proposed.y;
+            label.style.top = y + offset + "px";
+            break;
+          }
+        }
+      }
       label.hidden =
         projected.z > 1 ||
         x < 25 ||

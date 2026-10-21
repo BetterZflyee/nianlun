@@ -2511,3 +2511,33 @@ main {
   font-size: 10px;
   color: #74856c;
 }
+.constellation-label {
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 3px;
+  min-height: 0;
+  line-height: 1.3;
+  background: transparent;
+  pointer-events: auto;
+  font-weight: 400;
+}
+.constellation-label:hover {
+  background: #304a32;
+  color: #fff1c6;
+  box-shadow: none;
+}
+.constellation-label:focus-visible {
+  outline: 1px solid #becfa9;
+  outline-offset: 2px;
+}
+.memory-rail {
+  max-height: clamp(420px, calc(100dvh - 295px), 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+@media (max-width: 1000px) {
+  .memory-rail {
+    max-height: none;
+    overflow-y: visible;
+  }
+}

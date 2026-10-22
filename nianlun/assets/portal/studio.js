@@ -190,6 +190,16 @@ async function openRelations(project, rows) {
       badge,
       roleNames,
       label: projectLabel,
+      initialOrder: boot.settings?.relation_order,
+      onOrderChange: async (order) => {
+        const saved = await api("/api/view-preferences", {
+          relation_order: order,
+        });
+        boot.settings = {
+          ...boot.settings,
+          relation_order: saved.relation_order,
+        };
+      },
       edit: (role, row) => {
         cleanup();
         editRow(role, row);

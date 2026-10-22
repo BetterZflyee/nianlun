@@ -136,11 +136,36 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.get('/api/bootstrap',{'Authorization':'Bearer test-secret'})[0],200)
 
     def test_relation_view_assets_are_served_with_module_types(self):
-        for path, mime in [('/relations.js', 'javascript'), ('/relations-model.js', 'javascript'), ('/relations.css', 'text/css')]:
+        for path, mime in [('/relations.js', 'javascript'), ('/relations-model.js', 'javascript'), ('/relations.css', 'text/css'), ('/vendor/echarts-sankey.min.js','javascript')]:
             status, body, headers = self.get(path)
             self.assertEqual(status, 200)
             self.assertTrue(body)
             self.assertIn(mime, headers['Content-Type'])
+
+    def test_relation_order_persists_locally_without_business_jobs(self):
+        headers={'Authorization':'Bearer test-secret','Origin':self.origin,'Content-Type':'application/json'}
+        order=['sites','milestones','records']
+        self.app.settings['enabled_skills']=['preserve']
+        before=dict(self.app.jobs)
+        status,body,_=self.get('/api/view-preferences',headers,json.dumps({'relation_order':order}))
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(body)['relation_order'],order)
+        self.assertEqual(n.load(self.app.settings_path),{'enabled_skills':['preserve'],'relation_order':order})
+        reopened=Application(self.dir/'home',self.dir/'config.json')
+        self.addCleanup(reopened.read_pool.shutdown);self.addCleanup(reopened.write_pool.shutdown)
+        self.assertEqual(reopened.bootstrap()['settings']['relation_order'],order)
+        self.assertEqual(self.app.jobs,before)
+        self.assertFalse(self.app.config.exists())
+
+    def test_relation_order_rejects_invalid_input_and_untrusted_origin(self):
+        headers={'Authorization':'Bearer test-secret','Origin':self.origin,'Content-Type':'application/json'}
+        for invalid in (None,[],['records','sites','sites'],['records','sites','other'],[{},'sites','records']):
+            self.assertEqual(self.get('/api/view-preferences',headers,json.dumps({'relation_order':invalid}))[0],400)
+        self.assertFalse(self.app.settings_path.exists())
+        body=json.dumps({'relation_order':['sites','records','milestones']})
+        self.assertEqual(self.get('/api/view-preferences',{'Origin':self.origin,'Content-Type':'application/json'},body)[0],401)
+        headers['Origin']='https://other.example'
+        self.assertEqual(self.get('/api/view-preferences',headers,body)[0],403)
 
     def test_dns_rebinding_and_cross_origin_requests_rejected(self):
         self.assertEqual(self.get('/',{'Host':'attacker.example'})[0],403)

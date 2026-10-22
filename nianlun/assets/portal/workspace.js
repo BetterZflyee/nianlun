@@ -189,7 +189,7 @@ function handoffText(job) {
 function showTaskResult(box, job) {
   const r = job.result || {};
   box.replaceChildren();
-  if (r.answer || r.summary)
+  if (job.op !== "report" && (r.answer || r.summary))
     box.append(el("p", { text: r.answer || r.summary }));
   if (r.url && /^https:\/\//.test(r.url))
     box.append(
@@ -206,6 +206,12 @@ function showTaskResult(box, job) {
         text: "汇报结合 " + r.memory_pages.length + " 篇独立记忆页面。",
       }),
     );
+  if (job.op === "report" && r.summary) {
+    box.append(el("details", { class: "report-body" }, [
+      el("summary", { text: "查看报告正文" }),
+      el("pre", { text: r.summary, style: "white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:420px;overflow:auto" }),
+    ]));
+  }
   if (r.failed)
     box.append(
       el("p", {

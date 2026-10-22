@@ -1,64 +1,9 @@
 import * as THREE from "./vendor/three.module.min.js";
-// On-demand rendering: no idle animation loop, no third-party network resources.
-const colors = [
-  "#bacb8d",
-  "#86b59b",
-  "#b9ab79",
-  "#89a8b0",
-  "#bd9e8b",
-  "#a0b775",
-  "#a9a1b8",
-];
-function hash(s) {
-  let h = 2166136261;
-  for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619);
-  return h >>> 0;
-}
-export function mount(host, { nodes, edges, onSelect }) {
-  let dead = false,
-    selected = null,
-    hovered = null;
-  const groups = nodes.filter((n) => n.kind === "group"),
-    pages = nodes.filter((n) => n.kind !== "group");
-  const positions = new Map(),
-    groupPositions = new Map();
-  groups.forEach((g, i) => {
-    const a = i * 2.399963,
-      r = groups.length === 1 ? 0 : 85 * Math.sqrt(i + 1);
-    const p = { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.8, z: 0 };
-    groupPositions.set(g.group, p);
-    positions.set(g.id, p);
-  });
-  pages.forEach((n) => {
-    const siblings = pages.filter((p) => p.group === n.group),
-      i = siblings.indexOf(n),
-      a = i * 2.399963 + (hash(n.group) % 10),
-      r = 25 + 11 * Math.sqrt(i + 1),
-      g = groupPositions.get(n.group) || { x: 0, y: 0 };
-    positions.set(n.id, {
-      x: g.x + Math.cos(a) * r,
-      y: g.y + Math.sin(a) * r,
-      z: ((hash(n.id) % 100) - 50) * 0.6,
-    });
-  });
-  // A short deterministic relaxation separates clusters without implying extra links.
-  const pageNodes = pages.slice(0, 600);
-  for (let iter = 0; iter < 35; iter++)
-    for (let i = 0; i < pageNodes.length; i++)
-      for (let j = i + 1; j < pageNodes.length; j++) {
-        const a = positions.get(pageNodes[i].id),
-          b = positions.get(pageNodes[j].id);
-        let dx = a.x - b.x,
-          dy = a.y - b.y,
-          dist = dx * dx + dy * dy;
-        if (dist < 225 && dist > 0.01) {
-          const force = (15 - Math.sqrt(dist)) * 0.1;
-          a.x += (dx * force) / 15;
-          a.y += (dy * force) / 15;
-          b.x -= (dx * force) / 15;
-          b.y -= (dy * force) / 15;
-        }
-      }
+import { hash, seedLayout, neighborhood, colorFor } from "./galaxy-model.js";
+
+// Local, batched Three.js rendering. Galaxy View inspired the exploration model;
+// the renderer and adapter are native Nianlun code, with no Obsidian dependency.
+export function mount(host, options) {
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({
@@ -67,413 +12,807 @@ export function mount(host, { nodes, edges, onSelect }) {
       powerPreference: "low-power",
     });
   } catch {
-    return fallback(host, nodes, edges, positions, onSelect);
+    return fallback(host, options);
   }
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7));
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  let dead = false,
+    fallbackView = null,
+    raf = 0,
+    worker = null,
+    revision = 0,
+    nodes = [],
+    edges = [],
+    groups = [];
+  let positions = new Float32Array(),
+    selected = null,
+    hovered = null,
+    focusDepth = 1,
+    focus = new Set();
+  let mode = "galaxy",
+    auto = !reduced.matches,
+    inView = true,
+    width = 1,
+    height = 1,
+    baseDistance = 700;
+  let theta = 0.12,
+    phi = 1.3,
+    distance = 700,
+    target = new THREE.Vector3(),
+    flight = null;
+  let lastTime = 0,
+    lastLabels = 0,
+    interactionTime = 0,
+    drag = null,
+    pinch = null;
+  let points = null,
+    lines = null,
+    mist = null,
+    nodeIndex = new Map(),
+    degree = new Map();
+  const pointers = new Map(),
+    projected = new THREE.Vector3(),
+    resources = [];
+  const scene = new THREE.Scene(),
+    camera = new THREE.PerspectiveCamera(46, 1, 1, 12000);
   const canvas = renderer.domElement;
+  canvas.tabIndex = 0;
+  canvas.setAttribute("role", "img");
   canvas.setAttribute(
     "aria-label",
-    "交互记忆星图；拖动平移，滚轮缩放，可通过目录使用键盘选取页面",
+    "三维记忆星图：拖动旋转，Shift 加拖动平移，滚轮缩放；也可通过目录选择记忆，Escape 返回全景",
   );
-  canvas.setAttribute("role", "img");
   host.append(canvas);
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.6));
   const labels = document.createElement("div");
   labels.className = "graph-label-layer";
   host.append(labels);
-  const scene = new THREE.Scene(),
-    world = new THREE.Group();
-  scene.add(world);
-  const camera = new THREE.PerspectiveCamera(45, 1, 1, 3000);
-  camera.position.z = 650;
-  const colorFor = (id) =>
-    new THREE.Color(colors[Math.abs(hash(id)) % colors.length]);
-  const meshes = [],
-    geometries = [],
-    materials = [],
-    labelNodes = [],
-    map = new Map();
-  const shape = new THREE.SphereGeometry(1, 12, 8);
-  geometries.push(shape);
-  for (const node of nodes) {
-    const p = positions.get(node.id),
-      material = new THREE.MeshBasicMaterial({
-        color: node.kind === "group" ? 0xe0ebc3 : colorFor(node.group),
-      });
-    materials.push(material);
-    const mesh = new THREE.Mesh(shape, material);
-    mesh.position.set(p.x, p.y, p.z);
-    mesh.scale.setScalar(
-      node.kind === "group" ? 4.2 : 2.3 + (hash(node.id) % 10) / 12,
-    );
-    mesh.userData.node = node;
-    world.add(mesh);
-    meshes.push(mesh);
-    map.set(node.id, mesh);
-    const label = document.createElement("button");
-    label.type = "button";
-    label.setAttribute("aria-label", "查看记忆节点 " + node.title);
-    label.onclick = () => onSelect(node.id);
-    label.className =
-      "constellation-label" + (node.kind === "group" ? " group" : "");
-    const groupTitle = groups.find((g) => g.group === node.group)?.title;
-    label.textContent =
-      node.kind === "group"
-        ? node.title
-        : node.title
-            .replace(groupTitle || "__none__", "")
-            .replace(/^[ ·—-]+/, "");
-    label.title = node.title;
-    labels.append(label);
-    labelNodes.push({ node, mesh, label });
+  const labelPool = Array.from({ length: 26 }, () => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "constellation-label";
+    b.hidden = true;
+    b.onclick = () => options.onSelect(b.dataset.node);
+    labels.append(b);
+    return b;
+  });
+  const status = document.createElement("span");
+  status.className = "galaxy-render-status";
+  status.textContent = "三维布局准备中…";
+  host.append(status);
+  const own = (obj) => {
+    resources.push(obj);
+    return obj;
+  };
+  const nodeShader = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    uniforms: { uScale: { value: 700 }, uOpacity: { value: 1 } },
+    vertexShader: `attribute float aSize; attribute float aDim; varying vec3 vColor; varying float vDim;
+      uniform float uScale; void main(){ vColor=color; vDim=aDim; vec4 p=modelViewMatrix*vec4(position,1.);
+      gl_PointSize=clamp(aSize*uScale/max(1.,-p.z),2.,110.); gl_Position=projectionMatrix*p; }`,
+    fragmentShader: `varying vec3 vColor; varying float vDim; uniform float uOpacity;
+      void main(){ float r=length(gl_PointCoord-.5)*2.; if(r>1.) discard;
+      float core=1.-smoothstep(.03,.29,r); float glow=pow(1.-r,3.)*.64;
+      gl_FragColor=vec4(mix(vColor,vec3(1.),core*.68),(core+glow)*vDim*uOpacity); }`,
+  });
+  own(nodeShader);
+  const starsGeo = own(new THREE.BufferGeometry()),
+    starPositions = [],
+    starColors = [];
+  for (let i = 0; i < 1100; i++) {
+    const a = ((hash("star-a" + i) % 10000) / 10000) * Math.PI * 2,
+      z = (hash("star-z" + i) % 10000) / 5000 - 1;
+    const r = 2300 + (i % 13) * 20,
+      d = Math.sqrt(1 - z * z);
+    starPositions.push(Math.cos(a) * d * r, z * r, Math.sin(a) * d * r);
+    const light = 0.3 + (hash("light" + i) % 100) / 160;
+    starColors.push(light * 0.72, light * 0.86, light);
   }
-  const groupVertices = [],
-    refVertices = [];
-  for (const edge of edges) {
-    const a = positions.get(edge.source),
-      b = positions.get(edge.target);
-    if (!a || !b) continue;
-    const dest = edge.kind === "reference" ? refVertices : groupVertices;
-    dest.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  starsGeo.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(starPositions, 3),
+  );
+  starsGeo.setAttribute(
+    "color",
+    new THREE.Float32BufferAttribute(starColors, 3),
+  );
+  const stars = new THREE.Points(
+    starsGeo,
+    own(
+      new THREE.PointsMaterial({
+        size: 1.2,
+        sizeAttenuation: false,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.44,
+        depthWrite: false,
+      }),
+    ),
+  );
+  scene.add(stars);
+  function remove(object) {
+    if (!object) return;
+    scene.remove(object);
+    object.geometry.dispose();
+    if (object.material !== nodeShader) object.material.dispose();
   }
-  for (const [vertices, dashed] of [
-    [groupVertices, true],
-    [refVertices, false],
-  ]) {
-    if (!vertices.length) continue;
+  function setCamera() {
+    camera.position
+      .set(
+        Math.sin(phi) * Math.sin(theta),
+        Math.cos(phi),
+        Math.sin(phi) * Math.cos(theta),
+      )
+      .multiplyScalar(distance)
+      .add(target);
+    camera.lookAt(target);
+    camera.updateMatrixWorld();
+  }
+  function rebuildLines() {
+    remove(lines);
+    const vertices = [],
+      colors = [];
+    for (const e of edges) {
+      const a = nodeIndex.get(e.source),
+        b = nodeIndex.get(e.target);
+      if (a === undefined || b === undefined) continue;
+      const p = new THREE.Vector3().fromArray(positions, a * 3),
+        q = new THREE.Vector3().fromArray(positions, b * 3);
+      const bend = new THREE.Vector3(-(q.y - p.y), q.x - p.x, 0)
+        .normalize()
+        .multiplyScalar(Math.min(18, p.distanceTo(q) * 0.08));
+      const linked =
+          selected && (e.source === selected || e.target === selected),
+        near = focus.has(e.source) && focus.has(e.target);
+      const c = new THREE.Color(
+        nodes[a].color || colorFor(nodes[a].group),
+      ).lerp(new THREE.Color(nodes[b].color || colorFor(nodes[b].group)), 0.5);
+      c.multiplyScalar(selected ? (linked ? 0.85 : near ? 0.38 : 0.025) : 0.23);
+      for (let j = 0; j < 6; j++)
+        for (const t of [j / 6, (j + 1) / 6]) {
+          const v = p
+            .clone()
+            .lerp(q, t)
+            .addScaledVector(bend, 4 * t * (1 - t));
+          vertices.push(v.x, v.y, v.z);
+          colors.push(c.r, c.g, c.b);
+        }
+    }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       "position",
       new THREE.Float32BufferAttribute(vertices, 3),
     );
-    geometries.push(geometry);
-    const material = dashed
-      ? new THREE.LineDashedMaterial({
-          color: 0x9cb281,
-          transparent: true,
-          opacity: 0.4,
-          dashSize: 3,
-          gapSize: 4,
-        })
-      : new THREE.LineBasicMaterial({
-          color: 0xc0d39c,
-          transparent: true,
-          opacity: 0.65,
-        });
-    materials.push(material);
-    const lines = new THREE.LineSegments(geometry, material);
-    lines.computeLineDistances();
-    world.add(lines);
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    lines = new THREE.LineSegments(
+      geometry,
+      new THREE.LineBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        depthWrite: false,
+      }),
+    );
+    scene.add(lines);
   }
-  // Small background particles are purely decorative and non-interactive.
-  const starGeometry = new THREE.BufferGeometry(),
-    stars = [];
-  for (let i = 0; i < 200; i++)
-    stars.push(
-      Math.sin(i * 12.9898) * 600,
-      Math.cos(i * 78.233) * 400,
-      -150 - (i % 80),
+  function updateAppearance() {
+    focus = neighborhood(selected, edges, focusDepth);
+    if (points) {
+      const dims = points.geometry.attributes.aDim,
+        sizes = points.geometry.attributes.aSize;
+      nodes.forEach((n, i) => {
+        dims.setX(i, selected && !focus.has(n.id) ? 0.11 : 1);
+        sizes.setX(
+          i,
+          (14 + Math.min(10, Math.sqrt(degree.get(n.id) || 0) * 3)) *
+            (n.id === selected ? 1.65 : n.id === hovered ? 1.3 : 1),
+        );
+      });
+      dims.needsUpdate = sizes.needsUpdate = true;
+    }
+    rebuildLines();
+    lastLabels = 0;
+    schedule();
+  }
+  function geometryFromPositions() {
+    if (!points) return;
+    points.geometry.setAttribute(
+      "position",
+      new THREE.BufferAttribute(positions, 3),
     );
-  starGeometry.setAttribute(
-    "position",
-    new THREE.Float32BufferAttribute(stars, 3),
-  );
-  const starMaterial = new THREE.PointsMaterial({
-    color: 0x71896d,
-    size: 0.75,
-    transparent: true,
-    opacity: 0.25,
-  });
-  geometries.push(starGeometry);
-  materials.push(starMaterial);
-  scene.add(new THREE.Points(starGeometry, starMaterial));
-  const raycaster = new THREE.Raycaster(),
-    pointer = new THREE.Vector2();
-  let width = 1,
-    height = 1,
-    drag = null,
-    raf = 0;
-  const extent = Math.max(
-    160,
-    ...[...positions.values()].map((p) =>
-      Math.max(Math.abs(p.x), Math.abs(p.y)),
-    ),
-  );
-  let baseZ = 650;
-  function render() {
-    if (dead || document.hidden) return;
-    scene.updateMatrixWorld();
-    const projected = new THREE.Vector3(),
-      occupied = [];
-    const order = [...labelNodes].sort(
-      (a, b) =>
-        (b.node.id === selected || b.node.id === hovered
-          ? 4
-          : b.node.kind === "group"
-            ? 2
-            : 0) -
-        (a.node.id === selected || a.node.id === hovered
-          ? 4
-          : a.node.kind === "group"
-            ? 2
-            : 0),
+    points.geometry.computeBoundingSphere();
+    rebuildLines();
+    rebuildMist();
+    lastLabels = 0;
+    schedule();
+  }
+  function rebuildMist() {
+    remove(mist);
+    const centers = [],
+      colors = [],
+      sizes = [],
+      dims = [];
+    for (const g of groups) {
+      const groupNodes = nodes
+        .map((n, i) => ({ n, i }))
+        .filter((x) => x.n.group === g.id);
+      if (!groupNodes.length) continue;
+      const center = new THREE.Vector3();
+      for (const { i } of groupNodes)
+        center.add(new THREE.Vector3().fromArray(positions, i * 3));
+      center.divideScalar(groupNodes.length);
+      centers.push(...center.toArray());
+      const c = new THREE.Color(g.color || colorFor(g.id));
+      colors.push(c.r, c.g, c.b);
+      sizes.push(Math.min(280, 80 + groupNodes.length * 3));
+      dims.push(0.05);
+    }
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(centers, 3));
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geom.setAttribute("aSize", new THREE.Float32BufferAttribute(sizes, 1));
+    geom.setAttribute("aDim", new THREE.Float32BufferAttribute(dims, 1));
+    // A separate, very soft point shader avoids extra textures and postprocessing passes.
+    const material = nodeShader.clone();
+    material.fragmentShader = `varying vec3 vColor; varying float vDim; uniform float uOpacity;
+      void main(){float r=length(gl_PointCoord-.5)*2.;if(r>1.)discard;gl_FragColor=vec4(vColor,pow(1.-r,3.)*vDim);}`;
+    mist = new THREE.Points(geom, material);
+    scene.add(mist);
+  }
+  function launchLayout() {
+    revision++;
+    worker?.terminate();
+    worker = null;
+    status.textContent = "正在整理星系…";
+    try {
+      worker = new Worker(new URL("./galaxy-worker.js", import.meta.url), {
+        type: "module",
+      });
+      worker.onmessage = ({ data }) => {
+        if (dead || data.revision !== revision) return;
+        positions = data.positions;
+        geometryFromPositions();
+        status.textContent = "";
+        worker.terminate();
+        worker = null;
+      };
+      worker.onerror = () => {
+        worker?.terminate();
+        worker = null;
+        status.textContent = "使用轻量星系布局";
+      };
+      worker.postMessage({
+        nodes: nodes.map(({ id, group }) => ({ id, group })),
+        edges,
+        mode,
+        revision,
+      });
+    } catch {
+      status.textContent = "使用轻量星系布局";
+    }
+  }
+  function update(next) {
+    nodes = next.nodes.slice(0, 1500);
+    edges = next.edges;
+    groups = next.groups || [];
+    nodeIndex = new Map(nodes.map((n, i) => [n.id, i]));
+    degree = new Map();
+    for (const e of edges)
+      for (const id of [e.source, e.target])
+        degree.set(id, (degree.get(id) || 0) + 1);
+    if (selected && !nodeIndex.has(selected)) selected = null;
+    const first = !points;
+    remove(points);
+    positions = seedLayout(nodes, mode);
+    const geom = new THREE.BufferGeometry(),
+      colors = [];
+    for (const n of nodes) {
+      const c = new THREE.Color(n.color || colorFor(n.group));
+      colors.push(c.r, c.g, c.b);
+    }
+    geom.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geom.setAttribute(
+      "aSize",
+      new THREE.Float32BufferAttribute(
+        nodes.map(() => 16),
+        1,
+      ),
     );
-    let visibleCount = 0;
-    for (const { node, mesh, label } of order) {
-      mesh.getWorldPosition(projected);
-      projected.project(camera);
+    geom.setAttribute(
+      "aDim",
+      new THREE.Float32BufferAttribute(
+        nodes.map(() => 1),
+        1,
+      ),
+    );
+    points = new THREE.Points(geom, nodeShader);
+    scene.add(points);
+    const radius = Math.max(
+      140,
+      ...nodes.map((n, i) => Math.hypot(...positions.slice(i * 3, i * 3 + 3))),
+    );
+    baseDistance =
+      (radius * 2.65) / Math.min(1.5, Math.max(0.6, width / height));
+    if (first || !selected) {
+      distance = baseDistance;
+      target.set(0, 0, 0);
+      flight = null;
+    }
+    rebuildMist();
+    updateAppearance();
+    launchLayout();
+  }
+  function updateEdges(nextEdges) {
+    edges = nextEdges;
+    degree = new Map();
+    for (const e of edges)
+      for (const id of [e.source, e.target])
+        degree.set(id, (degree.get(id) || 0) + 1);
+    updateAppearance(); // Preserve camera and positions as background link reads arrive.
+  }
+  function select(id, fly = true) {
+    selected = nodeIndex.has(id) ? id : null;
+    if (selected && fly) {
+      const p = new THREE.Vector3().fromArray(
+        positions,
+        nodeIndex.get(selected) * 3,
+      );
+      const neighbors = neighborhood(selected, edges, 1),
+        spread = Math.max(
+          65,
+          ...[...neighbors]
+            .filter((n) => nodeIndex.has(n))
+            .map((n) =>
+              p.distanceTo(
+                new THREE.Vector3().fromArray(positions, nodeIndex.get(n) * 3),
+              ),
+            ),
+        );
+      flyTo(p, Math.max(310, Math.min(baseDistance, spread * 3.3)));
+    }
+    updateAppearance();
+  }
+  function flyTo(position, nextDistance) {
+    flight = {
+      start: performance.now(),
+      from: target.clone(),
+      to: position.clone(),
+      fromDistance: distance,
+      toDistance: nextDistance,
+    };
+    interactionTime = performance.now();
+    if (reduced.matches) {
+      target.copy(position);
+      distance = nextDistance;
+      flight = null;
+    }
+    schedule();
+  }
+  function reset() {
+    selected = null;
+    hovered = null;
+    flyTo(new THREE.Vector3(), baseDistance);
+    updateAppearance();
+  }
+  function labelFrame() {
+    const candidates = [...nodes].sort((a, b) => {
+      const score = (n) =>
+        (n.id === selected ? 10000 : 0) +
+        (n.id === hovered ? 9000 : 0) +
+        (focus.has(n.id) ? 200 : 0) +
+        (degree.get(n.id) || 0) * 3 +
+        (hash(n.id) % 17) / 17;
+      return score(b) - score(a);
+    });
+    const occupied = [];
+    let count = 0;
+    for (const n of candidates) {
+      if (count >= labelPool.length) break;
+      const important = n.id === selected || n.id === hovered;
+      if (selected && !focus.has(n.id) && !important) continue;
+      projected.fromArray(positions, nodeIndex.get(n.id) * 3).project(camera);
       const x = (projected.x * 0.5 + 0.5) * width,
-        y = (-projected.y * 0.5 + 0.5) * height + 14,
-        important =
-          node.kind === "group" || node.id === selected || node.id === hovered;
-      label.style.left = x + "px";
-      label.style.top = y + "px";
-      label.classList.toggle(
-        "selected",
-        selected === node.id || hovered === node.id,
-      );
-      const w = Math.min(130, label.textContent.length * 9),
-        rect = { x: x - w / 2, y: y - 6, w, h: 16 };
-      const collision = occupied.some(
-        (r) =>
-          rect.x < r.x + r.w + 12 &&
-          rect.x + rect.w > r.x - 12 &&
-          rect.y < r.y + r.h + 8 &&
-          rect.y + rect.h > r.y - 8,
-      );
-      if (important && collision) {
-        for (const offset of [20, -20, 40, -40, 60, -60]) {
-          const proposed = { ...rect, y: rect.y + offset };
-          if (proposed.y < 90 || proposed.y > height - 70) continue;
-          if (
-            !occupied.some(
-              (r) =>
-                proposed.x < r.x + r.w + 12 &&
-                proposed.x + proposed.w > r.x - 12 &&
-                proposed.y < r.y + r.h + 8 &&
-                proposed.y + proposed.h > r.y - 8,
-            )
-          ) {
-            rect.y = proposed.y;
-            label.style.top = y + offset + "px";
-            break;
-          }
-        }
-      }
-      label.hidden =
+        y = (-projected.y * 0.5 + 0.5) * height + 15;
+      if (
         projected.z > 1 ||
-        x < 25 ||
-        x > width - 25 ||
-        y < 90 ||
-        y > height - 70 ||
-        (!important && (collision || visibleCount > 18));
-      if (!label.hidden) {
-        occupied.push(rect);
-        visibleCount++;
-      }
-      mesh.scale.setScalar(
-        (node.kind === "group" ? 4.2 : 2.3 + (hash(node.id) % 10) / 12) *
-          (selected === node.id ? 1.9 : hovered === node.id ? 1.45 : 1),
-      );
+        projected.z < -1 ||
+        x < 35 ||
+        x > width - 35 ||
+        y < 50 ||
+        y > height - 55
+      )
+        continue;
+      const w = Math.min(180, n.title.length * 11),
+        rect = { x: x - w / 2, y, w, h: 20 };
+      if (
+        !important &&
+        occupied.some(
+          (r) =>
+            rect.x < r.x + r.w + 12 &&
+            rect.x + w > r.x - 12 &&
+            rect.y < r.y + r.h + 10 &&
+            rect.y + 20 > r.y - 10,
+        )
+      )
+        continue;
+      if (!important && count > (selected ? 16 : 10)) continue;
+      occupied.push(rect);
+      const b = labelPool[count++];
+      b.hidden = false;
+      b.dataset.node = n.id;
+      if (b.textContent !== n.title) b.textContent = n.title;
+      b.title = n.title;
+      b.setAttribute("aria-label", "查看记忆节点 " + n.title);
+      b.classList.toggle("selected", important);
+      b.style.transform = `translate3d(${x}px,${y}px,0) translateX(-50%)`;
+    }
+    for (let i = count; i < labelPool.length; i++) labelPool[i].hidden = true;
+  }
+  function render(now) {
+    raf = 0;
+    if (dead || document.hidden || !inView) return;
+    const dt = lastTime ? Math.min(0.05, (now - lastTime) / 1000) : 0;
+    lastTime = now;
+    if (flight) {
+      let t = Math.min(1, (now - flight.start) / 850);
+      t = t * t * (3 - 2 * t);
+      target.lerpVectors(flight.from, flight.to, t);
+      distance =
+        flight.fromDistance + (flight.toDistance - flight.fromDistance) * t;
+      if (t >= 1) flight = null;
+    }
+    if (
+      auto &&
+      !reduced.matches &&
+      !drag &&
+      !flight &&
+      now - interactionTime > 4000
+    )
+      theta += dt * 0.035;
+    setCamera();
+    nodeShader.uniforms.uScale.value =
+      height / (2 * Math.tan(THREE.MathUtils.degToRad(23)));
+    if (mist)
+      mist.material.uniforms.uScale.value = nodeShader.uniforms.uScale.value;
+    if (now - lastLabels > 90) {
+      labelFrame();
+      lastLabels = now;
     }
     renderer.render(scene, camera);
+    // Exposed as DOM diagnostics, not a global mutable renderer handle.
+    host.dataset.drawCalls = String(renderer.info.render.calls);
+    host.dataset.nodes = String(nodes.length);
+    host.dataset.edges = String(edges.length);
+    if (flight || (auto && !reduced.matches)) schedule();
   }
   function schedule() {
-    cancelAnimationFrame(raf);
-    raf = requestAnimationFrame(render);
+    if (!dead && !raf && !document.hidden && inView)
+      raf = requestAnimationFrame(render);
   }
   function resize() {
-    width = Math.max(1, host.clientWidth);
+    const was = width;
     height = Math.max(1, host.clientHeight);
+    width = Math.max(1, host.clientWidth);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
-    baseZ = Math.max(410, (extent * 2.8) / Math.min(camera.aspect, 1));
-    camera.position.z = baseZ;
+    if (was === 1) distance = baseDistance;
+    lastLabels = 0;
     schedule();
   }
-  const obs = new ResizeObserver(resize);
-  obs.observe(host);
-  function eventPoint(e) {
-    const r = canvas.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
+  const resizeObserver = new ResizeObserver(resize);
+  resizeObserver.observe(host);
+  const visibleObserver = new IntersectionObserver(([entry]) => {
+    inView = entry.isIntersecting;
+    if (inView) schedule();
+    else {
+      cancelAnimationFrame(raf);
+      raf = 0;
+    }
+  });
+  visibleObserver.observe(host);
   function pick(e) {
-    const p = eventPoint(e);
-    pointer.set((p.x / width) * 2 - 1, (-p.y / height) * 2 + 1);
-    raycaster.setFromCamera(pointer, camera);
-    return raycaster.intersectObjects(meshes)[0]?.object;
+    const r = canvas.getBoundingClientRect(),
+      x = e.clientX - r.left,
+      y = e.clientY - r.top;
+    let nearest = null,
+      threshold = 15;
+    for (let i = 0; i < nodes.length; i++) {
+      projected.fromArray(positions, i * 3).project(camera);
+      if (projected.z > 1 || projected.z < -1) continue;
+      const d = Math.hypot(
+        (projected.x * 0.5 + 0.5) * width - x,
+        (-projected.y * 0.5 + 0.5) * height - y,
+      );
+      if (d < threshold) {
+        threshold = d;
+        nearest = nodes[i].id;
+      }
+    }
+    return nearest;
   }
-  function down(e) {
-    if (e.button !== 0) return;
-    drag = { x: e.clientX, y: e.clientY, moved: 0 };
+  const onDown = (e) => {
+    canvas.focus({ preventScroll: true });
     canvas.setPointerCapture(e.pointerId);
-    canvas.style.cursor = "grabbing";
-  }
-  function move(e) {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    drag = {
+      x: e.clientX,
+      y: e.clientY,
+      startX: e.clientX,
+      startY: e.clientY,
+      moved: false,
+      pan: e.shiftKey || e.metaKey || e.button === 2,
+    };
+    flight = null;
+    interactionTime = performance.now();
+    if (pointers.size === 2) {
+      const p = [...pointers.values()];
+      pinch = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+      drag.moved = true;
+    }
+  };
+  const onMove = (e) => {
+    if (pointers.has(e.pointerId))
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (drag) {
       const dx = e.clientX - drag.x,
         dy = e.clientY - drag.y;
-      drag.moved += Math.abs(dx) + Math.abs(dy);
-      world.position.x += ((dx * camera.position.z) / height) * 0.8;
-      world.position.y -= ((dy * camera.position.z) / height) * 0.8;
+      drag.moved =
+        drag.moved ||
+        Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) > 4;
+      if (pointers.size === 2) {
+        const p = [...pointers.values()],
+          span = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+        if (pinch > 0)
+          distance = Math.max(
+            100,
+            Math.min(baseDistance * 3, (distance * pinch) / Math.max(1, span)),
+          );
+        pinch = span;
+      } else if (drag.pan) {
+        const right = new THREE.Vector3().setFromMatrixColumn(
+            camera.matrixWorld,
+            0,
+          ),
+          up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+        target
+          .addScaledVector(right, ((-dx * distance) / height) * 0.8)
+          .addScaledVector(up, ((dy * distance) / height) * 0.8);
+      } else {
+        theta -= dx * 0.005;
+        phi = Math.max(0.15, Math.min(Math.PI - 0.15, phi - dy * 0.005));
+      }
       drag.x = e.clientX;
       drag.y = e.clientY;
+      lastLabels = 0;
+      interactionTime = performance.now();
       schedule();
     } else {
-      const hit = pick(e);
-      canvas.style.cursor = hit ? "pointer" : "grab";
-      const next = hit?.userData.node.id || null;
-      if (next !== hovered) {
-        hovered = next;
-        schedule();
+      const id = pick(e);
+      if (id !== hovered) {
+        hovered = id;
+        canvas.style.cursor = id ? "pointer" : "grab";
+        updateAppearance();
       }
     }
-  }
-  function up(e) {
-    const click = drag && drag.moved < 5;
-    drag = null;
-    canvas.style.cursor = "grab";
+  };
+  const onUp = (e) => {
+    const moved = drag?.moved;
+    const active = pointers.has(e.pointerId);
+    pointers.delete(e.pointerId);
     if (canvas.hasPointerCapture(e.pointerId))
       canvas.releasePointerCapture(e.pointerId);
-    if (click) {
-      const m = pick(e);
-      if (m) onSelect(m.userData.node.id);
+    if (pointers.size) {
+      if (drag) drag.moved = true;
+      return;
     }
-  }
-  function wheel(e) {
+    drag = null;
+    pinch = null;
+    if (active && !moved) {
+      const id = pick(e);
+      if (id) options.onSelect(id);
+      else {
+        reset();
+        options.onClear?.();
+      }
+    }
+  };
+  const onCancel = (e) => {
+    pointers.delete(e.pointerId);
+    drag = null;
+    pinch = null;
+  };
+  const onWheel = (e) => {
     e.preventDefault();
-    camera.position.z = Math.max(
-      130,
+    flight = null;
+    distance = Math.max(
+      100,
       Math.min(
-        2000,
-        camera.position.z *
-          Math.exp(Math.max(-100, Math.min(100, e.deltaY)) * 0.001),
+        baseDistance * 3,
+        distance * Math.exp(Math.max(-150, Math.min(150, e.deltaY)) * 0.0016),
       ),
     );
+    interactionTime = performance.now();
+    lastLabels = 0;
     schedule();
-  }
-  canvas.addEventListener("pointerdown", down);
-  canvas.addEventListener("pointermove", move);
-  canvas.addEventListener("pointerup", up);
-  canvas.addEventListener("pointercancel", () => (drag = null));
-  canvas.addEventListener("wheel", wheel, { passive: false });
-  document.addEventListener("visibilitychange", schedule);
-  const detached = new MutationObserver(() => {
-    if (!host.isConnected) destroy();
-  });
-  detached.observe(document.body, { childList: true, subtree: true });
+  };
+  const onKey = (e) => {
+    if (e.key === "Escape" || e.key.toLowerCase() === "r") {
+      e.preventDefault();
+      reset();
+      options.onClear?.();
+      return;
+    }
+    const moves = {
+      ArrowLeft: [-0.08, 0],
+      ArrowRight: [0.08, 0],
+      ArrowUp: [0, -0.08],
+      ArrowDown: [0, 0.08],
+    };
+    if (moves[e.key]) {
+      e.preventDefault();
+      theta += moves[e.key][0];
+      phi = Math.max(0.15, Math.min(Math.PI - 0.15, phi + moves[e.key][1]));
+    } else if (["+", "=", "-"].includes(e.key)) {
+      e.preventDefault();
+      distance = Math.max(
+        100,
+        Math.min(baseDistance * 3, distance * (e.key === "-" ? 1.15 : 0.87)),
+      );
+    } else return;
+    interactionTime = performance.now();
+    lastLabels = 0;
+    schedule();
+  };
+  const noContext = (e) => e.preventDefault();
+  for (const [event, fn] of [
+    ["pointerdown", onDown],
+    ["pointermove", onMove],
+    ["pointerup", onUp],
+    ["pointercancel", onCancel],
+    ["contextmenu", noContext],
+    ["keydown", onKey],
+  ])
+    canvas.addEventListener(event, fn);
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  const visibility = () => {
+    cancelAnimationFrame(raf);
+    raf = 0;
+    lastTime = 0;
+    schedule();
+  };
+  document.addEventListener("visibilitychange", visibility);
+  const reduceChange = () => {
+    if (reduced.matches) auto = false;
+    options.onMotion?.(auto);
+    schedule();
+  };
+  reduced.addEventListener("change", reduceChange);
+  const lost = (e) => {
+    e.preventDefault();
+    destroy();
+    host.replaceChildren();
+    fallbackView = fallback(host, { ...options, nodes, edges, groups });
+  };
+  canvas.addEventListener("webglcontextlost", lost);
   function destroy() {
+    if (fallbackView) {
+      fallbackView.destroy();
+      fallbackView = null;
+    }
     if (dead) return;
     dead = true;
     cancelAnimationFrame(raf);
-    obs.disconnect();
-    detached.disconnect();
-    document.removeEventListener("visibilitychange", schedule);
-    geometries.forEach((g) => g.dispose());
-    materials.forEach((m) => m.dispose());
+    worker?.terminate();
+    resizeObserver.disconnect();
+    visibleObserver.disconnect();
+    document.removeEventListener("visibilitychange", visibility);
+    reduced.removeEventListener("change", reduceChange);
+    canvas.removeEventListener("webglcontextlost", lost);
+    remove(points);
+    remove(lines);
+    remove(mist);
+    for (const resource of resources) resource.dispose();
     renderer.dispose();
     renderer.forceContextLoss();
-    canvas.remove();
     labels.remove();
+    status.remove();
+    canvas.remove();
   }
-  canvas.addEventListener("webglcontextlost", (e) => {
-    e.preventDefault();
-    if (!dead) {
-      destroy();
-      fallback(host, nodes, edges, positions, onSelect);
-    }
-  });
   resize();
+  update(options);
+  const api = {
+    update,
+    updateEdges,
+    select,
+    reset,
+    destroy,
+    relayout: launchLayout,
+    setDepth(value) {
+      focusDepth = value;
+      updateAppearance();
+    },
+    setMotion(value) {
+      auto = !!value && !reduced.matches;
+      options.onMotion?.(auto);
+      schedule();
+    },
+    setMode(value) {
+      mode = value;
+      positions = seedLayout(nodes, mode);
+      geometryFromPositions();
+      launchLayout();
+    },
+    zoom(factor) {
+      flight = null;
+      distance = Math.max(100, Math.min(baseDistance * 3, distance * factor));
+      lastLabels = 0;
+      schedule();
+    },
+  };
+  return Object.fromEntries(
+    Object.entries(api).map(([name, fn]) => [
+      name,
+      (...args) =>
+        fallbackView && name !== "destroy"
+          ? fallbackView[name]?.(...args)
+          : fn(...args),
+    ]),
+  );
+}
+
+function fallback(host, options) {
+  const box = document.createElement("div");
+  box.className = "galaxy-fallback";
+  host.append(box);
+  let selected = null,
+    depth = 1;
+  function draw() {
+    const near = neighborhood(selected, options.edges, depth);
+    box.replaceChildren();
+    const title = document.createElement("p");
+    title.textContent = "当前设备使用二维记忆目录 · 正文和真实引用仍可浏览";
+    box.append(title);
+    for (const n of options.nodes) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = n.title;
+      b.className = near.has(n.id) ? "active" : "";
+      b.onclick = () => options.onSelect(n.id);
+      box.append(b);
+    }
+  }
+  draw();
+  options.onFallback?.();
   return {
+    update(next) {
+      options = { ...options, ...next };
+      draw();
+    },
+    updateEdges(edges) {
+      options.edges = edges;
+      draw();
+    },
     select(id) {
       selected = id;
-      schedule();
+      draw();
     },
     reset() {
-      world.position.set(0, 0, 0);
-      camera.position.z = baseZ;
-      schedule();
+      selected = null;
+      draw();
     },
-    destroy,
-  };
-}
-function fallback(host, nodes, edges, positions, onSelect) {
-  const ns = "http://www.w3.org/2000/svg",
-    svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "-350 -280 700 560");
-  svg.setAttribute("width", "100%");
-  svg.setAttribute("height", "100%");
-  svg.setAttribute("aria-label", "二维记忆星图（WebGL 不可用）");
-  host.append(svg);
-  const make = (tag, attrs) => {
-    const e = document.createElementNS(ns, tag);
-    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
-    return e;
-  };
-  const scale =
-    250 /
-    Math.max(
-      250,
-      ...[...positions.values()].map((p) =>
-        Math.max(Math.abs(p.x), Math.abs(p.y)),
-      ),
-    );
-  for (const e of edges) {
-    const a = positions.get(e.source),
-      b = positions.get(e.target);
-    if (a && b)
-      svg.append(
-        make("line", {
-          x1: a.x * scale,
-          y1: -a.y * scale,
-          x2: b.x * scale,
-          y2: -b.y * scale,
-          stroke: "#7b946a",
-          "stroke-opacity": e.kind === "reference" ? 0.7 : 0.3,
-          "stroke-dasharray": e.kind === "reference" ? "0" : "3 4",
-        }),
-      );
-  }
-  const elements = new Map();
-  for (const n of nodes) {
-    const p = positions.get(n.id),
-      g = make("g", {
-        role: "button",
-        tabindex: 0,
-        "aria-label": n.title,
-        style: "cursor:pointer",
-      }),
-      c = make("circle", {
-        cx: p.x * scale,
-        cy: -p.y * scale,
-        r: n.kind === "group" ? 5 : 3,
-        fill: n.kind === "group" ? "#e4eebf" : "#92b58c",
-      }),
-      t = make("text", {
-        x: p.x * scale,
-        y: -p.y * scale + 15,
-        fill: "#c2d2ad",
-        "font-size": 8,
-        "text-anchor": "middle",
-      });
-    t.textContent = n.title.slice(0, 15);
-    g.append(c, t);
-    g.onclick = () => onSelect(n.id);
-    g.onkeydown = (e) => {
-      if (e.key === "Enter") onSelect(n.id);
-    };
-    svg.append(g);
-    elements.set(n.id, c);
-  }
-  return {
-    select(id) {
-      elements.forEach((c, key) =>
-        c.setAttribute("stroke", key === id ? "#fff8ca" : "none"),
-      );
-    },
-    reset() {},
     destroy() {
-      svg.remove();
+      box.remove();
     },
+    setDepth(d) {
+      depth = d;
+      draw();
+    },
+    setMotion() {},
+    setMode() {},
+    zoom() {},
   };
 }

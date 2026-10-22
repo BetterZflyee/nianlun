@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 from release_guard import check_file, check_source
 
-VERSION = '2.4.0'
+VERSION = '2.5.0'
 LAUNCHERS = ('安装年轮.command', '打开年轮.command')
 
 
@@ -33,7 +33,7 @@ def build(output=None):
         for name in ('LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md'):
             shutil.copyfile(ROOT / name, package / name)
         (package/'docs').mkdir()
-        for name in ('USER_GUIDE.md','PRODUCT_RELEASE_2.1.md','VERSIONING.md','VALIDATION_2.1.md','VALIDATION_2.1.1.md','PRODUCT_RELEASE_2.2.md','VALIDATION_2.2.md','PRODUCT_RELEASE_2.3.md','VALIDATION_2.3.md','UI_RESEARCH_2.3.md','PRODUCT_RELEASE_2.4.md','VALIDATION_2.4.md'):
+        for name in ('USER_GUIDE.md','PRODUCT_RELEASE_2.1.md','VERSIONING.md','VALIDATION_2.1.md','VALIDATION_2.1.1.md','PRODUCT_RELEASE_2.2.md','VALIDATION_2.2.md','PRODUCT_RELEASE_2.3.md','VALIDATION_2.3.md','UI_RESEARCH_2.3.md','PRODUCT_RELEASE_2.4.md','VALIDATION_2.4.md','PRODUCT_RELEASE_2.5.md','VALIDATION_2.5.md'):
             shutil.copyfile(ROOT/'docs'/name,package/'docs'/name)
         ignore = shutil.ignore_patterns('__pycache__', '*.pyc', 'test_*.py', '.DS_Store')
         shutil.copytree(ROOT / 'packaging/hosts', package / 'hosts', ignore=ignore)

@@ -21,3 +21,7 @@ Upstream: https://github.com/mrdoob/three.js. Source package: npm `three@0.186.1
 The two browser ESM build files were minified with esbuild 0.28.2; the core import was
 renamed to the local `.min.js` filename. No CDN, telemetry, or remote font is used.
 Full license: `nianlun/assets/portal/vendor/three-LICENSE.txt`.
+
+## 交互设计参考：Galaxy View
+
+2.5 的三维记忆探索参考了 [Galaxy View](https://github.com/Longwind1984/galaxy-view) 的发光节点、飞近和邻域聚焦交互（上游 MIT）。本版本没有复制或分发插件源码，没有引入 Obsidian；年轮使用自己的 Three.js 渲染器和只读记忆适配。

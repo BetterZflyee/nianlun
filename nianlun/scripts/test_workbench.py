@@ -135,6 +135,13 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.get('/api/bootstrap')[0],401)
         self.assertEqual(self.get('/api/bootstrap',{'Authorization':'Bearer test-secret'})[0],200)
 
+    def test_relation_view_assets_are_served_with_module_types(self):
+        for path, mime in [('/relations.js', 'javascript'), ('/relations-model.js', 'javascript'), ('/relations.css', 'text/css')]:
+            status, body, headers = self.get(path)
+            self.assertEqual(status, 200)
+            self.assertTrue(body)
+            self.assertIn(mime, headers['Content-Type'])
+
     def test_dns_rebinding_and_cross_origin_requests_rejected(self):
         self.assertEqual(self.get('/',{'Host':'attacker.example'})[0],403)
         headers={'Authorization':'Bearer test-secret','Origin':'https://attacker.example','Content-Type':'application/json'}

@@ -257,6 +257,8 @@ async function refresh() {
   await navigate(view, false);
 }
 async function navigate(next, reload = true) {
+  memoryViewCleanup();
+  memoryViewCleanup = () => {};
   view = next;
   window.scrollTo({ top: 0, behavior: "instant" });
   const generation = ++viewVersion;
@@ -293,7 +295,8 @@ async function navigate(next, reload = true) {
       );
       return;
     }
-    if (["projects", "todos", "memory", "workflows"].includes(view) && !data) {
+    // Memory is independently readable even when the AI-table connection is unavailable.
+    if (["projects", "todos", "workflows"].includes(view) && !data) {
       data = (await run("snapshot")).value;
       $("#identity").textContent = data.identity.name;
     }

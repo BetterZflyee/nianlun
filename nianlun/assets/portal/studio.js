@@ -158,116 +158,50 @@ function compactRelations(project) {
   );
   return panel;
 }
-function openRelations(project, rows) {
-  const canvas = el("div", { class: "relation-matrix" }),
-    search = el("input", {
-      type: "search",
-      placeholder: "查找记录、里程碑或场地",
-      "aria-label": "查找关联节点",
-    });
-  const box = el("div", {}, [
-    el("p", {
-      class: "subtle",
-      text: projectLabel(project) + " · 每行只展开一条记录的真实关联",
-    }),
-    search,
-    canvas,
-  ]);
-  const inspect = (role, row) => {
-    dialog(
-      roleNames[role] + " · " + row.title,
-      el("div", {}, [
-        el("p", { text: row.description || row.notes || "暂无说明" }),
-        badge(row.status),
-        el("p", { class: "subtle", text: projectLabel(project) }),
-        btn("编辑与关联", () => editRow(role, row), "primary"),
-      ]),
-    );
-  };
-  function draw() {
-    const q = search.value.trim().toLowerCase();
-    canvas.replaceChildren(
-      el(
-        "div",
-        { class: "relation-columns" },
-        ["项目记录", "关联里程碑", "关联场地"].map((t) =>
-          el("strong", { text: t }),
-        ),
-      ),
-    );
-    for (const r of rows.records) {
-      const miles = rows.milestones.filter((m) =>
-          r.milestone_ids?.includes(m.id),
-        ),
-        sites = rows.sites.filter((s) => r.site_ids?.includes(s.id));
-      if (
-        q &&
-        ![r, ...miles, ...sites].some((n) => n.title.toLowerCase().includes(q))
-      )
-        continue;
-      canvas.append(
-        el("div", { class: "relation-columns" }, [
-          btn(r.title, () => inspect("records", r), "relation-cell"),
-          el(
-            "div",
-            {},
-            miles.length
-              ? miles.map((m) =>
-                  btn(m.title, () => inspect("milestones", m), "relation-cell"),
-                )
-              : [el("span", { class: "subtle", text: "未关联" })],
-          ),
-          el(
-            "div",
-            {},
-            sites.length
-              ? sites.map((s) =>
-                  btn(s.title, () => inspect("sites", s), "relation-cell"),
-                )
-              : [el("span", { class: "subtle", text: "未关联" })],
-          ),
-        ]),
-      );
-    }
+async function openRelations(project, rows) {
+  try {
+    const { createRelationView } = await import("./relations.js");
+    // Include explicitly referenced targets even when they belong to another project.
+    const resolved = { ...rows };
     for (const role of ["milestones", "sites"]) {
-      const ids = new Set(
-          rows.records.flatMap(
-            (r) =>
-              r[role === "milestones" ? "milestone_ids" : "site_ids"] || [],
-          ),
-        ),
-        loose = rows[role].filter(
-          (r) => !ids.has(r.id) && (!q || r.title.toLowerCase().includes(q)),
-        );
-      if (loose.length)
-        canvas.append(
-          el("details", {}, [
-            el("summary", {
-              text: "尚未连接记录的" + roleNames[role] + " · " + loose.length,
-            }),
-            ...loose.map((r) =>
-              btn(r.title, () => inspect(role, r), "relation-cell"),
-            ),
-          ]),
-        );
+      const field = role === "milestones" ? "milestone_ids" : "site_ids";
+      const ids = new Set(rows.records.flatMap((row) => row[field] || []));
+      resolved[role] = [
+        ...new Map(
+          [
+            ...rows[role],
+            ...(data[role] || []).filter((row) => ids.has(row.id)),
+          ].map((row) => [row.id, row]),
+        ).values(),
+      ];
     }
-    if (canvas.children.length === 1)
-      canvas.append(
-        studioEmpty(
-          "没有匹配的关联",
-          "尝试其他名称，或为项目记录关联里程碑与场地。",
-        ),
-      );
+    const modal = $("#modal");
+    let view;
+    const cleanup = () => {
+      view?.destroy();
+      modal.classList.remove("relations-dialog");
+      modal.removeEventListener("close", cleanup);
+    };
+    view = createRelationView({
+      project,
+      rows: resolved,
+      el,
+      btn,
+      badge,
+      roleNames,
+      label: projectLabel,
+      edit: (role, row) => {
+        cleanup();
+        editRow(role, row);
+      },
+    });
+    dialog("探索项目关系", view.root);
+    modal.classList.add("relations-dialog");
+    modal.addEventListener("close", cleanup, { once: true });
+    view.mount();
+  } catch (error) {
+    toast("项目关系图未能打开：" + error.message);
   }
-  search.oninput = draw;
-  draw();
-  dialog("探索项目关系", box);
-  $("#modal").classList.add("wide-dialog");
-  $("#modal").addEventListener(
-    "close",
-    () => $("#modal").classList.remove("wide-dialog"),
-    { once: true },
-  );
 }
 
 async function renderTodos23(root, generation) {
@@ -605,285 +539,596 @@ async function renderTodos23(root, generation) {
   await load();
 }
 
+let memoryViewCleanup = () => {};
 async function renderMemory23(root, generation) {
-  const search = el("input", {
-      type: "search",
-      placeholder: "在记忆星图中查找…",
-      "aria-label": "筛选记忆星图",
-    }),
-    rail = el("aside", { class: "memory-rail" }),
-    stage = el("div", { class: "constellation-stage" }),
-    detail = el("aside", { class: "memory-inspector" }),
-    status = el("span", { class: "graph-status" }),
-    nodeList = el("div", { class: "memory-node-list" }),
-    listToggle = btn("目录", () => {
-      nodeList.hidden = !nodeList.hidden;
-    }),
-    more = btn("加载更多记忆", () => load(offset));
+  const model = await import("./galaxy-model.js");
+  if (generation !== viewVersion) return;
+  // A late workspace snapshot must not change group IDs during link hydration.
+  const memoryProjects = (data?.projects || []).map(({ id, title }) => ({
+    id,
+    title,
+  }));
   let pages = [],
     offset = 0,
     group = "all",
     graph = null,
-    selectedSlug = null,
+    selectedKey = null,
     readSeq = 0,
-    hasMore = false;
-  const graphCard = el("section", { class: "constellation-card" }, [
+    hasMore = false,
+    disposed = false;
+  let preloading = true,
+    catalogBusy = false;
+  let loadingLinks = false,
+    stopLinks = false,
+    attempted = new Set(),
+    fullGraph = { nodes: [], edges: [], groups: [] },
+    drawSeq = 0;
+  const search = el("input", {
+    type: "search",
+    placeholder: "查找记忆，飞近一颗星…",
+    "aria-label": "查找星图记忆",
+  });
+  const results = el("div", { class: "galaxy-search-results" });
+  results.hidden = true;
+  const searchBox = el("div", { class: "galaxy-search" }, [
+    studioIcon("search"),
+    search,
+    results,
+  ]);
+  const stage = el("div", { class: "constellation-stage", "aria-live": "off" });
+  const status = el("span", { class: "graph-status" }),
+    linkStatus = el("span", { class: "galaxy-link-status", role: "status" });
+  const detail = el("aside", {
+    class: "memory-inspector galaxy-inspector",
+    "aria-label": "记忆正文",
+  });
+  detail.hidden = true;
+  const rail = el("div", { class: "galaxy-groups" }),
+    nodeList = el("div", { class: "memory-node-list" });
+  nodeList.hidden = true;
+  const more = btn("加载更多记忆", () => load(offset));
+  const pause = btn("暂停漫游", () => {
+    motion = !motion;
+    graph?.setMotion(motion);
+  });
+  let motion = !matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const depth = select(
+    [
+      ["1", "一层引用"],
+      ["2", "两层引用"],
+    ],
+    "1",
+  );
+  depth.setAttribute("aria-label", "关联聚焦范围");
+  depth.onchange = () => graph?.setDepth(Number(depth.value));
+  const style = select(
+    [
+      ["galaxy", "立体星系"],
+      ["disc", "舒展星盘"],
+    ],
+    "galaxy",
+  );
+  style.setAttribute("aria-label", "星图布局");
+  style.onchange = () => graph?.setMode(style.value);
+  const nodeToggle = btn("记忆目录", () => {
+    nodeList.hidden = !nodeList.hidden;
+    nodeToggle.setAttribute("aria-expanded", String(!nodeList.hidden));
+  });
+  const indexButton = el("button", { type: "button", text: "暂停读取" });
+  const controls = el("details", { class: "galaxy-controls", open: true }, [
+    el("summary", { text: "探索星图" }),
+    el("div", { class: "galaxy-control-body" }, [
+      el("div", { class: "galaxy-settings" }, [
+        formField("空间布局", style),
+        formField("点击后聚焦", depth),
+      ]),
+      el("div", { class: "galaxy-actions" }, [pause, btn("返回全景", clear)]),
+      el("p", { class: "galaxy-rail-label", text: "颜色分组" }),
+      rail,
+      more,
+      el("p", {
+        class: "galaxy-source-hint",
+        text: "项目按标题匹配，其余按记忆目录聚类。颜色表示分组，连线只表示真实引用。",
+      }),
+    ]),
+  ]);
+  const expand = btn("展开星图", () => {
+    studio.classList.toggle("expanded");
+    expand.textContent = studio.classList.contains("expanded")
+      ? "收起星图"
+      : "展开星图";
+  });
+  const card = el("section", { class: "constellation-card galaxy-card" }, [
     el("div", { class: "graph-toolbar" }, [
       el("div", {}, [el("strong", { text: "记忆星图" }), status]),
-      el("div", { class: "actions" }, [
-        listToggle,
-        btn("重置视角", () => graph?.reset()),
-      ]),
+      el("div", { class: "actions" }, [nodeToggle, expand]),
     ]),
     stage,
-    el("div", { class: "graph-legend" }, [
-      el("span", { text: "● 记忆页面" }),
-      el("span", { text: "◉ 项目分组" }),
-      el("span", { text: "虚线：标题匹配 · 实线：已读取的引用" }),
-      el("small", { text: "拖动平移 · 滚轮缩放 · 点击阅读" }),
+    controls,
+    el("div", { class: "galaxy-zoom" }, [
+      btn("+", () => graph?.zoom(0.8)),
+      btn("−", () => graph?.zoom(1.25)),
+    ]),
+    el("div", { class: "galaxy-bottom" }, [
+      el("div", { class: "galaxy-index" }, [linkStatus, indexButton]),
+      el("div", {
+        class: "galaxy-help",
+        text: "拖动旋转 · Shift / 右键拖动平移 · 滚轮缩放 · 点击飞近阅读 · Esc 返回全景",
+      }),
     ]),
     nodeList,
   ]);
+  const studio = el("div", { class: "memory-studio galaxy-studio" }, [
+    card,
+    detail,
+  ]);
   root.replaceChildren(
-    studioHead("项目记忆", "先看见积累，再沿着线索深入。", [
+    studioHead("项目记忆", "让积累成为星系，沿着关联找到下一条线索。", [
       btn("刷新目录", () => navigate("memory")),
     ]),
-    el("div", { class: "memory-searchbar" }, [
-      search,
+    el("div", { class: "galaxy-searchbar" }, [
+      searchBox,
       btn("全文检索", () => quiet(fullSearch())),
     ]),
-    el("div", { class: "memory-studio" }, [rail, graphCard, detail]),
+    studio,
   );
-  detail.append(
-    studioEmpty(
-      "每一个点，都是一段积累",
-      "点击星图或目录中的页面，查看正文及它引用的其他记忆。",
-    ),
-  );
-  nodeList.hidden = true;
-  const projects = data?.projects || [];
-  const groupsFor = (p) =>
-    projects
-      .filter((pr) =>
-        (p.title + " " + p.slug).toLowerCase().includes(pr.title.toLowerCase()),
-      )
-      .map((pr) => pr.id);
-  function subset() {
-    const q = search.value.trim().toLowerCase();
-    return pages.filter(
-      (p) =>
-        (group === "all" ||
-          (group === "unassigned"
-            ? !groupsFor(p).length
-            : groupsFor(p).includes(group))) &&
-        (!q || (p.title + " " + p.slug).toLowerCase().includes(q)),
-    );
+  const closeExpanded = (e) => {
+    if (e.key === "Escape" && studio.classList.contains("expanded")) {
+      studio.classList.remove("expanded");
+      expand.textContent = "展开星图";
+    }
+  };
+  document.addEventListener("keydown", closeExpanded);
+  memoryViewCleanup = () => {
+    disposed = true;
+    stopLinks = true;
+    readSeq++;
+    drawSeq++;
+    graph?.destroy();
+    document.removeEventListener("keydown", closeExpanded);
+  };
+  function active() {
+    return !disposed && generation === viewVersion;
+  }
+  function clear() {
+    selectedKey = null;
+    detail.hidden = true;
+    graph?.reset();
+  }
+  function syncGraph() {
+    fullGraph = model.buildGraph(pages, memoryProjects);
+  }
+  function visibleGraph() {
+    const nodes = (
+        group === "all"
+          ? fullGraph.nodes
+          : fullGraph.nodes.filter((n) => n.group === group)
+      ).slice(0, 1500),
+      ids = new Set(nodes.map((n) => n.id));
+    return {
+      nodes,
+      edges: fullGraph.edges.filter(
+        (e) => ids.has(e.source) && ids.has(e.target),
+      ),
+      groups: fullGraph.groups,
+    };
+  }
+  function counts() {
+    const visible = visibleGraph();
+    status.textContent =
+      `${visible.nodes.length} 篇记忆 · ${visible.edges.length} 条已读取引用` +
+      (hasMore ? " · 目录可继续加载" : "");
   }
   function drawRail() {
-    rail.replaceChildren(el("div", { class: "rail-title", text: "记忆分组" }));
+    rail.replaceChildren();
     const options = [
-      ["all", "全部记忆", pages.length],
-      ...projects
-        .map((p) => [
-          p.id,
-          p.title,
-          pages.filter((n) => groupsFor(n).includes(p.id)).length,
-        ])
-        .filter((x) => x[2]),
-      [
-        "unassigned",
-        "其他记忆",
-        pages.filter((p) => !groupsFor(p).length).length,
-      ],
+      { id: "all", title: "全部记忆", color: "#dce9df" },
+      ...fullGraph.groups,
     ];
-    options.forEach(([id, label, count]) => {
+    for (const g of options) {
+      const count =
+        g.id === "all"
+          ? pages.length
+          : fullGraph.nodes.filter((n) => n.group === g.id).length;
       const b = btn(
         "",
         () => {
-          group = id;
+          group = g.id;
+          selectedKey = null;
+          detail.hidden = true;
           drawRail();
-          draw();
+          quiet(draw());
         },
-        group === id ? "active" : "",
+        group === g.id ? "active" : "",
       );
-      b.append(el("span", { text: label }), el("small", { text: count }));
+      const dot = el("i", { class: "galaxy-swatch" });
+      dot.style.backgroundColor = g.color;
+      b.append(
+        dot,
+        el("span", { text: g.title }),
+        el("small", { text: count }),
+      );
+      b.setAttribute("aria-pressed", String(group === g.id));
+      b.title = g.basis || "所有已载入记忆";
       rail.append(b);
-    });
-    rail.append(
-      el("p", {
-        class: "form-help",
-        text: "按标题归组，保留原始记忆。未匹配到项目的页面也会展示。",
-      }),
-      more,
-    );
+    }
     more.hidden = !hasMore;
+    more.disabled = preloading || pages.length >= 1500;
+    more.textContent = preloading
+      ? "正在展开记忆目录…"
+      : pages.length >= 1500
+        ? "已达 1500 篇展示上限"
+        : "加载更多记忆";
   }
   async function draw() {
-    const shown = subset();
-    const visual = shown.slice(0, 300);
-    status.textContent =
-      shown.length +
-      " 篇 / 已载入 " +
-      pages.length +
-      " 篇" +
-      (shown.length > 300 ? " · 星图显示前 300 篇" : "");
+    const turn = ++drawSeq;
+    syncGraph();
+    counts();
+    const visual = visibleGraph();
     nodeList.replaceChildren(
-      ...shown.map((p) => btn(p.title, () => open(p), "memory-list-node")),
+      el("div", { class: "galaxy-list-head" }, [
+        el("strong", { text: "已载入的记忆" }),
+        btn("关闭目录", () => {
+          nodeList.hidden = true;
+          nodeToggle.setAttribute("aria-expanded", "false");
+        }),
+      ]),
+      ...visual.nodes.map((p) =>
+        btn(p.title, () => open(p), "memory-list-node"),
+      ),
     );
-    if (!shown.length) {
+    if (!visual.nodes.length) {
       graph?.destroy();
       graph = null;
       stage.replaceChildren(
-        studioEmpty("没有匹配的页面", "可以加载更多记忆，或使用全文检索。"),
+        studioEmpty(
+          "还没有记忆页面",
+          "连接或写入自己的独立记忆空间后，已有页面会出现在这里。",
+        ),
       );
       return;
     }
-    const nodes = visual.map((p) => ({
-      id: p.slug,
-      title: p.title,
-      group: groupsFor(p)[0] || "other",
-      kind: "page",
-    }));
-    const groups = [...new Set(nodes.map((p) => p.group))];
-    const anchors = groups.map((id) => ({
-      id: "group:" + id,
-      title: projects.find((p) => p.id === id)?.title || "其他记忆",
-      kind: "group",
-      group: id,
-    }));
-    const edges = nodes.map((p) => ({
-      source: "group:" + p.group,
-      target: p.id,
-      kind: "group",
-    }));
-    const slugs = new Set(shown.map((p) => p.slug));
-    shown.forEach((p) =>
-      (p.references || [])
-        .filter((s) => slugs.has(s))
-        .forEach((s) =>
-          edges.push({ source: p.slug, target: s, kind: "reference" }),
-        ),
-    );
     try {
       const module = await import("./constellation.js");
-      if (generation !== viewVersion) return;
-      graph?.destroy();
-      stage.replaceChildren();
-      graph = module.mount(stage, {
-        nodes: [...anchors, ...nodes],
-        edges,
-        onSelect: (id) => {
-          if (id.startsWith("group:")) {
-            group = id.slice(6) === "other" ? "unassigned" : id.slice(6);
-            drawRail();
-            draw();
-          } else {
-            const p = pages.find((p) => p.slug === id);
-            if (p) open(p);
-          }
-        },
-      });
-      if (selectedSlug) graph.select(selectedSlug);
-    } catch (e) {
+      if (!active() || turn !== drawSeq) return;
+      if (graph) graph.update(visual);
+      else {
+        stage.replaceChildren();
+        graph = module.mount(stage, {
+          ...visual,
+          onSelect: (id) => {
+            const p = pages.find((p) => model.keyFor(p) === id);
+            if (p) quiet(open(p));
+          },
+          onClear: () => {
+            selectedKey = null;
+            detail.hidden = true;
+          },
+          onMotion: (value) => {
+            motion = value;
+            pause.textContent = value ? "暂停漫游" : "开启漫游";
+            pause.setAttribute("aria-pressed", String(value));
+          },
+          onFallback: () => {
+            pause.disabled = true;
+            style.disabled = true;
+          },
+        });
+      }
+      graph.setDepth(Number(depth.value));
+      graph.setMotion(motion);
+      if (style.value !== "galaxy") graph.setMode(style.value);
+      if (selectedKey) graph.select(selectedKey, false);
+    } catch {
       stage.replaceChildren(
-        studioEmpty("星图暂不可用", "仍可在目录中阅读所有已载入记忆。"),
+        studioEmpty("星图暂不可用", "可以通过记忆目录继续阅读。"),
       );
       nodeList.hidden = false;
     }
   }
+  function paintDetail(p) {
+    detail.replaceChildren(
+      el("div", { class: "galaxy-detail-head" }, [
+        el("span", { class: "inspector-kicker", text: "记忆页面" }),
+        btn("×", () => {
+          detail.hidden = true;
+          graph?.reset();
+          selectedKey = null;
+        }),
+      ]),
+      el("h2", { text: p.title }),
+    );
+    detail.querySelector("button").setAttribute("aria-label", "关闭记忆正文");
+    detail.append(
+      el("div", { class: "memory-meta" }, [
+        badge(p.type || "note"),
+        el("small", { text: p.updated || "原始记忆" }),
+      ]),
+      el("small", { text: p.slug }),
+    );
+    if (p.text === undefined)
+      detail.append(
+        el("p", { class: "subtle", text: "读取独立记忆空间正文…" }),
+      );
+    else
+      detail.append(
+        el("pre", { class: "memory-body", text: p.text || "此页正文为空。" }),
+      );
+    if (p.note) detail.append(el("p", { class: "form-help", text: p.note }));
+    const id = model.keyFor(p),
+      out = fullGraph.edges.filter((e) => e.source === id),
+      incoming = fullGraph.edges.filter((e) => e.target === id);
+    for (const [title, links, field] of [
+      ["引用的记忆", out, "target"],
+      ["被这些记忆引用", incoming, "source"],
+    ]) {
+      if (!links.length) continue;
+      detail.append(el("h3", { text: title }));
+      for (const e of links) {
+        const node = fullGraph.nodes.find((n) => n.id === e[field]);
+        if (node)
+          detail.append(btn(node.title, () => open(node), "reference-page"));
+      }
+    }
+    const unresolved = (p.references || []).filter(
+      (slug) => !pages.some((x) => x.slug === slug),
+    );
+    if (unresolved.length)
+      detail.append(
+        el("p", {
+          class: "form-help",
+          text: `另有 ${unresolved.length} 条正文引用尚未载入目录。可加载更多或全文检索。`,
+        }),
+      );
+    if (p.links_truncated)
+      detail.append(
+        el("p", {
+          class: "form-help",
+          text: "此页引用较多，当前仅显示已读取部分。",
+        }),
+      );
+    if (!out.length && !incoming.length)
+      detail.append(
+        el("p", {
+          class: "form-help",
+          text: p.links_verified
+            ? "在当前已载入页面中，尚无明确引用连线。"
+            : "此页引用尚未核验，已显示可读正文。",
+        }),
+      );
+  }
   async function open(page) {
     const current = ++readSeq;
-    selectedSlug = page.slug;
-    graph?.select(page.slug);
-    detail.replaceChildren(
-      el("span", { class: "inspector-kicker", text: "记忆页面" }),
-      el("h2", { text: page.title }),
-      el("small", { text: page.slug }),
-      el("p", { class: "subtle", text: "读取独立记忆空间正文…" }),
-    );
+    selectedKey = model.keyFor(page);
+    results.hidden = true;
+    search.value = "";
+    if (
+      group !== "all" &&
+      fullGraph.nodes.find((n) => n.id === selectedKey)?.group !== group
+    ) {
+      group = "all";
+      drawRail();
+      await draw();
+    }
+    if (!active() || current !== readSeq) return;
+    detail.hidden = false;
+    graph?.select(selectedKey);
+    paintDetail(page);
     try {
       const p =
         page.text !== undefined
           ? page
-          : (await run("memory_page", { slug: page.slug })).value;
-      if (current !== readSeq || generation !== viewVersion) return;
+          : (await run("memory_page", { slug: page.slug, key: page.key }))
+              .value;
+      if (!active() || current !== readSeq) return;
+      const original = pages.find((p) => model.keyFor(p) === selectedKey);
       Object.assign(page, p);
-      detail.replaceChildren(
-        el("span", { class: "inspector-kicker", text: "记忆页面" }),
-        el("h2", { text: p.title }),
-        el("div", { class: "memory-meta" }, [
-          badge(p.type || "note"),
-          el("small", { text: p.updated || "原始记忆" }),
-        ]),
-        el("small", { text: p.slug }),
-        el("pre", { class: "memory-body", text: p.text || "此页正文为空。" }),
-      );
-      if (p.note) detail.append(el("p", { class: "form-help", text: p.note }));
-      if (p.references?.length) {
-        detail.append(el("h3", { text: "引用的页面" }));
-        for (const slug of p.references) {
-          const target = pages.find((x) => x.slug === slug);
-          detail.append(
-            target
-              ? btn(target.title, () => open(target), "reference-page")
-              : el("p", { class: "subtle", text: slug + " · 尚未载入目录" }),
-          );
-        }
-        draw();
-      }
+      if (original) Object.assign(original, p);
+      syncGraph();
+      counts();
+      graph?.updateEdges(visibleGraph().edges);
+      paintDetail(page);
     } catch (e) {
-      if (current === readSeq)
+      if (active() && current === readSeq)
         detail.append(
           el("p", { class: "form-error", text: e.message }),
           btn("重试读取", () => open(page)),
         );
     }
   }
-  async function load(at) {
-    more.disabled = true;
-    if (!pages.length) loading(stage, "正在读取已有记忆目录…");
+  function updateLinkStatus() {
+    const checked = pages.filter((p) => p.links_verified).length,
+      failed = pages.filter((p) => p.links_error).length;
+    linkStatus.textContent =
+      loadingLinks && !stopLinks
+        ? `后台读取引用 ${attempted.size} / ${pages.length} · 可继续浏览`
+        : stopLinks
+          ? `${failed ? "引用读取遇到问题，可重试" : loadingLinks ? "当前批完成后暂停" : "引用读取已暂停"} · 已核验 ${checked} / ${pages.length}`
+          : failed
+            ? `${checked} 篇已核验 · ${failed} 篇暂未读到引用`
+            : `已核验 ${checked} 篇引用索引` +
+              (pages.some((p) => p.links_truncated)
+                ? " · 部分引用有截断"
+                : "") +
+              (fullGraph.edges.length ? "" : " · 当前页面之间暂无明确引用");
+    indexButton.textContent = stopLinks
+      ? failed
+        ? "重试并继续"
+        : "继续读取"
+      : failed && !loadingLinks
+        ? "重试未读引用"
+        : loadingLinks
+          ? "暂停读取"
+          : "引用已就绪";
+    indexButton.disabled = !loadingLinks && !stopLinks && !failed;
+    if (failed && !loadingLinks && !stopLinks)
+      indexButton.onclick = () => {
+        for (const p of pages.filter((p) => p.links_error)) {
+          attempted.delete(model.keyFor(p));
+          delete p.links_error;
+        }
+        quiet(loadLinks());
+      };
+    else
+      indexButton.onclick = () => {
+        stopLinks = !stopLinks;
+        if (!stopLinks) {
+          for (const p of pages.filter((p) => p.links_error)) {
+            attempted.delete(model.keyFor(p));
+            delete p.links_error;
+          }
+        }
+        updateLinkStatus();
+        if (!stopLinks) quiet(loadLinks());
+      };
+  }
+  async function loadLinks() {
+    if (loadingLinks || stopLinks || !active()) return;
+    loadingLinks = true;
+    updateLinkStatus();
     try {
-      const r = (await run("memory_catalog", { offset: at })).value;
-      if (generation !== viewVersion) return;
-      const map = new Map(pages.map((p) => [p.slug, p]));
-      r.pages.forEach((p) => map.set(p.slug, p));
-      pages = [...map.values()];
-      offset = r.next_offset;
-      hasMore = r.has_more;
-      drawRail();
-      await draw();
-    } catch (e) {
-      stage.replaceChildren(
-        studioEmpty("记忆目录未能读取", e.message),
-        btn("重试目录", () => load(at)),
-      );
+      while (active() && !stopLinks) {
+        const batch = pages
+          .filter((p) => p.key && !attempted.has(model.keyFor(p)))
+          .slice(0, 6);
+        if (!batch.length) break;
+        try {
+          const value = (
+            await run("memory_relations", { keys: batch.map((p) => p.key) })
+          ).value;
+          if (!active()) return;
+          for (const p of batch) {
+            const found = value.pages.find((x) => x.key === p.key);
+            attempted.add(p.key);
+            p.links_verified = found?.verified === true;
+            if (p.links_verified) {
+              p.links = found.links;
+              p.links_truncated = found.truncated;
+              delete p.links_error;
+            } else p.links_error = found?.error || "引用暂未读到";
+          }
+        } catch (e) {
+          if (!active()) return;
+          for (const p of batch) {
+            attempted.add(p.key);
+            p.links_error = e.message;
+          }
+          stopLinks = true;
+        }
+        syncGraph();
+        counts();
+        graph?.updateEdges(visibleGraph().edges);
+        const currentPage = pages.find((p) => model.keyFor(p) === selectedKey);
+        if (currentPage && currentPage.text !== undefined && !detail.hidden) {
+          const top = detail.scrollTop;
+          paintDetail(currentPage);
+          detail.scrollTop = top;
+        }
+        updateLinkStatus();
+      }
     } finally {
-      more.disabled = false;
+      loadingLinks = false;
+      if (active()) {
+        updateLinkStatus();
+        if (!selectedKey && !stopLinks) graph?.relayout?.();
+      }
     }
   }
+  async function load(at) {
+    if (catalogBusy) return false;
+    catalogBusy = true;
+    more.disabled = true;
+    if (!pages.length) loading(stage, "正在读取自己的记忆目录…");
+    try {
+      const r = (await run("memory_catalog", { offset: at })).value;
+      if (!active()) return;
+      const map = new Map(pages.map((p) => [model.keyFor(p), p]));
+      for (const p of r.pages)
+        if (!map.has(model.keyFor(p))) map.set(model.keyFor(p), p);
+      pages = [...map.values()].slice(0, 1500);
+      offset = r.next_offset;
+      hasMore = r.has_more;
+      syncGraph();
+      drawRail();
+      await draw();
+      updateLinkStatus();
+      quiet(loadLinks());
+      return true;
+    } catch (e) {
+      if (active())
+        stage.replaceChildren(
+          studioEmpty("记忆目录未能读取", e.message),
+          btn("重试目录", () => load(at)),
+        );
+    } finally {
+      catalogBusy = false;
+      more.disabled = preloading || pages.length >= 1500;
+    }
+  }
+  function showResults() {
+    const q = search.value.trim().toLowerCase();
+    results.replaceChildren();
+    results.hidden = !q;
+    if (!q) return;
+    const matches = fullGraph.nodes
+      .filter((n) => (n.title + " " + n.slug).toLowerCase().includes(q))
+      .slice(0, 8);
+    if (!matches.length)
+      results.append(el("p", { text: "已载入目录中暂无匹配，可用全文检索。" }));
+    for (const p of matches) results.append(btn(p.title, () => open(p)));
+  }
+  search.oninput = showResults;
+  search.onkeydown = (e) => {
+    if (e.key === "Escape") {
+      results.hidden = true;
+      search.value = "";
+    }
+    if (e.key === "Enter") {
+      const first = results.querySelector("button");
+      if (first) {
+        e.preventDefault();
+        first.click();
+      }
+    }
+  };
   async function fullSearch() {
     if (!search.value.trim()) {
       toast("先输入要检索的关键词");
       return;
     }
+    const current = ++readSeq;
+    results.hidden = true;
+    detail.hidden = false;
     loading(detail, "正在检索记忆全文…");
-    const r = (await run("memory_query", { query: search.value })).value;
-    if (generation !== viewVersion) return;
-    detail.replaceChildren(
-      el("h3", { text: "全文检索结果 · " + r.pages.length }),
-    );
-    if (!r.pages.length)
-      detail.append(studioEmpty("暂无匹配", "可更换简称或另一个关键词。"));
-    r.pages.forEach((p) =>
-      detail.append(btn(p.title, () => open(p), "reference-page")),
-    );
+    try {
+      const r = (await run("memory_query", { query: search.value })).value;
+      if (!active() || current !== readSeq) return;
+      detail.replaceChildren(
+        el("div", { class: "galaxy-detail-head" }, [
+          el("h3", { text: `全文检索 · ${r.pages.length} 项` }),
+          btn("关闭", () => {
+            detail.hidden = true;
+          }),
+        ]),
+      );
+      if (!r.pages.length)
+        detail.append(studioEmpty("暂无匹配", "可以更换简称或关键词。"));
+      for (const p of r.pages)
+        detail.append(btn(p.title, () => open(p), "reference-page"));
+    } catch (e) {
+      if (active() && current === readSeq)
+        detail.replaceChildren(
+          studioEmpty("全文检索未完成", e.message),
+          btn("重试", fullSearch),
+        );
+    }
   }
-  let debounce;
-  search.oninput = () => {
-    clearTimeout(debounce);
-    debounce = setTimeout(draw, 180);
-  };
   await load(0);
+  // Preload a bounded metadata overview, not the page bodies, without blocking the visible graph.
+  while (active() && hasMore && pages.length < 600)
+    if (!(await load(offset))) break;
+  preloading = false;
+  if (active()) drawRail();
 }
 
 function skillCategory(s) {
@@ -1422,6 +1667,7 @@ async function renderRuns23(root, generation) {
     "todos",
     "todo_detail",
     "memory_catalog",
+    "memory_relations",
     "memory_page",
     "memory_query",
     "memory_project",

@@ -1,0 +1,235 @@
+#modal.relations-dialog {
+  width: min(1280px, 96vw);
+  max-width: 1280px;
+}
+.relations-view {
+  --relation-mile: #497c65;
+  --relation-record: #55768b;
+  --relation-site: #b58a45;
+}
+.relations-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 10px;
+}
+.relations-toolbar > div {
+  min-width: 0;
+}
+.relations-toolbar strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.relations-summary {
+  display: block;
+  margin-top: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.relations-toolbar input {
+  width: 280px;
+  flex: 0 0 auto;
+  margin: 0;
+}
+.relations-help {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.relations-scroll {
+  overflow: auto;
+  max-height: 62vh;
+  border-block: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 10px;
+}
+.relations-scroll[hidden] {
+  display: none;
+}
+.relations-canvas {
+  position: relative;
+  min-height: 396px;
+}
+.relations-bands {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.relations-band {
+  fill: var(--relation-mile);
+  opacity: 0.24;
+  transition: opacity 0.14s;
+}
+.relations-band.relations-sites {
+  fill: var(--relation-site);
+}
+.relations-band.is-focused {
+  opacity: 0.65;
+}
+.relations-band.is-dimmed {
+  opacity: 0.045;
+}
+.relations-column-heading {
+  position: absolute;
+  top: 17px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.relations-column-heading::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--relation-mile);
+}
+.relations-column-heading.relations-records::before {
+  background: var(--relation-record);
+}
+.relations-column-heading.relations-sites::before {
+  background: var(--relation-site);
+}
+.relations-column-heading small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.relations-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  padding: 9px 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--relation-mile);
+  border-radius: 7px;
+  text-align: left;
+  box-shadow: 0 2px 5px #25362e06;
+  transition:
+    opacity 0.14s,
+    box-shadow 0.14s,
+    background 0.14s;
+}
+.relations-node.relations-records {
+  border-left-color: var(--relation-record);
+}
+.relations-node.relations-sites {
+  border-left-color: var(--relation-site);
+}
+.relations-node-title {
+  font-size: 12px;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.relations-node small {
+  font-size: 11px;
+  line-height: 1.2;
+}
+.relations-node:hover,
+.relations-node.is-focused {
+  background: var(--light);
+  box-shadow: 0 0 0 2px #497c6525;
+}
+.relations-node.is-dimmed {
+  opacity: 0.3;
+}
+.relations-detail {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  padding: 18px 20px;
+  border-radius: 10px;
+}
+.relations-detail[hidden] {
+  display: none;
+}
+.relations-detail-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.relations-detail-heading > div {
+  flex: 1;
+  min-width: 160px;
+}
+.relations-detail-heading h3 {
+  margin: 4px 0 8px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.relations-detail p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 10px 0 0;
+  font-size: 13px;
+}
+.relations-detail-links {
+  color: var(--muted);
+}
+.relations-loose {
+  margin-top: 17px;
+}
+.relations-loose summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.relations-loose-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 12px;
+}
+.relations-loose-node {
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.relations-note,
+.relations-empty {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 16px 0;
+}
+@media (max-width: 700px) {
+  #modal.relations-dialog #dialog-content {
+    padding: 18px 16px;
+  }
+  .relations-toolbar {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+  .relations-toolbar input {
+    width: 100%;
+  }
+  .relations-scroll {
+    max-height: 56vh;
+  }
+  .relations-detail {
+    padding: 14px;
+  }
+  .relations-detail-heading {
+    align-items: flex-start;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .relations-band,
+  .relations-node {
+    transition: none;
+  }
+}

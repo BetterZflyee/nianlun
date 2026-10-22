@@ -3,6 +3,7 @@ import json
 import re
 import threading
 import time
+import concurrent.futures
 from urllib.parse import urlsplit
 import nianlun as n
 import growth as g
@@ -64,12 +65,12 @@ def parse_inventory(raw):
 
 class MemoryExplorer:
     def __init__(self, config_path):
-        self.config_path=config_path; self.cache={}; self.allowed={}; self.lock=threading.RLock();self.scope=None
+        self.config_path=config_path; self.cache={}; self.allowed={}; self.links_cache={}; self.lock=threading.RLock();self.scope=None
     def config(self):
         config=n.load(self.config_path)
         scope=n.digest(config.get('growth',{}))
         if scope!=self.scope:
-            self.cache.clear();self.allowed.clear();self.scope=scope
+            self.cache.clear();self.allowed.clear();self.links_cache.clear();self.scope=scope
         return config
     def catalog(self, offset=0):
         if type(offset) is not int or not 0<=offset<=10000:raise n.Error('记忆分页范围无效')
@@ -77,21 +78,76 @@ class MemoryExplorer:
             config=self.config()
             cached=self.cache.get(offset)
             if cached and time.monotonic()-cached[0]<120:return cached[1]
-            result=memory.run(config,['list','--limit','121','--offset',str(offset),'--sort','updated_desc','--json'],timeout=45)
+            # The raw read operation preserves source_id; the human list command's TSV does not.
+            result=memory.run(config,['call','list_pages',json.dumps({'limit':121,'offset':offset,'sort':'updated_desc'})],timeout=45)
             if result.returncode:raise n.Error('独立记忆空间目录读取失败，请检查连接')
             pages=parse_inventory(result.stdout);more=len(pages)>120;pages=pages[:120]
-            for p in pages:self.allowed[p['slug']]=p
+            for p in pages:
+                p['key']=n.digest([p.get('source_id'),p['slug']])[:24]
+                self.allowed[p['key']]=p
             value={'pages':pages,'has_more':more,'next_offset':offset+len(pages),
                    'scope':'当前已连接的独立记忆空间；按最近更新分页。项目分组按标题匹配，不代表页面之间存在引用。'}
             self.cache[offset]=(time.monotonic(),value);return value
-    def page(self,slug):
+    def resolve(self, slug=None, key=None):
+        if key is not None:
+            meta=self.allowed.get(key) if isinstance(key,str) else None
+        else:
+            matches=[p for p in self.allowed.values() if p['slug']==slug]
+            meta=matches[0] if len(matches)==1 else None
+        if not meta or meta['slug'].startswith('-'):raise n.Error('请从当前记忆目录选择页面')
+        return meta
+    def page(self,slug=None,key=None):
         with self.lock:
-            config=self.config();meta=self.allowed.get(slug) if isinstance(slug,str) else None
-            if not meta or slug.startswith('-'):raise n.Error('请从当前记忆目录选择页面')
-        args=['get',slug]+(['--source',meta['source_id']] if meta.get('source_id') else [])
+            config=self.config();meta=self.resolve(slug,key);scope=self.scope
+        args=['get',meta['slug']]+(['--source',meta['source_id']] if meta.get('source_id') else [])
         result=memory.run(config,args,timeout=45)
         if result.returncode:raise n.Error('记忆正文读取失败，请稍后重试')
         text=result.stdout[:60000]
         refs=re.findall(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]',text)
+        with self.lock:
+            self.config()
+            if self.scope!=scope:raise n.Error('记忆连接已变化，请刷新目录')
         return {**meta,'text':text,'full_page':len(result.stdout)<=60000,
                 'references':list(dict.fromkeys(refs)),'note':'正文超过展示上限' if len(result.stdout)>60000 else ''}
+
+    def relations(self, keys):
+        """Bounded, cached reads of explicit links. No extraction, embedding or writes."""
+        if not isinstance(keys,list) or not 1<=len(keys)<=6 or any(not isinstance(k,str) for k in keys):
+            raise n.Error('每批最多读取 6 篇已载入记忆的引用')
+        with self.lock:
+            config=self.config();scope=self.scope
+            metas=[self.resolve(key=k) for k in dict.fromkeys(keys)]
+        def read(meta):
+            key=meta['key']
+            with self.lock:cached=self.links_cache.get(key)
+            if cached and time.monotonic()-cached[0]<300:return cached[1]
+            params={'slug':meta['slug']}
+            if meta.get('source_id'):params['source_id']=meta['source_id']
+            try:
+                result=memory.run(config,['call','get_links',json.dumps(params)],timeout=20)
+                if result.returncode:raise ValueError('read failed')
+                rows=json.loads(result.stdout)
+                if not isinstance(rows,list):raise ValueError('unsupported link response')
+                edges=[];seen=set();truncated=len(rows)>500
+                for row in rows[:500]:
+                    if not isinstance(row,dict) or not isinstance(row.get('to_slug'),str) or row.get('from_slug')!=meta['slug']:
+                        raise ValueError('unsupported link row')
+                    if row.get('from_source_id') and meta.get('source_id') and row['from_source_id']!=meta['source_id']:
+                        continue
+                    target=(row.get('to_source_id'),row['to_slug'])
+                    if target not in seen:
+                        seen.add(target);edges.append({'slug':target[1],'source_id':target[0],
+                            'type':str(row.get('link_type') or 'reference')[:100]})
+                    truncated=truncated or row.get('truncated') is True
+                value={'key':key,'links':edges,'verified':True,'truncated':truncated}
+                with self.lock:
+                    if self.scope==scope:self.links_cache[key]=(time.monotonic(),value)
+                return value
+            except Exception:
+                # A missing or incompatible index is not evidence of zero links; retry remains available.
+                return {'key':key,'verified':False,'error':'引用索引暂未读到，可重试；仍可阅读正文。'}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(read,metas))
+        with self.lock:
+            self.config()
+            if self.scope!=scope:raise n.Error('记忆连接已变化，请刷新目录')
+        return {'pages':results}

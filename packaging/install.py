@@ -92,7 +92,7 @@ def main():
             if not setup.is_dir():setup=PACKAGE/'nianlun-setup'
             core_status=register(CORE,core,home);setup_status=register(setup,setup_core,home)
             config=old.get('config') or str(Path.home()/'.config/nianlun/config.json')
-            result={'version':'2.4.0','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
+            result={'version':'2.5.0','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
                     'scheduler_entry':old.get('scheduler_entry') or (str(Path(old['skills']['nianlun']['path'])/'scripts/scheduler.py') if old.get('skills') else str(core/'scripts/scheduler.py')),
                     'skills':{'nianlun':{'path':str(core),'status':core_status},'nianlun-setup':{'path':str(setup_core),'status':setup_status}},
                     'host_entries':dict(old.get('host_entries',{}))}

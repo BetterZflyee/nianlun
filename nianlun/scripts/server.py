@@ -39,7 +39,7 @@ from workbench import Workbench, text
 from file_lock import file_lock
 
 ASSETS=n.SKILL/'assets/portal'
-READ_OPS={'todo_detail','memory_catalog','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
+READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
 
 
 class Application:
@@ -64,7 +64,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.4.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.5.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
             'preferences':{'schedule':growth.get('schedule'),'sources':{'inbox':bool(growth.get('inbox_dirs')),'portal':bool(growth.get('codex_session_dirs')),**growth.get('sources',{}),'codex':bool(growth.get('codex_session_dirs'))},
@@ -292,10 +292,12 @@ class Application:
         if op=='todo_detail':
             import explorer
             return explorer.todo_detail(self.work,data.get('task_id'),data.get('completed') is True)
-        if op in ('memory_catalog','memory_page'):
+        if op in ('memory_catalog','memory_relations','memory_page'):
             import explorer
             if not hasattr(self,'memory_explorer'):self.memory_explorer=explorer.MemoryExplorer(self.config)
-            return self.memory_explorer.catalog(data.get('offset',0)) if op=='memory_catalog' else self.memory_explorer.page(data.get('slug'))
+            if op=='memory_catalog':return self.memory_explorer.catalog(data.get('offset',0))
+            if op=='memory_relations':return self.memory_explorer.relations(data.get('keys'))
+            return self.memory_explorer.page(data.get('slug'),data.get('key'))
         if op=='mutate':return self.work.mutate(data)
         if op=='bulk_mutate':return self.work.bulk(data,lambda message:self.phase(jid,message))
         if op=='memory_query':return self.work.memory_query(data.get('query'))
@@ -554,7 +556,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(404,{'error':'文件不存在或不属于该工作流'})
             if file.stat().st_size>200*1024*1024:return self.respond(413,{'error':'文件较大，请从本机产物目录打开'})
             return self.respond(200,file.read_bytes(),'application/octet-stream')
-        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/constellation.js':'constellation.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
+        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/relations.js':'relations.js','/relations-model.js':'relations-model.js','/relations.css':'relations.css','/constellation.js':'constellation.js','/galaxy-model.js':'galaxy-model.js','/galaxy-worker.js':'galaxy-worker.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
         if path in files:
             file=ASSETS/files[path]
             return self.respond(200,file.read_bytes(),mimetypes.guess_type(str(file))[0]+'; charset=utf-8')

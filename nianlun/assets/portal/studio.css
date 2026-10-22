@@ -2541,3 +2541,515 @@ main {
     overflow-y: visible;
   }
 }
+
+/* 2.5 · A full-width, navigable memory galaxy; reading stays beside the stars. */
+.galaxy-searchbar {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin: 0 0 18px;
+}
+.galaxy-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  max-width: 600px;
+}
+.galaxy-search > svg {
+  position: absolute;
+  left: 14px;
+  color: #718576;
+  pointer-events: none;
+}
+.galaxy-search input {
+  width: 100%;
+  padding-left: 44px;
+}
+.galaxy-search-results {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  right: 0;
+  z-index: 25;
+  padding: 8px;
+  background: #fffef7;
+  border: 1px solid #d7dfd3;
+  border-radius: 12px;
+  box-shadow: 0 12px 35px #13281e20;
+  max-height: 350px;
+  overflow: auto;
+}
+.galaxy-search-results > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  padding: 12px;
+  font-size: 13px;
+}
+.galaxy-search-results > button:hover {
+  background: #e9f0e5;
+}
+.galaxy-search-results p {
+  padding: 10px;
+  font-size: 12px;
+}
+.memory-studio.galaxy-studio {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+.galaxy-studio .galaxy-card {
+  width: 100%;
+  height: clamp(510px, calc(100dvh - 265px), 850px);
+  border-radius: 18px;
+  background: radial-gradient(
+    ellipse at 65% 50%,
+    #112720 0%,
+    #091813 48%,
+    #07120f 100%
+  );
+  border-color: #263e32;
+  box-shadow: 0 12px 40px #163d2319;
+}
+.galaxy-studio .constellation-stage {
+  height: 100%;
+  background: none;
+}
+.galaxy-card .graph-toolbar {
+  padding: 21px 24px;
+}
+.galaxy-card .graph-toolbar strong {
+  font-size: 17px;
+  letter-spacing: 2px;
+  color: #edf4e8;
+}
+.galaxy-card .graph-status {
+  font-size: 11px;
+  color: #a6bcae;
+  margin-top: 8px;
+  letter-spacing: 0.2px;
+}
+.galaxy-card .graph-toolbar button {
+  padding: 7px 12px;
+  font-size: 12px;
+  min-height: 33px;
+  border-radius: 8px;
+}
+.galaxy-card .graph-toolbar button,
+.galaxy-card .galaxy-controls button,
+.galaxy-card .galaxy-zoom button,
+.galaxy-card .galaxy-bottom button {
+  color: #c1d4c6;
+  background: #192d25d9;
+  border: 1px solid #344b3e;
+  box-shadow: none;
+}
+.galaxy-card .graph-toolbar button:hover,
+.galaxy-card .galaxy-controls button:hover,
+.galaxy-card .galaxy-zoom button:hover,
+.galaxy-card .galaxy-bottom button:hover {
+  background: #2b4435;
+  color: #fff;
+}
+.galaxy-controls {
+  position: absolute;
+  top: 98px;
+  left: 20px;
+  width: 205px;
+  max-height: calc(100% - 200px);
+  overflow: auto;
+  z-index: 4;
+  background: #0e2119dc;
+  border: 1px solid #334839b3;
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #375242 transparent;
+}
+.galaxy-controls > summary {
+  padding: 13px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #cbd9cb;
+  cursor: pointer;
+}
+.galaxy-control-body {
+  padding: 0 12px 13px;
+}
+.galaxy-settings {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+.galaxy-settings .form-field {
+  margin: 0;
+}
+.galaxy-settings label {
+  color: #819b8e;
+  font-size: 10px;
+  margin-bottom: 6px;
+}
+.galaxy-settings select {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: #172c23;
+  color: #d6e1d7;
+  border-color: #314b3b;
+}
+.galaxy-actions {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0 19px;
+}
+.galaxy-actions button {
+  padding: 6px 8px;
+  font-size: 11px;
+  min-height: 32px;
+}
+.galaxy-rail-label {
+  color: #809d8c;
+  letter-spacing: 2px;
+  font-size: 10px;
+  margin: 0 0 8px;
+}
+.galaxy-groups {
+  display: grid;
+  gap: 4px;
+  max-height: 205px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.galaxy-groups > button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-color: transparent !important;
+  background: transparent !important;
+  font-size: 12px;
+  padding: 8px 7px;
+  text-align: left;
+  min-height: 34px;
+}
+.galaxy-groups > button.active {
+  background: #314d384d !important;
+  border-color: #5c806647 !important;
+  color: #f0f4e9;
+}
+.galaxy-groups > button span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.galaxy-groups > button small {
+  color: #859f8d;
+  font-size: 10px;
+}
+.galaxy-swatch {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 8px currentColor;
+}
+.galaxy-source-hint {
+  font-size: 10px;
+  color: #8ba393;
+  line-height: 1.8;
+  margin: 13px 2px 0;
+}
+.galaxy-control-body > button {
+  font-size: 11px;
+  width: 100%;
+  margin-top: 10px;
+  min-height: 32px;
+}
+.galaxy-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  padding: 25px 24px 18px;
+  background: linear-gradient(transparent, #081710e6 38%);
+  pointer-events: none;
+}
+.galaxy-index {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.galaxy-link-status {
+  color: #9db9a7;
+  font-size: 11px;
+}
+.galaxy-index button {
+  pointer-events: auto;
+  padding: 3px 8px;
+  min-height: 24px;
+  font-size: 10px;
+}
+.galaxy-help {
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  color: #6f907d;
+  margin-top: 10px;
+}
+.galaxy-zoom {
+  position: absolute;
+  right: 23px;
+  bottom: 106px;
+  display: grid;
+  gap: 5px;
+  z-index: 4;
+}
+.galaxy-zoom button {
+  height: 32px;
+  width: 32px;
+  min-height: 0;
+  padding: 0;
+  font-size: 20px;
+}
+.galaxy-render-status {
+  position: absolute;
+  right: 24px;
+  top: 77px;
+  color: #8daa96;
+  font-size: 10px;
+  pointer-events: none;
+}
+.galaxy-card .constellation-label {
+  top: 0;
+  left: 0;
+  font-size: 11px;
+  padding: 3px 6px;
+  max-width: 180px;
+  color: #c1d1cd;
+  opacity: 0.72;
+  text-shadow:
+    0 1px 7px #03100e,
+    0 0 15px #03100e;
+  will-change: transform;
+}
+.galaxy-card .constellation-label:hover,
+.galaxy-card .constellation-label.selected {
+  color: #fff8df;
+  background: #173227bd;
+  opacity: 1;
+  border-radius: 5px;
+}
+.galaxy-card .memory-node-list {
+  position: absolute;
+  top: 75px;
+  left: auto;
+  right: 20px;
+  bottom: 98px;
+  width: min(350px, calc(100% - 40px));
+  max-height: none;
+  background: #102219f5;
+  border: 1px solid #3f5745;
+  border-radius: 12px;
+  padding: 10px;
+  z-index: 8;
+  overflow: auto;
+}
+.galaxy-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 12px;
+  color: #d4e0cd;
+  font-size: 12px;
+}
+.galaxy-list-head button {
+  padding: 5px 9px;
+  font-size: 11px;
+  background: #233c2c;
+  border-color: #3b5240;
+  color: #c9dec0;
+}
+.galaxy-card .memory-list-node {
+  padding: 12px 9px;
+  line-height: 1.5;
+  color: #b6d0ba;
+  font-size: 12px;
+}
+.galaxy-card .memory-list-node:hover {
+  background: #233c2c;
+}
+.galaxy-studio .galaxy-inspector {
+  position: absolute;
+  right: 18px;
+  top: 92px;
+  width: 310px;
+  height: auto;
+  max-height: calc(100% - 190px);
+  padding: 20px;
+  background: #f7f8edfa;
+  border: 1px solid #d6e2cf;
+  border-radius: 14px;
+  z-index: 6;
+  box-shadow: 0 16px 50px #0004;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.galaxy-inspector[hidden] {
+  display: none;
+}
+.galaxy-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: sticky;
+  top: -20px;
+  background: #f7f8ed;
+  padding: 7px 0;
+  z-index: 2;
+}
+.galaxy-detail-head button {
+  font-size: 22px;
+  line-height: 1;
+  border: 0;
+  background: none;
+  min-height: 30px;
+  padding: 4px 7px;
+}
+.galaxy-inspector h2 {
+  font-size: 18px;
+  margin: 10px 0;
+  line-height: 1.5;
+}
+.galaxy-inspector h3 {
+  font-size: 12px;
+  margin-top: 20px;
+}
+.galaxy-inspector .memory-body {
+  max-height: none;
+  font-size: 12px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.galaxy-inspector > small {
+  overflow-wrap: anywhere;
+}
+.galaxy-inspector .reference-page {
+  font-size: 12px;
+}
+.galaxy-studio.expanded {
+  position: fixed;
+  inset: 12px;
+  z-index: 65;
+  background: #07150f;
+  border-radius: 18px;
+  box-shadow: 0 0 0 25px #07150fcc;
+}
+.galaxy-studio.expanded .galaxy-card {
+  height: 100%;
+}
+.galaxy-fallback {
+  padding: 110px 26px 100px 240px;
+  overflow: auto;
+  height: 100%;
+  box-sizing: border-box;
+}
+.galaxy-fallback p {
+  color: #c8dac4;
+  font-size: 12px;
+}
+.galaxy-fallback button {
+  margin: 5px;
+  background: #1e382b;
+  color: #cce3d2;
+  border-color: #3c5948;
+  font-size: 12px;
+}
+@media (max-width: 1000px) {
+  .galaxy-studio .galaxy-card {
+    height: 650px;
+  }
+  .galaxy-controls {
+    width: 185px;
+    left: 14px;
+  }
+  .galaxy-studio .galaxy-inspector {
+    width: 280px;
+  }
+}
+@media (max-width: 760px) {
+  .galaxy-searchbar {
+    gap: 7px;
+  }
+  .galaxy-searchbar > button {
+    padding-inline: 10px;
+    font-size: 12px;
+  }
+  .galaxy-studio .galaxy-card {
+    height: 660px;
+  }
+  .galaxy-card .graph-toolbar {
+    padding: 17px 15px;
+    align-items: flex-start;
+  }
+  .galaxy-card .graph-toolbar strong {
+    font-size: 15px;
+  }
+  .galaxy-card .graph-toolbar .actions {
+    gap: 4px;
+  }
+  .galaxy-card .graph-toolbar button {
+    font-size: 10px;
+    padding: 6px 7px;
+  }
+  .galaxy-controls {
+    top: 89px;
+    width: 165px;
+    max-height: 380px;
+  }
+  .galaxy-studio .galaxy-inspector {
+    top: auto;
+    bottom: 91px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 340px;
+    padding: 16px;
+  }
+  .galaxy-card .graph-status {
+    max-width: 150px;
+    font-size: 10px;
+  }
+  .galaxy-bottom {
+    padding: 25px 14px 16px;
+  }
+  .galaxy-help {
+    font-size: 9px;
+    max-width: 320px;
+    line-height: 1.8;
+  }
+  .galaxy-render-status {
+    top: 67px;
+    font-size: 9px;
+    right: 15px;
+  }
+  .galaxy-fallback {
+    padding-left: 185px;
+  }
+  .galaxy-studio.expanded {
+    inset: 5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .galaxy-studio * {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}

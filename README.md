@@ -4,7 +4,7 @@
 
 年轮是一套可接入不同 AI 宿主的本地项目管理工具。它通过 DWS CLI 连接你自己的钉钉 AI 表格，用独立记忆空间保存长期记忆，由已登录的 AI 宿主分析信息。界面、采集、去重和写后核验由年轮负责。
 
-代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.3.0 发布候选版**；各平台的验证范围见下表。
+代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.4.0 发布候选版**；各平台的验证范围见下表。
 
 ## 能做什么
 
@@ -23,6 +23,12 @@ flowchart LR
   Core <--> Brain[自己的独立记忆空间]
   Core --> Todo[本人钉钉待办与摘要]
 ```
+
+## 2.4 DeepSeek 自动阶段汇报
+
+在项目中选择时间范围即可调用本机 DeepSeek Harness：读取 AI 表格、检索独立记忆、生成正文、按所选方法排版、上传报告并回读项目链接。页面展示阶段与耗时；关闭弹窗继续运行，失败可重试同一报告。通知支持多选、全部已读和未读筛选，完成或失败的新状态会再次提示。
+
+需要用户已安装并登录的 `dsh` headless JSON 接口。模型只负责分析，写入仍由年轮执行；其他 DeepSeek 工作流继续使用宿主接续。详见 [2.4 发布说明](docs/PRODUCT_RELEASE_2.4.md) 和 [验收记录](docs/VALIDATION_2.4.md)。
 
 ## 2.3 工作台重构
 
@@ -48,7 +54,7 @@ flowchart LR
 
 ## 安装
 
-2.3 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.3.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
+2.4 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.4.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、钉钉连接工具和记忆引擎，不要求预装 Python 或记忆工具。

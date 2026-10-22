@@ -30,6 +30,7 @@ import source_state
 import planning
 import run_control
 import recovery
+import deepseek_report
 import scheduler
 import project_actions
 import nianlun as n
@@ -63,7 +64,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.3.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.4.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
             'preferences':{'schedule':growth.get('schedule'),'sources':{'inbox':bool(growth.get('inbox_dirs')),'portal':bool(growth.get('codex_session_dirs')),**growth.get('sources',{}),'codex':bool(growth.get('codex_session_dirs'))},
@@ -83,6 +84,10 @@ class Application:
                 for j in self.jobs.values() if j['op'] not in READ_OPS]
             for row in rows:
                 result=self.jobs[row['id']].get('result',{})
+                if row['op']=='report':
+                    row['project_title']=result.get('project_title','')
+                    if row['status']=='succeeded':row['phase']='报告已上传，项目主表链接已回读确认'
+                    elif row['status']=='failed':row['phase']=self.jobs[row['id']].get('error','汇报未完成，可重试原报告')
                 if row['op']=='bulk_mutate' and result.get('failed'):
                     row.update(status='failed',phase='成功 '+str(result['succeeded'])+' 项；失败 '+str(result['failed'])+' 项，可继续原请求处理失败项')
         config=n.load(self.config) if self.config.exists() else {}
@@ -90,7 +95,30 @@ class Application:
             rows.append({'id':'schedule:'+run['key'],'op':run['role'],'status':{'complete':'succeeded'}.get(run['status'],run['status']),
                 'created_at':run['at'],'finished_at':run.get('finished_at',run['at']),
                 'phase':run.get('error') or run.get('result',{}).get('summary','定时轮次状态已更新'),'scheduled':True})
+        with self.guard:
+            reads=n.load(self.runtime/'notifications-read.json') if (self.runtime/'notifications-read.json').exists() else {}
+            for row in rows:
+                row['stamp']=str(row['status'])+':'+str(row.get('finished_at') or row.get('phase_at') or '')
+                row['read']=reads.get(row['id'])==row['stamp']
         return {'jobs':sorted(rows,key=lambda x:x.get('finished_at') or x['created_at'],reverse=True)[:100]}
+
+    def notifications_read(self,data):
+        items=data.get('items')
+        if not isinstance(items,list) or len(items)>100:raise n.Error('请提交最多 100 条通知')
+        with self.guard:
+            current={j['id']:j for j in self.notifications()['jobs']}
+            path=self.runtime/'notifications-read.json';reads=n.load(path) if path.exists() else {}
+            updated=0
+            for item in items:
+                if not isinstance(item,dict):raise n.Error('通知选择无效')
+                row=current.get(item.get('id'))
+                if row and row['stamp']==item.get('stamp'):
+                    reads[row['id']]=row['stamp'];updated+=1
+            # Read receipts are local UI state. Never execute or cancel the underlying jobs.
+            if len(reads)>1000:reads={key:value for key,value in reads.items() if key in current}
+            n.save(path,reads)
+            return {'marked':updated}
+
 
     def persist_job(self, job):
         if job['op'] not in READ_OPS:
@@ -101,16 +129,37 @@ class Application:
         if not isinstance(data,dict):raise n.Error('表单内容无效')
         with self.guard:
             if getattr(self,'closing',False):raise n.Error('本机服务正在退出，请重新打开年轮')
+            if op=='resume':
+                original=self.jobs.get(data.get('job_id'))
+                if original and original['op']=='report':
+                    if original['status'] in ('queued','running'):return {'job_id':original['id']}
+                    view=self.job_view(original)
+                    if not view['can_resume']:raise n.Error('此汇报任务不需要重试')
+                    if original.get('handoff') and not view.get('handoff_ready') and not view.get('automatic_report'):
+                        raise n.Error('所选宿主尚未返回报告')
+                    original.update(status='queued',cancel_requested=False,attempt=original.get('attempt',1)+1)
+                    original.setdefault('previous_attempts',[]).append({'progress':original.get('progress',[]),'error':original.get('error'),'finished_at':original.get('finished_at')})
+                    original.update(progress=[],phase='等待重试原报告');original.pop('phase_at',None)
+                    for key in ('error','finished_at','started_at'):original.pop(key,None)
+                    self.persist_job(original)
+                    self.write_pool.submit(self.execute,original['id'],'report',original['resume_data'])
+                    return {'job_id':original['id']}
+            if op=='report':
+                for original in self.jobs.values():
+                    same=all(original.get('resume_data',{}).get(k)==data.get(k) for k in ('project_id','since','until'))
+                    if original['op']=='report' and original['status'] in ('queued','running') and same:
+                        return {'job_id':original['id']}
             # A browser retry with the same write request reuses the original job.
             key=data.get('request_id')
             if key:
                 for job in self.jobs.values():
                     if job.get('request_id')==key:
                         if job['op']!=op or job.get('input_hash')!=n.digest(data):raise n.Error('同一请求编号对应的内容发生变化')
-                        if job['status'] not in ('failed','interrupted') or op=='workflow':return {'job_id':job['id']}
+                        if job['status'] not in ('failed','interrupted') or op in ('workflow','report'):return {'job_id':job['id']}
             jid=uuid.uuid4().hex
             job={'id':jid,'op':op,'status':'queued','created_at':datetime.now().astimezone().isoformat(timespec='seconds'),
                 'request_id':key,'input_hash':n.digest(data)}
+            if op=='report':job.update(resume_data=data,attempt=1)
             self.jobs[jid]=job;self.persist_job(job)
         if op=='schedule_pause':
             self.execute(jid,op,data)
@@ -131,7 +180,10 @@ class Application:
     def job_view(self,job):
         result=dict(job)
         partial=job['op']=='bulk_mutate' and job['status']=='succeeded' and job.get('result',{}).get('failed',0)>0
-        result['can_resume']=(job['status'] in ('waiting_harness','failed','interrupted') or partial) and 'resume_data' in job
+        result['can_resume']=(job['status'] in ('waiting_harness','failed','interrupted') or (job['op']=='report' and job['status']=='cancelled') or partial) and 'resume_data' in job
+        if job['op']=='report':
+            result['automatic_report']=harness.selection(self.config).get('provider')=='deepseek'
+            result['can_cancel']=job['status']=='queued' or (job['status']=='running' and job.get('report_cancellable',False))
         if job.get('handoff'):
             try:
                 item=host_bridge.pending(self.config,job['handoff']['id'])
@@ -145,7 +197,9 @@ class Application:
             if op in ('grow','report','ask','mutate','plan_milestones','bulk_mutate'):job['resume_data']=data
             self.persist_job(job)
         try:
-            if job.get('cancel_requested'):raise n.Error('工作流已取消，未执行')
+            if job.get('cancel_requested'):
+                if op=='report':raise deepseek_report.Cancelled('已停止生成，尚未上传或写回报告。')
+                raise n.Error('工作流已取消，未执行')
             if op.startswith('setup_') or op in ('profiles','inspect','create_resource','table_plan','tables_apply','memory_connect','configure'):
                 with file_lock(self.setup.directory/'setup.lock'):
                     result=self.setup_action(op,data)
@@ -155,10 +209,21 @@ class Application:
         except host_bridge.Waiting as exc:
             with self.guard:job.update(status='waiting_harness',handoff=exc.request,resume_data=data,error=str(exc))
             self.phase(jid,'等待 '+harness.PROVIDERS[exc.request['provider']]['name']+' 返回分析结果；当前没有继续执行')
+        except deepseek_report.Cancelled as exc:
+            with self.guard:job.update(status='cancelled',error=str(exc))
         except Exception as exc:
             with self.guard:job.update(status='failed',error=str(exc)[:2000])
         with self.guard:
+            job['report_cancellable']=False
             job['finished_at']=datetime.now().astimezone().isoformat(timespec='seconds');self.persist_job(job)
+
+    def report_control(self,data):
+        with self.guard:
+            job=self.jobs.get(data.get('job_id'))
+            if not job or job['op']!='report' or data.get('action')!='cancel':raise n.Error('报告操作无效')
+            if not self.job_view(job).get('can_cancel'):raise n.Error('报告已进入上传与写回阶段或已结束，请查看最终结果')
+            job['cancel_requested']=True;self.persist_job(job)
+            return {'job_id':job['id'],'cancel_requested':True}
 
     def setup_action(self, op, data):
         if op=='setup_probe':return self.setup.probe()
@@ -308,10 +373,16 @@ class Application:
             since=text(data.get('since'),'开始日期',10,True);until=text(data.get('until'),'结束日期',10,True)
             datetime.strptime(since,'%Y-%m-%d');datetime.strptime(until,'%Y-%m-%d')
             if since>until:raise n.Error('结束日期不能早于开始日期')
+            with self.guard:self.jobs[jid]['report_cancellable']=True
+            def before_publish():
+                with self.guard:
+                    if self.jobs[jid].get('cancel_requested'):raise deepseek_report.Cancelled('已停止生成，尚未上传或写回报告。')
+                    self.jobs[jid]['report_cancellable']=False;self.persist_job(self.jobs[jid])
             with g.locked(config):
                 return flow.report_projects(config,[data['project_id']],since,until,choice,
                     progress=lambda message:self.phase(jid,message),request_dir=self.runtime/'reports'/jid,
-                    legacy_handoff=self.jobs[jid].get('handoff'),report_skill=self.settings.get('report_skill_path'))[0]
+                    legacy_handoff=self.jobs[jid].get('handoff'),report_skill=self.settings.get('report_skill_path'),
+                    cancelled=lambda:self.jobs[jid].get('cancel_requested',False),before_publish=before_publish)[0]
         raise n.Error('未知工作台操作')
 
     def workflow(self,jid,data,export_only=False):
@@ -492,7 +563,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed(api=True,write=True):return
         path=urlsplit(self.path).path
-        if path not in ('/api/actions','/api/workflow-control','/api/shutdown'):return self.respond(404,{'error':'操作不存在'})
+        if path not in ('/api/actions','/api/workflow-control','/api/report-control','/api/notifications/read','/api/shutdown'):return self.respond(404,{'error':'操作不存在'})
         try:
             size=int(self.headers.get('Content-Length','0'))
             if not 0<size<=1048576:raise n.Error('表单内容过大或为空')
@@ -507,6 +578,8 @@ class Handler(BaseHTTPRequestHandler):
                     threading.Thread(target=self.server.shutdown,daemon=True).start()
                 return
             if path=='/api/workflow-control':return self.respond(200,self.server.app.control(body))
+            if path=='/api/notifications/read':return self.respond(200,self.server.app.notifications_read(body))
+            if path=='/api/report-control':return self.respond(200,self.server.app.report_control(body))
             self.respond(202,self.server.app.submit(body['op'],body.get('data',{})))
         except (ValueError,KeyError,TypeError,n.Error) as exc:
             self.respond(400,{'error':str(exc)})

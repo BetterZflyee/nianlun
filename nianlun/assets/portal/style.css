@@ -874,3 +874,19 @@ dialog{padding:0;overflow:hidden;max-height:90dvh}dialog[open]{display:flex;flex
 .memory-root{fill:#e5eddf;stroke:#63836c;stroke-width:2}.memory-match{stroke:#6c967c77;stroke-dasharray:5 5}.memory-graph pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:600px;overflow:auto}.top-actions svg{vertical-align:middle}
 
 .graph-branch.membership{stroke:#577e6666;stroke-width:4}.graph-node.projects rect{fill:#dce9d5;stroke:#527e5a}.graph-node.projects text{font-weight:600}
+
+/* Report progress and notification receipts */
+.report-stages{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:18px 0}
+.report-stages span{border:1px solid var(--line,#dce2d7);padding:10px 12px;border-radius:10px;color:#768276;font-size:13px;background:#f5f5ef}
+.report-stages .active{border-color:#32604c;background:#e7eee3;color:#244c3c;font-weight:600}
+.report-stages .done{color:#32604c;background:#eff4ec}
+.notification-toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;position:sticky;top:0;background:var(--paper,#fbfaf5);z-index:1;padding:10px 0}
+.notification-toolbar label{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.notification-toolbar input,.notification-row>input{width:18px;height:18px;flex-shrink:0;margin:0}
+.notification-toolbar select{width:auto;min-width:120px}
+.notification-row{display:flex;gap:12px;align-items:center;border:1px solid #dce2d7;border-radius:12px;padding:12px;background:#fffef9}
+.notification-row>button{flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:4px;display:flex;flex-direction:column;gap:8px}
+.notification-row.is-unread{border-left:3px solid #32604c}
+.notification-row.is-read .read-badge{color:#7c887b}
+.read-badge{font-size:12px;color:#32604c;white-space:nowrap}
+@media(max-width:600px){.report-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.notification-toolbar{position:static}.notification-toolbar button{font-size:13px}}

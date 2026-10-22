@@ -1083,7 +1083,7 @@ function reportDialog(project) {
   });
   const form = el("form", {}, [
     el("p", {
-      text: "自动结合进度、里程碑和项目记忆形成结论、偏差、风险与下一步，上传并回填主表。无需先手工补写；生成后可预览并通过 DWS CLI 发送到项目群。",
+      text: "结合 AI 表格和独立记忆空间的项目材料，由所选 AI 宿主撰写阶段回顾，按已选报告方法排版，上传并确认主表链接。DeepSeek 自动完成，无需复制请求。关闭窗口后仍会继续，可从右上角通知查看。",
     }),
     el("div", { class: "two-cols" }, [
       formField("开始日期", since),
@@ -1101,53 +1101,23 @@ function reportDialog(project) {
     el("div", { class: "form-actions" }, [save]),
   ]);
   const requestId = crypto.randomUUID();
-  let submitted = null;
+  let submitted = false;
   form.onsubmit = async (event) => {
     event.preventDefault();
+    if (submitted) return;
     save.disabled = true;
+    error.textContent = "";
     try {
-      const report = (
-        await run(
-          "report",
-          {
-            project_id: project.id,
-            since: since.value,
-            until: until.value,
-            request_id: requestId,
-          },
-          (message) => (save.textContent = message),
-        )
-      ).value;
-      if (!form.isConnected || !$("#modal").open) {
-        toast("阶段汇报已完成，请从通知查看");
-        return;
-      }
-      $("#modal").close();
-      toast("阶段汇报已上传，项目链接已更新");
-      data = (await run("snapshot")).value;
-      renderProject($("#content"));
-      dialog(
-        "汇报已生成 · " + project.title,
-        el("div", {}, [
-          el("div", { class: "ai-answer", text: report.summary }),
-          el("a", {
-            href: report.url,
-            target: "_blank",
-            rel: "noopener",
-            text: "打开完整汇报 ↗",
-          }),
-          btn(
-            "发送到项目群",
-            () => reportSendDialog(project, report),
-            "primary",
-          ),
-        ]),
-      );
+      const { job_id } = await api("/api/actions", { op: "report", data: {
+        project_id: project.id, since: since.value, until: until.value, request_id: requestId,
+      }});
+      submitted = true;
+      form.querySelectorAll("input,button").forEach(node => { node.disabled = true; });
+      save.textContent = "报告任务已提交";
+      form.append(taskPanel({ id: job_id, op: "report", status: "queued", created_at: new Date().toISOString() }));
     } catch (e) {
       error.textContent = e.message;
-    } finally {
       save.disabled = false;
-      save.textContent = "生成并写回项目";
     }
   };
   dialog("生成阶段汇报 · " + project.title, form);

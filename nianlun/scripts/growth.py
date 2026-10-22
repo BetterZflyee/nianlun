@@ -657,7 +657,7 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
-def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None):
+def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None,progress=lambda message:None):
     from render_report import render
     from planning import evidence
     gw=Gateway(config);self_identity(gw);state=n.fetch(config,gw.table());p=n.select_projects(state,[project])[0]
@@ -685,11 +685,13 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     if 'previous_link' not in receipt:
         receipt['previous_link']=p.get('report');n.save(receipt_file,receipt)
     safe=re.sub(r'[^\w\u4e00-\u9fff-]','-',p['title']);filename='阶段性汇报-'+safe+'-'+until+'-'+key[:8]+'.html'
-    if report_method and not receipt.get('node_id'):
-        import report_style
-        html=report_style.render(report_method,md,folder,p['title']+' · 阶段汇报')
-    n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
     if not receipt.get('node_id'):
+        if report_method:
+            import report_style
+            progress('正在按所选汇报样式生成可视化报告')
+            html=report_style.render(report_method,md,folder,p['title']+' · 阶段汇报')
+        n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
+        progress('正在上传报告到已绑定的文件夹')
         receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)
         try:d=gw.call(['drive','+upload','--file',filename,'--folder',config['growth']['report_folder'],'--yes'],cwd=folder)
         except n.Error:
@@ -699,6 +701,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         item=uploaded_node(d)
         if not item:raise n.Error('上传返回未包含可核验的节点与链接，保留回执待对账')
         receipt.update(node_id=item.get('nodeId') or item['fileId'],url=item.get('url') or item['docUrl']);receipt.pop('in_flight',None);n.save(receipt_file,receipt)
+    progress('正在核验报告链接并写回项目主表')
     current=n.fetch(config,gw.table());now=next(x for x in current['projects'] if x['id']==p['id'])
     if now.get('report') not in (receipt['previous_link'],receipt['url']):raise n.Error('主表汇报链接被其他人更新')
     f=config['tables']['projects']['fields']['report']['fieldId']

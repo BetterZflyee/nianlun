@@ -126,7 +126,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             'coverage':bundle['coverage'],'run_directory':str(folder),'verified':True}
 
 
-def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None):
+def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None,cancelled=lambda:False,before_publish=lambda:None):
     """Freeze table and memory evidence together; resume the same host request safely."""
     import report_style
     progress('正在读取项目事实与里程碑')
@@ -143,6 +143,9 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
     method=report_style.method(report_skill)
     results=[]
     for pid in project_ids:
+        if cancelled():
+            from deepseek_report import Cancelled
+            raise Cancelled('已停止生成，尚未上传或写回报告。')
         project=next(p for p in state['projects'] if p['id']==pid)
         facts=planning.evidence(state,pid)
         key=n.digest({'base':config['base_id'],'facts':facts,'since':since,'until':until,**({'method':method['name']} if method else {})})
@@ -174,7 +177,7 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
         history=context['memory'];method=context.get('method',method)
         if not summary.exists():
             sources=[{k:p.get(k) for k in ('title','slug','source_id','full_page','note','text')} for p in history.get('pages',[])]
-            answer=harness.reason('根据事实自动撰写项目阶段汇报，不要求用户先补写。中文 Markdown，'
+            answer=harness.report_reason('根据事实自动撰写项目阶段汇报，不要求用户先补写。中文 Markdown，'
                 '依次写目标与本期结论、实际进展、里程碑变化、风险和下一步。按节点说明计划、实际、偏差；'
                 '没有依据就明确未记录。计划到期不等于完成；AI 规划不是已确认事实。'
                 '区间外历史单列背景，不混成本期成果。引用记录名称、日期、来源链接，以及记忆页面标题与 slug。'
@@ -183,12 +186,17 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
                 '\n用户选择的报告方法（只借用结构与表达，返回仍为 Markdown）：'+method.get('guidance','')+
                 '\n实时项目：'+json.dumps(facts,ensure_ascii=False)+'\n独立记忆页面：'+json.dumps(sources,ensure_ascii=False)+
                 '\n记忆检索说明：'+('本次关键词未命中，不代表记忆库为空' if not history.get('matched') else '已读取上列页面'),
-                folder/'harness',binary,harness.ANSWER_SCHEMA)
+                folder/'harness',binary,harness.ANSWER_SCHEMA,progress=progress,cancelled=cancelled)
             if not isinstance(answer.get('answer'),str) or not answer['answer'].strip():raise n.Error('汇报内容为空')
             n.save(summary,answer['answer'])
+        before_publish()
+        if cancelled():
+            from deepseek_report import Cancelled
+            raise Cancelled('已停止生成，尚未上传或写回报告。')
         progress('正在生成汇报并上传，随后回读项目链接')
-        result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]))
-        results.append({**result,'summary':summary.read_text(encoding='utf-8'),'since':since,'until':until,
+        result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]),progress=progress)
+        progress('报告已发布，项目主表链接已回读确认')
+        results.append({**result,'project_title':project['title'],'project_id':pid,'summary':summary.read_text(encoding='utf-8'),'since':since,'until':until,
             'memory_pages':[{k:p.get(k) for k in ('title','slug','full_page')} for p in history.get('pages',[])],
             'method':method.get('name','年轮阶段汇报')})
     return results

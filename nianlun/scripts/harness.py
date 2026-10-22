@@ -188,7 +188,7 @@ def selection(config_path,legacy=None):
         if not value.get('binary') and settings.exists():value['binary']=n.load(settings).get('codex_bin')
     result=normalize(value)
     from host_bridge import queue_root
-    result.update(queue=str(queue_root(config_path)),binding=n.digest(config))
+    result.update(queue=str(queue_root(config_path)),binding=n.digest(config),config_path=str(config_path))
     return result
 
 
@@ -196,7 +196,8 @@ def describe(value):
     choice=normalize(value);meta=PROVIDERS[choice['provider']]
     return {**meta,'provider':choice['provider'],'mode':choice['mode'],'binary':choice.get('binary'),
             'embedded_workflow':meta['embedded_workflow'] and choice['mode']=='cli',
-            'direct_reasoning':meta['reasoning'] and choice['mode']=='cli'}
+            'direct_reasoning':meta['reasoning'] and choice['mode']=='cli',
+            'automatic_reports':choice['provider']=='deepseek' or (meta['reasoning'] and choice['mode']=='cli')}
 
 
 def find_claude(preferred=None):
@@ -208,6 +209,9 @@ def find_claude(preferred=None):
 
 def status(preferred=None):
     choice=normalize(preferred);meta=describe(choice)
+    if choice['provider']=='deepseek':
+        import deepseek_report
+        return {**meta,**deepseek_report.status(choice.get('binary'))}
     if choice['mode']=='delegated':
         return {**meta,'available':True,'logged_in':None,'message':meta['name']+'：通过宿主接续；宿主登录和定时能力需在该应用验证'}
     if choice['provider']=='codex':return {**meta,**codex_status(choice.get('binary'))}
@@ -264,3 +268,24 @@ def reason(prompt,directory,preferred=None,schema=None,timeout=900):
     else:value=claude_reason(prompt,directory,choice.get('binary'),schema,timeout)
     host_bridge.validate(value,schema)
     return value
+
+
+def report_reason(prompt,directory,preferred=None,schema=None,timeout=900,progress=lambda message:None,cancelled=lambda:False):
+    """Direct DeepSeek reports do not change the selected host's other workflows."""
+    choice=normalize(preferred)
+    if choice['provider']!='deepseek':return reason(prompt,directory,preferred,schema,timeout)
+    import deepseek_report
+    import host_bridge
+    frozen=Path(directory)/'request-input.json';waiting=None
+    if frozen.exists():
+        saved=n.load(frozen)
+        if any(saved.get(k)!=v for k,v in {'provider':choice['provider'],'binding':choice.get('binding'),'schema':schema}.items()):
+            raise n.Error('原接续请求的配置已变化，请核验后重新生成报告。')
+        prompt=saved['prompt']
+        try:return host_bridge.request(prompt,directory,choice,schema)
+        except host_bridge.Waiting as exc:waiting=exc.request
+    answer=deepseek_report.generate(prompt,directory,choice.get('binary'),schema,timeout,progress,cancelled)
+    if waiting:
+        if not choice.get('config_path'):raise n.Error('旧请求缺少配置路径，未执行写回。')
+        host_bridge.answer(choice['config_path'],waiting['id'],answer)
+    return answer

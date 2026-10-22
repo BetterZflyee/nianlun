@@ -23,7 +23,7 @@
 | Codex | 通用核心 CLI / Skill | 已登录 CLI | 页面 app-server 或宿主原生界面 | 原生 heartbeat 注册和回读验证 |
 | Claude Code | 通用核心 CLI / Skill | 已登录 CLI / 宿主接续 | 宿主原生界面 | 由宿主能力配置，核心不冒充已启用 |
 | WorkBuddy | 接入说明 + 通用 Skill / CLI | 结构化接续 | 宿主原生界面 | 由宿主能力配置和核验 |
-| DeepSeek Harness | 接入说明 + 通用 Skill / CLI | 结构化接续 | 宿主原生界面 | 由具体 Harness 的能力配置和核验 |
+| DeepSeek Harness | 接入说明 + 通用 Skill / CLI | 阶段汇报自动调用 dsh；其他分析接续 | 宿主原生界面 | 由具体 Harness 的能力配置和核验 |
 
 CLI 模式复用宿主已有登录与模型选择。推理期间关闭工具和无关 MCP，写入始终由确定性核心完成。交接模式不会调用某个隐藏的 Codex 兜底。宿主不能执行本机命令时，只能阅读接入说明，不能声称已接通项目操作或调度。
 
@@ -68,3 +68,13 @@ Codex 适配器能把原生工具事件、单次审批和产物展示在页面�
 使用同一安装记录中的 Python 与配置执行 `host.py pause` 可独立暂停后续定时轮次，不改冻结的业务配置。`unpause` 只解除本机暂停，不启用宿主原生任务。当前轮次与已提交结果保留。
 
 `recovery-status` 返回原轮次编号与动作状态。对结果未知的原轮次执行 `reconcile --run-id <原编号>`，只回读提供方并修复本地回执；成功后执行 `resume-growth --run-id <同一编号>` 继续剩余步骤。不得自行更换编号、新建轮次、删除去重记录或扩大原开关授权。没有可靠原编号、来源标记或投递句柄时保留待核，不猜测成功、不盲目重发。手动恢复不会改变暂停状态。
+
+## 2.4：DeepSeek 自动报告适配器
+
+仅报告链路使用官方 `dsh --profile headless --patch <本任务补丁> --json -`。stdin 传入冻结的项目事实、相关记忆和报告结构，接收 JSONL 的最终结果。复用用户 headless profile 的模型部署及宿主认证，不写全局配置，不直接操纵桌面聊天窗口。headless 与桌面 profile 的模型覆盖配置可能不同，用户在宿主中管理。
+
+每次调用加载年轮的无工具策略：创建 agent 时限制工具为空，另加全局拒绝 guard；必须收到 tools=0、正常 completed 终态、退出码 0 和通过 schema 校验的 final 才使用正文。thinking 不保存在年轮日志或界面；宿主自身的日志策略由宿主管理。模型不上传文件、不写表、不发消息。
+
+发布沿用确定性核心的上传回执、唯一报告键与主表回读。断网、取消或格式异常不伪装成功；用户可重试同一任务。旧结构化接续报告可在原请求上自动返回分析结果。其他 DeepSeek 工作流和生长决策保持原接续行为，升级不改变定时暂停状态。
+
+接口依据：[官方 headless 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/bundle/headless/README.md)。本机验证版本及平台边界见 docs/VALIDATION_2.4.md。

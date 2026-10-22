@@ -22,11 +22,16 @@ function taskPanel(job) {
     output,
     el("p", {
       class: "form-help",
-      text: "关闭窗口不会取消任务。在右上角通知或执行记录中，可查看状态、结果和接续步骤。",
+      text: job.op === "report" ? "关闭窗口后仍会继续。可从右上角通知回来查看；失败后重试会保留已完成步骤。" : "关闭窗口不会取消任务。在右上角通知或执行记录中，可查看状态、结果和接续步骤。",
     }),
   );
-  let latest = job,
-    timer;
+  let latest = job, timer, polling = false, ticks = 0;
+  const stages = el("div", { class: "report-stages", "aria-label": "汇报处理阶段" });
+  if (job.op === "report") box.insertBefore(stages, phase);
+  async function retryReport() {
+    const { job_id } = await api("/api/actions", { op: "resume", data: { job_id: latest.id } });
+    update(await api("/api/jobs/" + job_id));
+  }
   function update(value) {
     latest = value;
     box.dataset.job = value.id;
@@ -39,6 +44,7 @@ function taskPanel(job) {
         succeeded: "已完成",
         failed: "未完成",
         interrupted: "需要恢复",
+        cancelled: "已停止",
       }[value.status] || value.status;
     if (value.status === "succeeded" && value.result?.failed)
       status.textContent = value.result.succeeded
@@ -54,7 +60,24 @@ function taskPanel(job) {
       ),
     );
     actions.replaceChildren();
-    if (value.status === "waiting_harness") {
+    if (value.op === "report") {
+      const messages = (value.progress || []).map(p => p.message);
+      const labels = ["读取项目", "检索记忆", "AI 撰写", "生成页面", "上传报告", "写回确认"];
+      const patterns = [/项目事实/, /独立记忆/, /DeepSeek|正文|自动撰写/, /排版|可视化|生成汇报并上传/, /上传报告到/, /写回项目主表|回读确认/];
+      let index = -1;
+      if (value.status !== "queued") index = Math.max(0, ...patterns.map((p,i) => messages.some(m => p.test(m)) ? i : -1));
+      stages.replaceChildren(...labels.map((text,i) => el("span", { class: value.status === "succeeded" || i < index ? "done" : i === index ? "active" : "", text: (i + 1) + " · " + text })));
+      if (value.can_cancel) actions.append(btn(value.cancel_requested ? "正在停止…" : "停止生成", e => quiet(withButton(e.currentTarget, async () => {
+        await api("/api/report-control", { job_id: value.id, action: "cancel" });
+        update(await api("/api/jobs/" + value.id));
+      }))));
+      if (value.can_resume && (value.status !== "waiting_harness" || value.automatic_report || value.handoff_ready)) {
+        actions.append(btn(value.status === "waiting_harness" ? "由 DeepSeek 自动继续" : "重试此报告", e => quiet(withButton(e.currentTarget, retryReport)), "primary"));
+      }
+    }
+    if (value.status === "waiting_harness" && value.op === "report" && value.automatic_report) {
+      phase.textContent = "原报告材料已保留。点击自动继续，由本机 DeepSeek 生成并写回，无需复制请求。";
+    } else if (value.status === "waiting_harness") {
       phase.textContent = "当前停在宿主分析步骤，后台没有继续推理。";
       actions.append(
         el("p", {
@@ -92,7 +115,7 @@ function taskPanel(job) {
           "primary",
         ),
       );
-    } else if (value.can_resume)
+    } else if (value.can_resume && value.op !== "report")
       actions.append(
         btn("核验并重试原请求", (e) =>
           quiet(
@@ -123,7 +146,7 @@ function taskPanel(job) {
   }
   function updateClock() {
     const end =
-      ["succeeded", "failed", "interrupted", "waiting_harness"].includes(
+      ["succeeded", "failed", "interrupted", "waiting_harness", "cancelled"].includes(
         latest.status,
       ) && latest.finished_at
         ? Date.parse(latest.finished_at)
@@ -143,6 +166,12 @@ function taskPanel(job) {
       return;
     }
     updateClock();
+    if (latest.op === "report" && ["running", "queued"].includes(latest.status) && !polling && ++ticks % 2 === 0) {
+      polling = true;
+      api("/api/jobs/" + latest.id).then(update).catch(() => {
+        phase.textContent = "暂时无法读取进度，后台任务不会因此取消；正在重连…";
+      }).finally(() => { polling = false; });
+    }
   }, 1000);
   update(job);
   box.update = update;
@@ -160,7 +189,7 @@ function handoffText(job) {
 function showTaskResult(box, job) {
   const r = job.result || {};
   box.replaceChildren();
-  if (r.answer || r.summary)
+  if (job.op !== "report" && (r.answer || r.summary))
     box.append(el("p", { text: r.answer || r.summary }));
   if (r.url && /^https:\/\//.test(r.url))
     box.append(
@@ -177,6 +206,12 @@ function showTaskResult(box, job) {
         text: "汇报结合 " + r.memory_pages.length + " 篇独立记忆页面。",
       }),
     );
+  if (job.op === "report" && r.summary) {
+    box.append(el("details", { class: "report-body" }, [
+      el("summary", { text: "查看报告正文" }),
+      el("pre", { text: r.summary, style: "white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:420px;overflow:auto" }),
+    ]));
+  }
   if (r.failed)
     box.append(
       el("p", {
@@ -199,7 +234,7 @@ async function pollJob(id, progress, panel) {
       notice("");
       return { value: job.result, job: id };
     }
-    if (["waiting_harness", "failed", "interrupted"].includes(job.status)) {
+    if (["waiting_harness", "failed", "interrupted", "cancelled"].includes(job.status)) {
       const e = new Error(
         job.status === "waiting_harness"
           ? "任务已保存，按上方步骤到 " +
@@ -399,88 +434,77 @@ function svgNode(tag, attrs = {}) {
 function setupNotifications() {
   const button = $("#notifications");
   if (!button) return;
-  const seenKey = "nianlun.notifications." + boot.config_path;
-  let seen = {};
-  try {
-    seen = JSON.parse(localStorage.getItem(seenKey) || "{}");
-  } catch {}
-  let jobs = [];
-  const stamp = (j) => j.status + ":" + (j.finished_at || j.phase_at || "");
-  async function check() {
-    if (!token || document.hidden) return;
+  let jobs = [], previous = null, redraw = null;
+  async function check(force = false) {
+    if (!token || (document.hidden && !force)) return;
     try {
-      jobs = (await api("/api/notifications")).jobs.filter(
-        (j) =>
-          ![
-            "todo_detail",
-            "memory_catalog",
-            "memory_page",
-            "snapshot",
-            "todos",
-            "memory_query",
-            "memory_project",
-            "setup_probe",
-            "profiles",
-            "inspect",
-            "capabilities",
-            "growth_status",
-            "recovery_status",
-            "harness_status",
-            "scheduler_request",
-            "group_search",
-            "mailboxes",
-            "cdbi_status",
-            "cdbi_datasets",
-            "cdbi_fields",
-            "cdbi_preview",
-          ].includes(j.op),
-      );
-      const count = jobs.filter(
-        (j) =>
-          ["succeeded", "failed", "interrupted", "waiting_harness"].includes(
-            j.status,
-          ) && seen[j.id] !== stamp(j),
-      ).length;
+      jobs = (await api("/api/notifications")).jobs;
+      if (previous) for (const j of jobs) {
+        if (j.op === "report" && ["running", "queued"].includes(previous[j.id]) && ["succeeded", "failed"].includes(j.status)) {
+          toast(j.status === "succeeded" ? (j.project_title || "阶段") + "汇报已写回，请从通知查看" : "阶段汇报未完成，可从通知查看原因并重试");
+        }
+      }
+      previous = Object.fromEntries(jobs.map(j => [j.id, j.status]));
+      const count = jobs.filter(j => ["succeeded", "failed", "interrupted", "waiting_harness", "cancelled"].includes(j.status) && !j.read).length;
       $("#notification-count").textContent = count ? String(count) : "";
+      if (redraw) redraw();
     } catch {}
   }
+  async function mark(items) {
+    await api("/api/notifications/read", { items: items.map(j => ({ id: j.id, stamp: j.stamp })) });
+    await check(true);
+  }
   button.onclick = async () => {
-    await check();
-    const list = el("div", { class: "notification-list" });
-    for (const j of jobs) {
-      const b = btn(
-        (jobNames[j.op] || j.op) +
-          " · " +
-          ({
-            succeeded: "已完成",
-            failed: "未完成",
-            waiting_harness: "等宿主回复",
-            running: "正在执行",
-            queued: "排队中",
-            interrupted: "需要恢复",
-          }[j.status] || j.status),
-        async () => {
-          seen[j.id] = stamp(j);
-          localStorage.setItem(seenKey, JSON.stringify(seen));
-          if (j.scheduled) {
-            $("#modal").close();
-            await navigate("setup");
-          } else
-            dialog(
-              jobNames[j.op] || j.op,
-              taskPanel(await api("/api/jobs/" + j.id)),
-            );
-          check();
-        },
-      );
-      b.append(el("small", { text: j.phase || j.created_at }));
-      list.append(b);
+    await check(true);
+    const selected = new Set(), list = el("div", { class: "notification-list" }), failure = el("p", { class: "form-error", role: "alert" });
+    const filter = select([["all", "全部通知"], ["unread", "未读通知"]]);
+    filter.setAttribute("aria-label", "通知筛选");
+    const all = el("input", { type: "checkbox", "aria-label": "全选当前通知" });
+    const selectedButton = btn("标记所选已读", e => quiet(withButton(e.currentTarget, async () => {
+      await mark(jobs.filter(j => selected.has(j.id))); selected.clear(); render();
+    }).catch(error => { failure.textContent = error.message; }).finally(selectionState)));
+    const markAll = btn("全部标为已读", e => quiet(withButton(e.currentTarget, async () => {
+      await mark(jobs.filter(j => !j.read)); selected.clear(); render();
+    }).catch(error => { failure.textContent = error.message; }).finally(selectionState)));
+    const toolbar = el("div", { class: "notification-toolbar" }, [
+      el("label", {}, [all, el("span", { text: "全选" })]), filter, selectedButton, markAll,
+    ]);
+    const panel = el("div", {}, [toolbar, failure, el("p", { class: "subtle", text: "最近 100 条通知。标记已读只清除提示；任务仍会继续，出现新结果时会再次提醒。" }), list]);
+    const visible = () => jobs.filter(j => filter.value !== "unread" || !j.read);
+    function selectionState() {
+      const rows = visible(), count = rows.filter(j => selected.has(j.id)).length;
+      all.checked = rows.length > 0 && count === rows.length;
+      all.indeterminate = count > 0 && count < rows.length;
+      all.disabled = !rows.length;
+      selectedButton.disabled = !jobs.some(j => selected.has(j.id) && !j.read);
+      selectedButton.textContent = "标记所选已读" + (selected.size ? "（" + selected.size + "）" : "");
+      markAll.disabled = !jobs.some(j => !j.read);
     }
-    if (!jobs.length) list.append(el("p", { text: "目前没有任务通知。" }));
-    dialog("任务通知", list);
+    function render() {
+      list.replaceChildren();
+      for (const j of visible()) {
+        const checkbox = el("input", { type: "checkbox", "aria-label": "选择通知 · " + (jobNames[j.op] || j.op), checked: selected.has(j.id) });
+        checkbox.onchange = () => { checkbox.checked ? selected.add(j.id) : selected.delete(j.id); selectionState(); };
+        const label = (j.project_title ? j.project_title + " · " : "") + (jobNames[j.op] || j.op);
+        const state = { succeeded: "已完成", failed: "未完成", waiting_harness: "待继续", running: "正在执行", queued: "排队中", interrupted: "需要恢复", cancelled: "已停止" }[j.status] || j.status;
+        const open = btn(label + " · " + state, () => quiet((async () => {
+          const job = j.scheduled ? null : await api("/api/jobs/" + j.id);
+          await mark([j]);
+          if (j.scheduled) { $("#modal").close(); await navigate("setup"); }
+          else dialog(label, taskPanel(job));
+        })()));
+        open.append(el("small", { text: j.phase || j.created_at }));
+        list.append(el("div", { class: "notification-row" + (j.read ? " is-read" : " is-unread") }, [checkbox, open, el("span", { class: "read-badge", text: j.read ? "已读" : "未读" })]));
+      }
+      if (!list.children.length) list.append(el("p", { text: filter.value === "unread" ? "所有通知都已读。" : "目前没有任务通知。" }));
+      selectionState();
+    }
+    filter.onchange = () => { selected.clear(); render(); };
+    all.onchange = () => { visible().forEach(j => all.checked ? selected.add(j.id) : selected.delete(j.id)); render(); };
+    redraw = () => { if (panel.isConnected) render(); else redraw = null; };
+    render(); dialog("任务通知", panel);
   };
-  check();
-  setInterval(check, 10000);
+  check(); setInterval(check, 10000);
 }
 function cdbiPanel() {
   const status = el("p", {

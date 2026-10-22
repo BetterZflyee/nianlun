@@ -25,3 +25,19 @@ Full license: `nianlun/assets/portal/vendor/three-LICENSE.txt`.
 ## 交互设计参考：Galaxy View
 
 2.5 的三维记忆探索参考了 [Galaxy View](https://github.com/Longwind1984/galaxy-view) 的发光节点、飞近和邻域聚焦交互（上游 MIT）。本版本没有复制或分发插件源码，没有引入 Obsidian；年轮使用自己的 Three.js 渲染器和只读记忆适配。
+
+## Apache ECharts 6.1.0
+
+Project relationship diagrams use Apache ECharts (Apache-2.0), © The Apache Software
+Foundation. Upstream: https://github.com/apache/echarts. The local ESM bundle includes
+only the selected chart/components and SVG renderer, built from npm `echarts@6.1.0`
+with esbuild 0.28.2. Dependencies included: `zrender@6.1.0` (BSD-3-Clause) and
+`tslib@2.3.0` (0BSD). Original notices and full licenses are retained in:
+
+- `nianlun/assets/portal/vendor/echarts-LICENSE.txt`
+- `nianlun/assets/portal/vendor/echarts-NOTICE.txt`
+- `nianlun/assets/portal/vendor/zrender-LICENSE.txt`
+- `nianlun/assets/portal/vendor/tslib-LICENSE.txt`
+
+The reproducible entry and build steps are in `tools/echarts-entry.js` and
+`docs/CHART_COMPONENTS.md`. No remote CDN or graph data upload is used.

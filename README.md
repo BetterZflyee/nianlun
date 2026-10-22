@@ -4,7 +4,7 @@
 
 年轮是一套可接入不同 AI 宿主的本地项目管理工具。它通过 DWS CLI 连接你自己的钉钉 AI 表格，用独立记忆空间保存长期记忆，由已登录的 AI 宿主分析信息。界面、采集、去重和写后核验由年轮负责。
 
-代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.5.0 发布候选版**；各平台的验证范围见下表。
+代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.5.1 发布候选版**；各平台的验证范围见下表。
 
 ## 能做什么
 
@@ -23,6 +23,10 @@ flowchart LR
   Core <--> Brain[自己的独立记忆空间]
   Core --> Todo[本人钉钉待办与摘要]
 ```
+
+## 2.5.1 可调整顺序的项目关系
+
+「探索关系」支持里程碑、项目记录、场地的六种排列，并记住本机选择。关系图使用 Apache ECharts 的桑基组件，提供节点拖动、悬停关联、详情、重置与 SVG 导出；只连接原表中已明确关联的条目。三维记忆星图继续使用 Three.js。详见 [组件与构建](docs/CHART_COMPONENTS.md) 和 [验收记录](docs/VALIDATION_2.5.1.md)。
 
 ## 2.5 三维记忆星图
 
@@ -60,7 +64,7 @@ flowchart LR
 
 ## 安装
 
-2.5 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.5.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
+2.5 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.5.1-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、钉钉连接工具和记忆引擎，不要求预装 Python 或记忆工具。

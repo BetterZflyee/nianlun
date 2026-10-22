@@ -1,13 +1,32 @@
 // A relationship Sankey: one band is one explicit record association.
 // It does not imply a conserved budget, progress, or a direct milestone/site link.
-const roles = ["milestones", "records", "sites"];
+export const DEFAULT_ORDER = ["milestones", "records", "sites"];
+const roles = DEFAULT_ORDER;
+export const RELATION_ORDERS = roles.flatMap((a) =>
+  roles
+    .filter((b) => b !== a)
+    .map((b) => [a, b, roles.find((c) => c !== a && c !== b)]),
+);
+export const normalizeOrder = (value) =>
+  Array.isArray(value) &&
+  value.length === 3 &&
+  new Set(value).size === 3 &&
+  value.every((v) => roles.includes(v))
+    ? [...value]
+    : [...DEFAULT_ORDER];
 const fields = { milestones: "milestone_ids", sites: "site_ids" };
 const key = (role, id) => JSON.stringify([role, String(id)]);
 const compare = (a, b) =>
   String(a.row.title || "").localeCompare(String(b.row.title || ""), "zh-CN") ||
   a.id.localeCompare(b.id);
 
-export function buildRelations(rows, query = "") {
+export function buildRelations(
+  rows,
+  query = "",
+  requestedOrder = DEFAULT_ORDER,
+) {
+  const order = normalizeOrder(requestedOrder),
+    rank = new Map(order.map((role, i) => [role, i]));
   const maps = Object.fromEntries(
     roles.map((role) => [
       role,
@@ -31,8 +50,8 @@ export function buildRelations(rows, query = "") {
           continue;
         }
         links.push({
-          source: role === "milestones" ? other.id : record.id,
-          target: role === "milestones" ? record.id : other.id,
+          source: rank.get(role) < rank.get("records") ? other.id : record.id,
+          target: rank.get(role) < rank.get("records") ? record.id : other.id,
           record: record.id,
           value: 1,
           role,
@@ -74,6 +93,7 @@ export function buildRelations(rows, query = "") {
   for (const node of nodes)
     node.value = Math.max(node.incoming.length, node.outgoing.length, 1);
   return {
+    order,
     nodes,
     links: visibleLinks,
     loose: all
@@ -83,126 +103,6 @@ export function buildRelations(rows, query = "") {
     recordCount: visibleRecords.size,
     totalRecords: records.length,
   };
-}
-
-export function layoutRelations(graph, width) {
-  const columns = roles.map((role) =>
-    graph.nodes
-      .filter((n) => n.role === role)
-      .map((n) => ({ ...n }))
-      .sort(compare),
-  );
-  const order = new Map();
-  const reindex = () =>
-    columns.forEach((c) => c.forEach((n, i) => order.set(n.id, i)));
-  reindex();
-  // Alternating barycentres reduce crossings without randomising the layout.
-  for (let pass = 0; pass < 8; pass++) {
-    for (const ci of pass % 2 ? [1, 0] : [1, 2]) {
-      const useIncoming = pass % 2 === 0;
-      const score = (n) => {
-        const edges = useIncoming ? n.incoming : n.outgoing;
-        return edges.length
-          ? edges.reduce(
-              (sum, e) => sum + order.get(useIncoming ? e.source : e.target),
-              0,
-            ) / edges.length
-          : order.get(n.id);
-      };
-      columns[ci].sort((a, b) => score(a) - score(b) || compare(a, b));
-      reindex();
-    }
-  }
-  const unit = 9,
-    gap = 16,
-    top = 62,
-    padding = 24;
-  const cardWidth = Math.min(218, (width - 2 * padding) * 0.24);
-  const nodeHeight = (n) =>
-    Math.max(
-      [...String(n.row.title || "")].reduce(
-        (sum, c) => sum + (/[\x00-\x7f]/.test(c) ? 0.55 : 1),
-        0,
-      ) *
-        12 >
-        cardWidth - 30
-        ? 76
-        : 58,
-      n.value * unit + 18,
-    );
-  const heights = columns.map(
-    (c) =>
-      c.reduce((h, n) => h + nodeHeight(n), 0) +
-      Math.max(0, c.length - 1) * gap,
-  );
-  const innerHeight = Math.max(310, ...heights);
-  columns.forEach((column, ci) => {
-    let y = top + (innerHeight - heights[ci]) / 2;
-    for (const n of column) {
-      n.x = padding + (ci * (width - 2 * padding - cardWidth)) / 2;
-      n.y = y;
-      n.width = cardWidth;
-      n.height = nodeHeight(n);
-      y += n.height + gap;
-    }
-  });
-  const nodes = columns.flat(),
-    byId = new Map(nodes.map((n) => [n.id, n]));
-  // Place side nodes near their records, then resolve overlaps within the column.
-  for (const ci of [0, 2]) {
-    const column = columns[ci];
-    for (const n of column) {
-      const edges = ci === 0 ? n.outgoing : n.incoming;
-      n.y =
-        edges.reduce((sum, e) => {
-          const other = byId.get(ci === 0 ? e.target : e.source);
-          return sum + other.y + other.height / 2;
-        }, 0) /
-          edges.length -
-        n.height / 2;
-    }
-    let cursor = top;
-    for (const n of column) {
-      n.y = Math.max(cursor, n.y);
-      cursor = n.y + n.height + gap;
-    }
-    cursor = top + innerHeight;
-    for (const n of [...column].reverse()) {
-      n.y = Math.min(n.y, cursor - n.height);
-      cursor = n.y - gap;
-    }
-  }
-  const offsets = new Map();
-  for (const n of nodes) {
-    for (const [direction, edges] of [
-      ["in", n.incoming],
-      ["out", n.outgoing],
-    ]) {
-      const sorted = [...edges].sort(
-        (a, b) =>
-          byId.get(direction === "in" ? a.source : a.target).y -
-          byId.get(direction === "in" ? b.source : b.target).y,
-      );
-      sorted.forEach((e, i) =>
-        offsets.set(
-          e.source + "|" + e.target + "|" + direction,
-          n.y + (n.height - sorted.length * unit) / 2 + i * unit,
-        ),
-      );
-    }
-  }
-  const links = graph.links.map((e) => {
-    const s = byId.get(e.source),
-      t = byId.get(e.target),
-      x0 = s.x + s.width,
-      x1 = t.x;
-    const y0 = offsets.get(e.source + "|" + e.target + "|out"),
-      y1 = offsets.get(e.source + "|" + e.target + "|in"),
-      bend = (x1 - x0) * 0.48;
-    const d = `M${x0},${y0} C${x0 + bend},${y0} ${x1 - bend},${y1} ${x1},${y1} L${x1},${y1 + unit} C${x1 - bend},${y1 + unit} ${x0 + bend},${y0 + unit} ${x0},${y0 + unit} Z`;
-    return { ...e, d };
-  });
-  return { nodes, links, width, height: top + innerHeight + 24, cardWidth };
 }
 
 export function relationNeighborhood(graph, id) {
@@ -219,5 +119,110 @@ export function relationNeighborhood(graph, id) {
         .filter((e) => records.has(e.record))
         .flatMap((e) => [e.source, e.target]),
     ]),
+  };
+}
+
+export const ROLE_COLORS = {
+  milestones: "#497c65",
+  records: "#55768b",
+  sites: "#b58a45",
+};
+
+export function relationChartOption(
+  graph,
+  { selected = null, width = 1000, reducedMotion = false, roleNames = {} } = {},
+) {
+  const rank = new Map(graph.order.map((role, i) => [role, i]));
+  const near = selected ? relationNeighborhood(graph, selected) : null;
+  const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+  const title = (id) => byId.get(id)?.row.title || "未命名";
+  // Keep an empty final column without inventing a layout-only business node.
+  const lastDepth = Math.max(0, ...graph.nodes.map((n) => rank.get(n.role)));
+  const right = 32 + ((width - 64 - 18) * (2 - lastDepth)) / 2;
+  return {
+    animation: !reducedMotion,
+    animationDurationUpdate: 350,
+    aria: {
+      enabled: true,
+      label: {
+        description:
+          "项目关联桑基图。列顺序仅为阅读顺序，不表示时间或业务依赖。也可展开下方节点列表阅读详情。",
+      },
+    },
+    tooltip: {
+      trigger: "item",
+      renderMode: "richText",
+      confine: true,
+      formatter: (p) =>
+        p.dataType === "edge"
+          ? title(p.data.source) +
+            " — " +
+            title(p.data.target) +
+            "\n1 项真实关联"
+          : (roleNames[byId.get(p.name)?.role] || "") + "\n" + title(p.name),
+    },
+    toolbox: {
+      right: 12,
+      top: 8,
+      itemSize: 16,
+      feature: {
+        restore: { title: "重置图表" },
+        saveAsImage: {
+          type: "svg",
+          title: "导出关系图",
+          name: "年轮-项目关系",
+          pixelRatio: 2,
+        },
+      },
+    },
+    series: [
+      {
+        id: "project-relations",
+        type: "sankey",
+        left: 32,
+        right,
+        top: 52,
+        bottom: 24,
+        nodeWidth: 18,
+        nodeGap: 26,
+        nodeAlign: "left",
+        layoutIterations: 32,
+        draggable: true,
+        emphasis: { focus: "adjacency", lineStyle: { opacity: 0.6 } },
+        lineStyle: { color: "gradient", opacity: 0.19, curveness: 0.48 },
+        label: {
+          color: "#344a3f",
+          fontSize: 12,
+          lineHeight: 18,
+          width: 190,
+          height: 38,
+          overflow: "break",
+          lineOverflow: "truncate",
+          formatter: (p) => title(p.name),
+        },
+        data: graph.nodes.map((n) => ({
+          name: n.id,
+          depth: rank.get(n.role),
+          itemStyle: {
+            color: ROLE_COLORS[n.role],
+            opacity: near && !near.nodes.has(n.id) ? 0.18 : 1,
+            borderWidth: n.id === selected ? 2 : 0,
+            borderColor: "#213c2f",
+          },
+          label: {
+            position: rank.get(n.role) === 2 ? "left" : "right",
+            opacity: near && !near.nodes.has(n.id) ? 0.35 : 1,
+          },
+        })),
+        links: graph.links.map((e) => ({
+          source: e.source,
+          target: e.target,
+          value: 1,
+          lineStyle: {
+            opacity: near ? (near.records.has(e.record) ? 0.58 : 0.025) : 0.19,
+          },
+        })),
+      },
+    ],
   };
 }

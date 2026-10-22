@@ -64,19 +64,29 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.5.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.5.1','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
             'preferences':{'schedule':growth.get('schedule'),'sources':{'inbox':bool(growth.get('inbox_dirs')),'portal':bool(growth.get('codex_session_dirs')),**growth.get('sources',{}),'codex':bool(growth.get('codex_session_dirs'))},
                 'switches':growth.get('switches',{}),'report_folder':growth.get('report_folder'),
                 'groups':growth.get('groups',[]),'mailbox':growth.get('mailbox',''),
                 'minutes_lookback_hours':growth.get('minutes_lookback_hours',48),'notification_mode':growth.get('notification_mode','every_run')},
-            'settings':{k:v for k,v in self.settings.items() if k in ('codex_bin','enabled_skills','skill_roots')},
+            'settings':{k:v for k,v in self.settings.items() if k in ('codex_bin','enabled_skills','skill_roots','relation_order')},
             'harness':harness.describe(harness.selection(self.config,self.settings.get('codex_bin'))),
             'hosts':harness.PROVIDERS,'config_path':str(self.config)}
 
     def capabilities(self):
         return harness.capabilities(harness.selection(self.config,self.settings.get('codex_bin')),self.settings.get('skill_roots',[]))
+
+    def view_preferences(self,data):
+        order=data.get('relation_order') if isinstance(data,dict) else None
+        if not isinstance(order,list) or len(order)!=3 or any(not isinstance(v,str) for v in order) or set(order)!={'milestones','records','sites'}:
+            raise n.Error('关系图顺序须包含里程碑、项目记录、场地各一次')
+        with self.guard:
+            settings={**self.settings,'relation_order':order}
+            n.save(self.settings_path,settings)
+            self.settings=settings
+        return {'relation_order':order}
 
     def notifications(self):
         with self.guard:
@@ -556,7 +566,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.respond(404,{'error':'文件不存在或不属于该工作流'})
             if file.stat().st_size>200*1024*1024:return self.respond(413,{'error':'文件较大，请从本机产物目录打开'})
             return self.respond(200,file.read_bytes(),'application/octet-stream')
-        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/relations.js':'relations.js','/relations-model.js':'relations-model.js','/relations.css':'relations.css','/constellation.js':'constellation.js','/galaxy-model.js':'galaxy-model.js','/galaxy-worker.js':'galaxy-worker.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
+        files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/relations.js':'relations.js','/relations-model.js':'relations-model.js','/relations.css':'relations.css','/constellation.js':'constellation.js','/galaxy-model.js':'galaxy-model.js','/galaxy-worker.js':'galaxy-worker.js','/vendor/echarts-sankey.min.js':'vendor/echarts-sankey.min.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
         if path in files:
             file=ASSETS/files[path]
             return self.respond(200,file.read_bytes(),mimetypes.guess_type(str(file))[0]+'; charset=utf-8')
@@ -565,12 +575,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.allowed(api=True,write=True):return
         path=urlsplit(self.path).path
-        if path not in ('/api/actions','/api/workflow-control','/api/report-control','/api/notifications/read','/api/shutdown'):return self.respond(404,{'error':'操作不存在'})
+        if path not in ('/api/actions','/api/workflow-control','/api/report-control','/api/notifications/read','/api/shutdown','/api/view-preferences'):return self.respond(404,{'error':'操作不存在'})
         try:
             size=int(self.headers.get('Content-Length','0'))
             if not 0<size<=1048576:raise n.Error('表单内容过大或为空')
             if self.headers.get_content_type()!='application/json':raise n.Error('请求须为 JSON')
             body=json.loads(self.rfile.read(size))
+            if path=='/api/view-preferences':return self.respond(200,self.server.app.view_preferences(body))
             if path=='/api/shutdown':
                 with self.server.app.guard:
                     if any(j.get('status') in ('running','queued') for j in self.server.app.jobs.values()):

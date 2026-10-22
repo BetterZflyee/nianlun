@@ -2,7 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildRelations,
-  layoutRelations,
+  normalizeOrder,
+  RELATION_ORDERS,
+  relationChartOption,
   relationNeighborhood,
 } from "../nianlun/assets/portal/relations-model.js";
 const rows = {
@@ -69,33 +71,89 @@ test("focus follows record paths but does not spread through shared endpoint to 
   assert.equal(focus.records.size, 1);
   assert.equal(focus.nodes.size, 5);
 });
-test("layout is deterministic, collision free and finite for dense graphs", () => {
-  const dense = {
-    ...rows,
-    records: Array.from({ length: 100 }, (_, i) => ({
-      id: "r" + i,
-      title: "记录" + i,
-      milestone_ids: i % 2 ? ["same"] : ["same", "m2"],
-      site_ids: ["same", "s2"],
-    })),
-  };
-  for (const width of [860, 1200]) {
-    const g = buildRelations(dense),
-      l = layoutRelations(g, width);
-    assert.deepEqual(l, layoutRelations(g, width));
-    for (const n of l.nodes)
-      assert.ok(
-        n.x >= 0 && n.x + n.width <= width && n.y + n.height <= l.height,
-      );
-    for (const role of ["records", "milestones", "sites"]) {
-      const ns = l.nodes
-        .filter((n) => n.role === role)
-        .sort((a, b) => a.y - b.y);
-      for (let i = 1; i < ns.length; i++)
-        assert.ok(ns[i].y >= ns[i - 1].y + ns[i - 1].height + 14);
-    }
+test("all six orders preserve associations, selected record paths and source data", () => {
+  const before = JSON.stringify(rows);
+  const original = buildRelations(rows);
+  const pairs = (g) =>
+    g.links.map((e) => JSON.stringify([e.source, e.target].sort())).sort();
+  assert.equal(RELATION_ORDERS.length, 6);
+  for (const order of RELATION_ORDERS) {
+    const g = buildRelations(rows, "", order);
+    const roles = new Map(g.nodes.map((n) => [n.id, n.role]));
+    assert.deepEqual(pairs(g), pairs(original));
     assert.ok(
-      l.links.every((e) => !e.d.includes("NaN") && !e.d.includes("undefined")),
+      g.links.every(
+        (e) =>
+          order.indexOf(roles.get(e.source)) <
+          order.indexOf(roles.get(e.target)),
+      ),
     );
+    assert.equal(
+      relationNeighborhood(g, g.nodes.find((n) => n.row.id === "m2").id).records
+        .size,
+      1,
+    );
+    assert.equal(buildRelations(rows, "上线", order).recordCount, 1);
+  }
+  assert.equal(JSON.stringify(rows), before);
+  for (const invalid of [
+    null,
+    [],
+    ["sites", "sites", "records"],
+    ["records", "sites", "unknown"],
+  ])
+    assert.deepEqual(normalizeOrder(invalid), [
+      "milestones",
+      "records",
+      "sites",
+    ]);
+});
+
+test("vendored ECharts renders every order, including empty columns, without synthetic nodes", async () => {
+  const { init, version } = await import(
+    "../nianlun/assets/portal/vendor/echarts-sankey.min.js"
+  );
+  assert.equal(version, "6.1.0");
+  for (const data of [
+    rows,
+    { ...rows, sites: [] },
+    { ...rows, milestones: [] },
+  ]) {
+    for (const order of RELATION_ORDERS) {
+      const graph = buildRelations(data, "", order);
+      const chart = init(null, null, {
+        renderer: "svg",
+        ssr: true,
+        width: 1200,
+        height: 700,
+      });
+      try {
+        const option = relationChartOption(graph, {
+          width: 1200,
+          reducedMotion: true,
+        });
+        assert.equal(option.series[0].data.length, graph.nodes.length);
+        chart.setOption(option);
+        const svg = chart.renderToSVGString();
+        assert.ok(
+          svg.includes("<svg") &&
+            !svg.includes("NaN") &&
+            !svg.includes("undefined"),
+        );
+        const rendered = chart.getModel().getSeriesByIndex(0).getData();
+        for (let i = 0; i < rendered.count(); i++) {
+          const layout = rendered.getItemLayout(i),
+            n = graph.nodes[i];
+          assert.ok(Number.isFinite(layout.x) && Number.isFinite(layout.y));
+          assert.ok(
+            Math.abs(
+              layout.x - (order.indexOf(n.role) * (1200 - 64 - 18)) / 2,
+            ) < 0.01,
+          );
+        }
+      } finally {
+        chart.dispose();
+      }
+    }
   }
 });

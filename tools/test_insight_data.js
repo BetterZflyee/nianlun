@@ -2,8 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   todoLandscape,
-  capabilityLandscape,
-  executionLandscape,
   projectLandscape,
   connectionLandscape,
 } from "../nianlun/assets/portal/insight-data.js";
@@ -20,36 +18,6 @@ test("task groups use actual project links and place unresolved links in unassig
   assert.equal(graph.nodes.find((n) => n.id === "p").value, 1);
   assert.equal(graph.nodes.find((n) => n.id === "unlinked").value, 2);
   assert.equal(graph.nodes.find((n) => n.id === "unlinked").urgent, 1);
-  assert.deepEqual(graph.edges, []);
-});
-
-test("capability counts are derived from loaded skills and enabled identities", () => {
-  const graph = capabilityLandscape(
-    [
-      { id: "a", group: "analysis" },
-      { id: "b", group: "analysis" },
-      { id: "c", group: "write" },
-    ],
-    new Set(["b", "unknown"]),
-    (s) => s.group,
-  );
-  assert.equal(graph.nodes[0].value, 2);
-  assert.equal(graph.nodes[0].enabled, 1);
-  assert.equal(graph.nodes[1].status, "idle");
-  assert.deepEqual(graph.edges, []);
-});
-
-test("execution order is chronological without fabricated dependencies", () => {
-  const jobs = [
-    { id: "new", created_at: "2026-10-23", status: "running" },
-    { id: "old", created_at: "2026-10-22", status: "failed" },
-  ];
-  const graph = executionLandscape(jobs, (j) => j.status);
-  assert.deepEqual(
-    graph.nodes.map((n) => n.id),
-    ["old", "new"],
-  );
-  assert.equal(jobs[0].id, "new");
   assert.deepEqual(graph.edges, []);
 });
 
@@ -94,7 +62,6 @@ test("connection topology distinguishes saved configuration from verified runtim
 
 test("empty sources remain empty and do not fabricate work", () => {
   assert.equal(todoLandscape([], []).nodes.length, 0);
-  assert.equal(capabilityLandscape([], new Set(), () => "x").nodes.length, 0);
   assert.equal(projectLandscape({}, {}).nodes.length, 0);
   assert.equal(connectionLandscape({}).edges.length, 0);
   assert.equal(

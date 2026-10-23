@@ -28,50 +28,6 @@ export function todoLandscape(rows, projects) {
   };
 }
 
-export function capabilityLandscape(skills, enabled, classify) {
-  const groups = new Map();
-  for (const skill of skills) {
-    const id = classify(skill);
-    if (!groups.has(id))
-      groups.set(id, {
-        id,
-        label: id,
-        group: "能力类别",
-        value: 0,
-        enabled: 0,
-      });
-    const group = groups.get(id);
-    group.value++;
-    if (enabled.has(skill.id)) group.enabled++;
-  }
-  return {
-    nodes: [...groups.values()].map((g) => ({
-      ...g,
-      status: g.enabled ? "ready" : "idle",
-      detail: `${g.value} 项能力 · ${g.enabled} 项已启用`,
-    })),
-    edges: [],
-  };
-}
-
-export function executionLandscape(jobs, stateLabel) {
-  // Order represents time, never job-to-job dependency.
-  const sorted = [...jobs].sort(
-    (a, b) => (Date.parse(a.created_at) || 0) - (Date.parse(b.created_at) || 0),
-  );
-  return {
-    nodes: sorted.map((j) => ({
-      id: j.id,
-      label: j.title || j.human_request || j.op,
-      group: stateLabel(j),
-      status: j.status,
-      detail: `${stateLabel(j)} · ${j.created_at || "时间未提供"}`,
-      value: 1,
-    })),
-    edges: [],
-  };
-}
-
 export function projectLandscape(project, rows) {
   const nodes = [],
     edges = [],

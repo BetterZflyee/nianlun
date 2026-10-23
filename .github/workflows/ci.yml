@@ -53,6 +53,12 @@ jobs:
           node --check nianlun/assets/portal/growth-scene.js
           node --check nianlun/assets/portal/growth-scene-model.js
           node --test tools/test_growth_scene.js
+          node --check nianlun/assets/portal/page-insights.js
+          node --check nianlun/assets/portal/insight-data.js
+          node --check nianlun/assets/portal/insight-model.js
+          node --check nianlun/assets/portal/insight-scene.js
+          node --test tools/test_insight_scene.js
+          node --test tools/test_insight_data.js
           node --check nianlun/assets/portal/constellation.js
           node --check nianlun/assets/portal/galaxy-worker.js
           node --check nianlun/assets/portal/relations.js

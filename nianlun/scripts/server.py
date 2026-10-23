@@ -64,7 +64,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.6.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.7.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -73,6 +73,7 @@ class Application:
                 'groups':growth.get('groups',[]),'mailbox':growth.get('mailbox',''),
                 'minutes_lookback_hours':growth.get('minutes_lookback_hours',48),'notification_mode':growth.get('notification_mode','every_run')},
             'settings':{k:v for k,v in self.settings.items() if k in ('codex_bin','enabled_skills','skill_roots','relation_order')},
+            'harness_configured':bool(config.get('harness',{}).get('provider')),
             'harness':harness.describe(harness.selection(self.config,self.settings.get('codex_bin'))),
             'hosts':harness.PROVIDERS,'config_path':str(self.config)}
 
@@ -570,6 +571,7 @@ class Handler(BaseHTTPRequestHandler):
         files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/relations.js':'relations.js','/relations-model.js':'relations-model.js','/relations.css':'relations.css','/constellation.js':'constellation.js','/galaxy-model.js':'galaxy-model.js','/galaxy-worker.js':'galaxy-worker.js','/vendor/echarts-sankey.min.js':'vendor/echarts-sankey.min.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
         files.update({ '/experience.js':'experience.js', '/experience.css':'experience.css',
             '/growth-scene.js':'growth-scene.js', '/growth-scene-model.js':'growth-scene-model.js' })
+        files.update({"/"+name:name for name in ("insight-data.js","insight-scene.js","insight-model.js","insight-scene.css","page-insights.js","page-insights.css","memory-view.js","memory-view.css")})
         if path in files:
             file=ASSETS/files[path]
             return self.respond(200,file.read_bytes(),mimetypes.guess_type(str(file))[0]+'; charset=utf-8')

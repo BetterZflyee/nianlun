@@ -21,13 +21,21 @@ export function buildGraph(pages, projects = []) {
   const groups = new Map(),
     bySlug = new Map();
   const nodes = pages.map((page) => {
-    const project = projects.find(
-      (p) =>
-        p.title &&
-        (page.title + " " + page.slug)
-          .toLowerCase()
-          .includes(p.title.toLowerCase()),
-    );
+    const matches = projects
+      .filter(
+        (p) =>
+          p.title &&
+          (page.title + " " + page.slug)
+            .toLowerCase()
+            .includes(p.title.toLowerCase()),
+      )
+      .sort((a, b) => b.title.length - a.title.length);
+    // Prefer the most specific name; equal names are ambiguous, not a binding.
+    const project =
+      matches.length &&
+      (!matches[1] || matches[0].title.length > matches[1].title.length)
+        ? matches[0]
+        : null;
     const folder = page.slug.includes("/") ? page.slug.split("/")[0] : "未分类";
     const group = project ? "project:" + project.id : "folder:" + folder;
     groups.set(group, {
@@ -72,6 +80,56 @@ export function buildGraph(pages, projects = []) {
     }
   }
   return { nodes, edges, groups: [...groups.values()], unresolved };
+}
+
+// Navigation reflects loaded metadata only. A group never creates citation edges.
+export function catalogGroups(graph, projects = []) {
+  const counts = new Map();
+  for (const node of graph.nodes)
+    counts.set(node.group, (counts.get(node.group) || 0) + 1);
+  const projectGroups = projects.map((project) => ({
+    id: "project:" + project.id,
+    title: project.title,
+    basis: "标题匹配项目",
+    color: colorFor("project:" + project.id),
+    count: counts.get("project:" + project.id) || 0,
+  }));
+  const folders = graph.groups
+    .filter((group) => group.id.startsWith("folder:"))
+    .map((group) => ({ ...group, count: counts.get(group.id) || 0 }))
+    .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+  return {
+    projects: projectGroups,
+    folders,
+    total: graph.nodes.length,
+    unassigned: folders.reduce((total, group) => total + group.count, 0),
+  };
+}
+
+export function catalogNodes(graph, group = "all", query = "") {
+  const q = String(query).trim().toLocaleLowerCase();
+  return graph.nodes.filter(
+    (node) =>
+      (group === "all" ||
+        (group === "unassigned"
+          ? node.group.startsWith("folder:")
+          : node.group === group)) &&
+      (!q || `${node.title} ${node.slug}`.toLocaleLowerCase().includes(q)),
+  );
+}
+
+export function referenceCoverage(pages) {
+  return {
+    total: pages.length,
+    verified: pages.filter((page) => page.links_verified === true).length,
+    failed: pages.filter(
+      (page) => page.links_verified !== true && page.links_error,
+    ).length,
+    truncated: pages.filter((page) => page.links_truncated === true).length,
+    pending: pages.filter(
+      (page) => page.links_verified !== true && !page.links_error,
+    ).length,
+  };
 }
 
 export function neighborhood(id, edges, depth = 1) {

@@ -54,3 +54,29 @@ node --test tools/test_growth_scene.js
 ```
 
 模型测试用于校验项目身份、关联统计和布局边界，不替代浏览器交互或业务写回验收。实现参考 [Three.js 按需渲染](https://threejs.org/manual/pages/rendering-on-demand.html) 和 [资源释放](https://threejs.org/manual/pages/how-to-dispose-of-objects.html)，实际验证见 [2.6 验收记录](VALIDATION_2.6.md)。
+
+## 各页面的任务图景（2.7）
+
+共享场景使用已打包的 Three.js，普通 DOM 保留文字、工具栏与键盘入口。没有新增 CDN 或外部数据服务，项目关系完整探索仍使用 ECharts。
+
+| 模块 | 职责 |
+| --- | --- |
+| `insight-data.js` | 将已载入的待办、能力、执行、项目关联和接入配置映射成真实节点与显式边；不另行读取数据或推断依赖 |
+| `insight-model.js` | 节点去重、状态显示、布局、边过滤与数量预算，纯函数可测试 |
+| `insight-scene.js` / `insight-scene.css` | Three.js 绘制、标签、HTML 条目按钮、选择、视角与降级，按需绘制 |
+| `page-insights.js` / `page-insights.css` | 页面面板、收起与展开、异步挂载保护、页面切换清理，以及选取后的业务入口 |
+
+同步接口：`mount(host, {kind, nodes, edges, onSelect, reducedMotion, onReady, onError})`，返回 `update({nodes, edges, selectedId?})`、`focus(id)`、`reset()`、`setPaused(boolean)`、`destroy()`。`kind` 为 `cluster`、`pipeline`、`timeline` 或 `connections`；节点包含稳定 `id`、`label`、`group`、`status`，可选 `value` 与 `detail`，边只接受显式 `source` / `target`。
+
+`onReady` 在挂载及数据更新时返回模式、节点总数、显示数、溢出数、实际边数与边溢出数。`focus` 仅高亮，不转移 DOM 焦点；`reset` 只复位视角，保留选中项；`update` 可明确传入 `selectedId: null` 清除选择。暂停视角交互仍可点击节点与 HTML 条目。调用方给容器约 240–300 像素高度并在导航前销毁。
+
+最多 80 个节点、320 条显式边，像素比上限 1.5。管线与时间轴保持调用方顺序，不因相邻而生成边；聚合依据传入分组。没有默认持续动画，交互、尺寸或数据变化才请求绘制；不可见时不消耗绘图帧，WebGL 中断后释放资源并使用条目目录。减少动态效果设置不会启动镜头过渡。
+
+数据映射和模型验证：
+
+```sh
+node --test tools/test_insight_scene.js
+node --test tools/test_insight_data.js
+```
+
+两组测试覆盖真实标识、去重、显式关联、数量上限、确定布局、中文状态、项目聚合和配置含义，不替代浏览器操作或业务写回验收。CI 同时检查新增场景与面板 JavaScript 语法；实际执行结果见 [2.7 验收记录](VALIDATION_2.7.md)。

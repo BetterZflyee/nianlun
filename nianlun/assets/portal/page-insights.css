@@ -102,12 +102,6 @@
   outline: 2px solid #3f7552;
   outline-offset: 5px;
 }
-.workflow-builder .flow-track {
-  display: none;
-}
-.workflow-builder > .page-insight {
-  margin-top: 0;
-}
 @media (max-width: 900px) {
   .project-detail-summary {
     grid-template-columns: 1fr;

@@ -55,13 +55,13 @@ node --test tools/test_growth_scene.js
 
 模型测试用于校验项目身份、关联统计和布局边界，不替代浏览器交互或业务写回验收。实现参考 [Three.js 按需渲染](https://threejs.org/manual/pages/rendering-on-demand.html) 和 [资源释放](https://threejs.org/manual/pages/how-to-dispose-of-objects.html)，实际验证见 [2.6 验收记录](VALIDATION_2.6.md)。
 
-## 各页面的任务图景（2.7）
+## 任务图景组件（2.7，2.7.1 调整页面范围）
 
-共享场景使用已打包的 Three.js，普通 DOM 保留文字、工具栏与键盘入口。没有新增 CDN 或外部数据服务，项目关系完整探索仍使用 ECharts。
+共享场景使用已打包的 Three.js，普通 DOM 保留文字、工具栏与键盘入口。2.7.1 仅在项目关系、待办分布和接入配置等保留页面挂载任务图景；能力中心、工作流和执行记录已移除图景入口，不恢复旧流程图。这三个页面继续使用 DOM 列表、表单与详情。项目工作台概览、记忆星图与报告路径各自的三维组件保留，项目完整关系探索仍使用 ECharts。
 
 | 模块 | 职责 |
 | --- | --- |
-| `insight-data.js` | 将已载入的待办、能力、执行、项目关联和接入配置映射成真实节点与显式边；不另行读取数据或推断依赖 |
+| `insight-data.js` | 将已载入数据映射成真实节点与显式边；当前页面使用待办、项目关联和接入配置映射，不另行读取数据或推断依赖 |
 | `insight-model.js` | 节点去重、状态显示、布局、边过滤与数量预算，纯函数可测试 |
 | `insight-scene.js` / `insight-scene.css` | Three.js 绘制、标签、HTML 条目按钮、选择、视角与降级，按需绘制 |
 | `page-insights.js` / `page-insights.css` | 页面面板、收起与展开、异步挂载保护、页面切换清理，以及选取后的业务入口 |
@@ -80,3 +80,5 @@ node --test tools/test_insight_data.js
 ```
 
 两组测试覆盖真实标识、去重、显式关联、数量上限、确定布局、中文状态、项目聚合和配置含义，不替代浏览器操作或业务写回验收。CI 同时检查新增场景与面板 JavaScript 语法；实际执行结果见 [2.7 验收记录](VALIDATION_2.7.md)。
+
+2.7.1 只调整页面挂载范围，没有新增渲染库、CDN 或外部数据服务。2.7 的历史实现与验收记录保留，当前修订的实际检查见 [2.7.1 验收记录](VALIDATION_2.7.1.md)。

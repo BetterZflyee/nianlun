@@ -580,7 +580,6 @@ function skillCategory(s) {
 }
 let workflowSkills23 = [];
 async function renderSkills23(root, generation) {
-  const insights = await import("./insight-data.js");
   const catalog = (await run("capabilities")).value;
   if (generation !== viewVersion) return;
   const chosen = new Set(),
@@ -598,16 +597,6 @@ async function renderSkills23(root, generation) {
   let category = "all",
     onlyEnabled = false,
     source = "all";
-  const landscape = insightPanel({
-    title: "方法星座",
-    description: "按用途组织已加载能力。点选类别查看方法，启用数量随操作更新。",
-    onSelect(id) {
-      category = id;
-      onlyEnabled = false;
-      drawRail();
-      draw();
-    },
-  });
   const addRoot = (e) =>
     quiet(
       withButton(e.currentTarget, async () => {
@@ -667,7 +656,6 @@ async function renderSkills23(root, generation) {
       btn("选择 Skill 文件夹", addRoot, "primary"),
     ]),
     summary,
-    landscape.root,
     el("div", { class: "capability-workspace" }, [
       rail,
       el("div", {}, [
@@ -794,10 +782,6 @@ async function renderSkills23(root, generation) {
     );
   }
   function draw() {
-    landscape.update({
-      ...insights.capabilityLandscape(catalog.skills, enabled, skillCategory),
-      selectedId: category === "all" ? null : category,
-    });
     summary.replaceChildren(
       el("div", {}, [
         el("strong", { text: catalog.skills.length }),
@@ -910,7 +894,6 @@ async function renderWorkflows23(root, generation) {
     }),
     detail = el("div"),
     history = el("div", { class: "workflow-history" }),
-    flow = el("div", { class: "flow-track" }),
     count = el("span"),
     error = el("p", { class: "form-error" }),
     submit = el("button", {
@@ -955,58 +938,11 @@ async function renderWorkflows23(root, generation) {
       studioIcon("arrow"),
     ),
   );
-  flow.append(
-    ...[
-      ["01", "项目背景", "从当前事实开始"],
-      ["02", "选择方法", "组合已启用的能力"],
-      [
-        "03",
-        boot.harness?.name || "AI 宿主",
-        boot.harness?.embedded_workflow ? "在页面执行" : "到所选宿主接续",
-      ],
-      ["04", "生成产物", "保留过程与文件"],
-    ].map(([n, t, d]) =>
-      el("div", { class: "flow-step" }, [
-        el("span", { text: n }),
-        el("strong", { text: t }),
-        el("small", { text: d }),
-      ]),
-    ),
-  );
-  const landscape = insightPanel({
-    title: "这次工作的路径",
-    description:
-      "这是执行前的组合预览，不表示任务已经开始。点选步骤可继续配置。",
-    kind: "pipeline",
-    onSelect(id) {
-      if (id === "project") project.focus();
-      if (id === "methods") skillSearch.focus();
-      if (id === "host")
-        studioDrawer(
-          "所选宿主",
-          el("div", {}, [
-            el("h2", { text: boot.harness?.name || "AI 宿主" }),
-            el("p", {
-              text: boot.harness?.embedded_workflow
-                ? "当前支持在页面执行，开始前由用户提交工作流。"
-                : "当前通用工作流采用接续方式。此预览不会启动任务。",
-            }),
-            btn("查看宿主设置", () => {
-              $("#modal").close();
-              navigate("setup");
-            }),
-          ]),
-        );
-      if (id === "result") question.focus();
-    },
-  });
   const selectionSummary = el("div", {
     class: "workflow-selection-summary",
     "aria-live": "polite",
   });
   const form = el("form", { class: "workflow-builder" }, [
-    landscape.root,
-    flow,
     selectionSummary,
     el("div", { class: "workflow-editor" }, [
       el("div", { class: "workflow-inputs" }, [
@@ -1049,60 +985,15 @@ async function renderWorkflows23(root, generation) {
     const selectedNames = available
       .filter((s) => chosen.has(s.id))
       .map((s) => s.name);
-    landscape.update({
-      nodes: [
-        {
-          id: "project",
-          label: title,
-          group: "01 · 项目背景",
-          status: "configured",
-          detail: "点击选择项目",
-        },
-        {
-          id: "methods",
-          label: chosen.size ? chosen.size + " 项能力" : "宿主选择方法",
-          group: "02 · 方法",
-          status: chosen.size ? "ready" : "idle",
-          detail: selectedNames.join("、") || "点击查找能力",
-        },
-        {
-          id: "host",
-          label: boot.harness?.name || "AI 宿主",
-          group: "03 · 执行",
-          status: boot.harness_configured ? "configured" : "idle",
-          detail: boot.harness?.embedded_workflow
-            ? "支持页面执行 · 尚未提交"
-            : "当前为宿主接续模式",
-        },
-        {
-          id: "result",
-          label: "工作成果",
-          group: "04 · 产物",
-          status: "idle",
-          detail: "提交后依实际执行结果产生",
-        },
-      ],
-      edges: [
-        { source: "project", target: "methods" },
-        { source: "methods", target: "host" },
-        { source: "host", target: "result" },
-      ],
-    });
-    const steps = flow.querySelectorAll(".flow-step");
-    steps[0].querySelector("small").textContent = title;
-    steps[1].querySelector("small").textContent = chosen.size
-      ? chosen.size + " 项能力已选"
-      : "由宿主选择方法";
-    steps[1].classList.toggle("is-selected", chosen.size > 0);
     selectionSummary.replaceChildren(
       el("span", { text: "本次组合" }),
       el("strong", { text: title }),
       ...selectedNames
         .slice(0, 4)
         .map((name) => el("span", { class: "selection-chip", text: name })),
-      selectedNames.length > 4
-        ? el("span", { text: "另 " + (selectedNames.length - 4) + " 项能力" })
-        : el("span"),
+      ...(selectedNames.length > 4
+        ? [el("span", { text: "另 " + (selectedNames.length - 4) + " 项能力" })]
+        : []),
       el("small", { text: "交给 " + (boot.harness?.name || "所选 AI 宿主") }),
     );
   }
@@ -1213,7 +1104,6 @@ function jobRow23(j, open) {
   ]);
 }
 async function renderRuns23(root, generation) {
-  const insights = await import("./insight-data.js");
   const reads = new Set([
     "snapshot",
     "todos",
@@ -1274,16 +1164,6 @@ async function renderRuns23(root, generation) {
     ]);
     studioDrawer(jobNames[j.op] || j.op, el("div", {}, [taskPanel(full), raw]));
   }
-  const landscape = insightPanel({
-    title: "行动时间线",
-    description:
-      "展示当前筛选中最近 80 次执行。沿时间排列，颜色表示状态；点击查看真实回执。",
-    kind: "timeline",
-    onSelect(id) {
-      const job = rows.find((j) => j.id === id);
-      if (job) quiet(openJob(job));
-    },
-  });
   root.replaceChildren(
     studioHead("执行记录", "每一次行动，都有明确的状态与回执。", [
       btn("运行状态与待完成步骤", () => navigate("setup")),
@@ -1312,7 +1192,6 @@ async function renderRuns23(root, generation) {
         el("div", {}, [el("span", { text: t }), el("strong", { text: v })]),
       ),
     ),
-    landscape.root,
     el("div", { class: "list-tools" }, [search, filter, state]),
     list,
   );
@@ -1331,31 +1210,6 @@ async function renderRuns23(root, generation) {
         ])
           .toLowerCase()
           .includes(q),
-    );
-    const labels = {
-      queued: "排队中",
-      running: "执行中",
-      succeeded: "已完成",
-      waiting_harness: "等待宿主",
-      prepared: "接续材料已准备",
-      failed: "未完成",
-      interrupted: "需核验",
-    };
-    const latest = [...shown]
-      .sort(
-        (a, b) =>
-          (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0),
-      )
-      .slice(0, 80);
-    landscape.update(
-      insights.executionLandscape(
-        latest.map((j) => ({
-          ...j,
-          status: uiJobState23(j),
-          title: j.human_request?.slice(0, 40) || jobNames[j.op] || j.op,
-        })),
-        (j) => labels[uiJobState23(j)] || j.status,
-      ),
     );
     list.replaceChildren(
       ...shown.map((j) => jobRow23(j, () => quiet(openJob(j)))),

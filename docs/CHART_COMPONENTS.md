@@ -26,3 +26,13 @@ node --test tools/test_relations.js
 同时保留 npm 包内原版许可证：`echarts/LICENSE`、`echarts/NOTICE`、`zrender/LICENSE` 和 `tslib/LICENSE.txt`，对应发行目录中的 `echarts-LICENSE.txt`、`echarts-NOTICE.txt`、`zrender-LICENSE.txt`、`tslib-LICENSE.txt`。升级依赖时应重新核对这些文件与 `THIRD_PARTY_NOTICES.md`。
 
 官方接口与按需导入：[ECharts 文档](https://echarts.apache.org/handbook/en/basics/import/)。组件版本取自 [ECharts 6.1.0](https://github.com/apache/echarts/releases/tag/6.1.0)。
+
+## 紧凑报告的 Three.js 路径视图（2.5.3）
+
+入口为 `nianlun/assets/report/path3d.js`，复用已锁定的 Three.js 0.186.1。构建命令（esbuild 0.25.12）：
+
+```sh
+esbuild nianlun/assets/report/path3d.js --bundle --minify --format=iife --target=es2020 --legal-comments=inline --outfile=nianlun/assets/report/path3d.bundle.js
+```
+
+报告渲染时内联 CSS、bundle 与 MIT 许可，在既有 CSP 中加入准确 SHA-256。只读取 am 已渲染的 SVG 节点、边与坐标，不推断项目关系。默认二维；读者选择后才创建 WebGL。只有交互和尺寸改变请求一帧，关闭即释放资源。不支持的复杂坐标变换保持原 SVG。

@@ -54,5 +54,7 @@ jobs:
           node --check nianlun/assets/portal/relations.js
           node --test tools/test_galaxy.js
           node --test tools/test_relations.js
+          node --check nianlun/assets/report/path3d.js
+          node --test tools/test_report_path.js
       - name: Build installer
         run: python packaging/build.py

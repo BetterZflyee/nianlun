@@ -56,7 +56,7 @@ class FastEdits(WorkbenchTests):
         self.work.mutate(self.create());pid=self.work.snapshot()['projects'][0]['id']
         self.config['growth'].update(brain_dir='/dummy',report_folder='folder',switches={'reports':True})
         report=Path(self.dir)/'report';query={'matched':True,'pages':[{'title':'验收决定','slug':'p/accept','text':'验收已完成','full_page':True}],'text':'验收已完成'}
-        with patch('flow.g.Gateway',side_effect=self.cloud.gateway),patch('flow.memory.retrieve',return_value=query) as retrieve,patch('flow.g.publish_report',return_value={'url':'https://example.test/r'}),patch('flow.harness.reason',return_value={'answer':'结论'}) as reason:
+        with patch('flow.g.Gateway',side_effect=self.cloud.gateway),patch('flow.memory.retrieve',return_value=query) as retrieve,patch('flow.g.publish_report',return_value={'url':'https://example.test/r'}),patch('flow.harness.reason',return_value={'answer':'Lead: 结论。\n\n## A 本期变化\n验收已完成。[K1]'}) as reason:
             flow.report_projects(self.config,[pid],'2026-10-01','2026-10-21',{},request_dir=report)
             self.assertIn('验收已完成',reason.call_args[0][0]);self.assertIn('p/accept',reason.call_args[0][0])
             flow.report_projects(self.config,[pid],'2026-10-01','2026-10-21',{},request_dir=report)

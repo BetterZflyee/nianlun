@@ -668,12 +668,13 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     date=datetime.strptime(until,'%Y-%m-%d');datetime.strptime(since,'%Y-%m-%d')
     if since>until:raise n.Error('时间范围错误')
     summary=Path(summary_file).read_text(encoding='utf-8') if summary_file else ''
+    import report_brief
+    source_index=report_brief.sources(evidence(state,p['id']),memory_sources or [])
     html,md,_=render(state,[p],since,until,'年轮 · 阶段性汇报',summary)
-    if memory_sources:
-        md=md.replace('数据源：钉钉 AI 表格。','数据源：钉钉 AI 表格与独立记忆空间。')
-        md+='\n\n## 独立记忆空间依据\n\n'+'\n'.join('- '+x['title']+' · '+x['slug']+('（全文）' if x.get('full_page') else '（部分内容）') for x in memory_sources)
-        from html import escape
-        html=html.replace('</header>','<p>另结合独立记忆空间的 '+str(len(memory_sources))+' 篇相关页面；命中范围并非全部历史。</p><ul>'+''.join('<li>'+escape(x['title']+' · '+x['slug'])+'</li>' for x in memory_sources)+'</ul></header>')
+    # Model output is the report. Evidence stays in a compact, closed appendix;
+    # never append the original records or the full milestone plan a second time.
+    source_details=report_brief.appendix(summary,source_index,memory_sources or []) if summary else ''
+    if source_details:html=report_brief.attach_appendix(html,source_details)
     key=n.digest({'project':p['id'],'since':since,'until':until,'summary':summary,'facts':evidence(state,p['id']),
         **({'method':report_method.get('name')} if report_method else {})})[:16]
     folder=root(config)/'reports'/key;folder.mkdir(parents=True,exist_ok=True)
@@ -689,7 +690,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         if report_method:
             import report_style
             progress('正在按所选汇报样式生成可视化报告')
-            html=report_style.render(report_method,md,folder,p['title']+' · 阶段汇报')
+            html=report_style.render(report_method,md,folder,p['title']+' · 阶段回顾',appendix_html=source_details,subtitle=since+' — '+until)
         n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
         progress('正在上传报告到已绑定的文件夹')
         receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)

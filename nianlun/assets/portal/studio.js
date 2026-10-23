@@ -625,7 +625,7 @@ async function renderMemory23(root, generation) {
     nodeToggle.setAttribute("aria-expanded", String(!nodeList.hidden));
   });
   const indexButton = el("button", { type: "button", text: "暂停读取" });
-  const controls = el("details", { class: "galaxy-controls", open: true }, [
+  const controls = el("details", { class: "galaxy-controls" }, [
     el("summary", { text: "探索星图" }),
     el("div", { class: "galaxy-control-body" }, [
       el("div", { class: "galaxy-settings" }, [
@@ -1532,8 +1532,13 @@ async function renderWorkflows23(root, generation) {
       ]),
     ),
   );
+  const selectionSummary = el("div", {
+    class: "workflow-selection-summary",
+    "aria-live": "polite",
+  });
   const form = el("form", { class: "workflow-builder" }, [
     flow,
+    selectionSummary,
     el("div", { class: "workflow-editor" }, [
       el("div", { class: "workflow-inputs" }, [
         formField("项目背景", project),
@@ -1568,6 +1573,32 @@ async function renderWorkflows23(root, generation) {
     ]),
     history,
   );
+  function updateSelectionSummary() {
+    const title =
+      data.projects.find((p) => p.id === project.value)?.title ||
+      "全部项目背景";
+    const selectedNames = available
+      .filter((s) => chosen.has(s.id))
+      .map((s) => s.name);
+    const steps = flow.querySelectorAll(".flow-step");
+    steps[0].querySelector("small").textContent = title;
+    steps[1].querySelector("small").textContent = chosen.size
+      ? chosen.size + " 项能力已选"
+      : "由宿主选择方法";
+    steps[1].classList.toggle("is-selected", chosen.size > 0);
+    selectionSummary.replaceChildren(
+      el("span", { text: "本次组合" }),
+      el("strong", { text: title }),
+      ...selectedNames
+        .slice(0, 4)
+        .map((name) => el("span", { class: "selection-chip", text: name })),
+      selectedNames.length > 4
+        ? el("span", { text: "另 " + (selectedNames.length - 4) + " 项能力" })
+        : el("span"),
+      el("small", { text: "交给 " + (boot.harness?.name || "所选 AI 宿主") }),
+    );
+  }
+  project.onchange = updateSelectionSummary;
   function drawSkills() {
     const q = skillSearch.value.toLowerCase();
     count.textContent = "已选 " + chosen.size;
@@ -1582,6 +1613,7 @@ async function renderWorkflows23(root, generation) {
               onchange: (e) => {
                 e.target.checked ? chosen.add(s.id) : chosen.delete(s.id);
                 count.textContent = "已选 " + chosen.size;
+                updateSelectionSummary();
               },
             }),
             el("span", { text: s.name }),
@@ -1598,6 +1630,7 @@ async function renderWorkflows23(root, generation) {
   }
   skillSearch.oninput = drawSkills;
   drawSkills();
+  updateSelectionSummary();
   form.onsubmit = async (e) => {
     e.preventDefault();
     submit.disabled = true;

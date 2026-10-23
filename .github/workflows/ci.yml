@@ -49,6 +49,10 @@ jobs:
           node --check nianlun/assets/portal/app.js
           node --check nianlun/assets/portal/workspace.js
           node --check nianlun/assets/portal/studio.js
+          node --check nianlun/assets/portal/experience.js
+          node --check nianlun/assets/portal/growth-scene.js
+          node --check nianlun/assets/portal/growth-scene-model.js
+          node --test tools/test_growth_scene.js
           node --check nianlun/assets/portal/constellation.js
           node --check nianlun/assets/portal/galaxy-worker.js
           node --check nianlun/assets/portal/relations.js

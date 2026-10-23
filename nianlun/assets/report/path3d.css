@@ -10,7 +10,9 @@
   border-radius: 6px;
   background: transparent;
   color: var(--ink-2, #42634e);
-  font: 12px/1.4 inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
   cursor: pointer;
 }
 .nl-path-dialog {

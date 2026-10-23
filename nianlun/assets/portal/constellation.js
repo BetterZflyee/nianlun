@@ -22,14 +22,16 @@ export function mount(host, options) {
     revision = 0,
     nodes = [],
     edges = [],
-    groups = [];
+    groups = [],
+    groupCenters = [];
   let positions = new Float32Array(),
     selected = null,
+    focusedGroups = null,
     hovered = null,
     focusDepth = 1,
     focus = new Set();
   let mode = "galaxy",
-    auto = !reduced.matches,
+    auto = options.motion !== false && !reduced.matches,
     inView = true,
     width = 1,
     height = 1,
@@ -75,6 +77,15 @@ export function mount(host, options) {
     labels.append(b);
     return b;
   });
+  const groupPool = Array.from({ length: 12 }, () => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "constellation-group-label";
+    b.hidden = true;
+    b.onclick = () => options.onGroup?.(b.dataset.group);
+    labels.append(b);
+    return b;
+  });
   const status = document.createElement("span");
   status.className = "galaxy-render-status";
   status.textContent = "三维布局准备中…";
@@ -101,7 +112,7 @@ export function mount(host, options) {
   const starsGeo = own(new THREE.BufferGeometry()),
     starPositions = [],
     starColors = [];
-  for (let i = 0; i < 1100; i++) {
+  for (let i = 0; i < (options.ambientStars === false ? 0 : 1100); i++) {
     const a = ((hash("star-a" + i) % 10000) / 10000) * Math.PI * 2,
       z = (hash("star-z" + i) % 10000) / 5000 - 1;
     const r = 2300 + (i % 13) * 20,
@@ -169,7 +180,23 @@ export function mount(host, options) {
       const c = new THREE.Color(
         nodes[a].color || colorFor(nodes[a].group),
       ).lerp(new THREE.Color(nodes[b].color || colorFor(nodes[b].group)), 0.5);
-      c.multiplyScalar(selected ? (linked ? 0.85 : near ? 0.38 : 0.025) : 0.23);
+      const inGroup =
+        focusedGroups &&
+        focusedGroups.has(nodes[a].group) &&
+        focusedGroups.has(nodes[b].group);
+      c.multiplyScalar(
+        selected
+          ? linked
+            ? 0.85
+            : near
+              ? 0.38
+              : 0.025
+          : focusedGroups
+            ? inGroup
+              ? 0.6
+              : 0.035
+            : 0.38,
+      );
       for (let j = 0; j < 6; j++)
         for (const t of [j / 6, (j + 1) / 6]) {
           const v = p
@@ -203,7 +230,18 @@ export function mount(host, options) {
       const dims = points.geometry.attributes.aDim,
         sizes = points.geometry.attributes.aSize;
       nodes.forEach((n, i) => {
-        dims.setX(i, selected && !focus.has(n.id) ? 0.11 : 1);
+        dims.setX(
+          i,
+          selected
+            ? focus.has(n.id)
+              ? 1
+              : 0.08
+            : focusedGroups
+              ? focusedGroups.has(n.group)
+                ? 1
+                : 0.12
+              : 1,
+        );
         sizes.setX(
           i,
           (14 + Math.min(10, Math.sqrt(degree.get(n.id) || 0) * 3)) *
@@ -234,21 +272,31 @@ export function mount(host, options) {
       colors = [],
       sizes = [],
       dims = [];
+    const membership = new Map();
+    nodes.forEach((n, i) => {
+      if (!membership.has(n.group)) membership.set(n.group, []);
+      membership.get(n.group).push(i);
+    });
+    groupCenters = [];
     for (const g of groups) {
-      const groupNodes = nodes
-        .map((n, i) => ({ n, i }))
-        .filter((x) => x.n.group === g.id);
+      const groupNodes = membership.get(g.id) || [];
       if (!groupNodes.length) continue;
       const center = new THREE.Vector3();
-      for (const { i } of groupNodes)
+      for (const i of groupNodes)
         center.add(new THREE.Vector3().fromArray(positions, i * 3));
       center.divideScalar(groupNodes.length);
+      groupCenters.push({
+        ...g,
+        center: center.clone(),
+        count: groupNodes.length,
+      });
       centers.push(...center.toArray());
       const c = new THREE.Color(g.color || colorFor(g.id));
       colors.push(c.r, c.g, c.b);
       sizes.push(Math.min(280, 80 + groupNodes.length * 3));
       dims.push(0.05);
     }
+    groupCenters.sort((a, b) => b.count - a.count);
     const geom = new THREE.BufferGeometry();
     geom.setAttribute("position", new THREE.Float32BufferAttribute(centers, 3));
     geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
@@ -274,6 +322,8 @@ export function mount(host, options) {
         if (dead || data.revision !== revision) return;
         positions = data.positions;
         geometryFromPositions();
+        if (selected) select(selected);
+        else if (focusedGroups) focusGroupCamera();
         status.textContent = "";
         worker.terminate();
         worker = null;
@@ -336,7 +386,7 @@ export function mount(host, options) {
     );
     baseDistance =
       (radius * 2.65) / Math.min(1.5, Math.max(0.6, width / height));
-    if (first || !selected) {
+    if (first || (!selected && !focusedGroups)) {
       distance = baseDistance;
       target.set(0, 0, 0);
       flight = null;
@@ -344,6 +394,7 @@ export function mount(host, options) {
     rebuildMist();
     updateAppearance();
     launchLayout();
+    if (selected) select(selected);
   }
   function updateEdges(nextEdges) {
     edges = nextEdges;
@@ -394,7 +445,42 @@ export function mount(host, options) {
   function reset() {
     selected = null;
     hovered = null;
+    focusedGroups = null;
     flyTo(new THREE.Vector3(), baseDistance);
+    updateAppearance();
+  }
+  function focusGroupCamera() {
+    const members = nodes.filter((n) => focusedGroups?.has(n.group));
+    if (!members.length) return;
+    const center = new THREE.Vector3();
+    for (const n of members)
+      center.add(
+        new THREE.Vector3().fromArray(positions, nodeIndex.get(n.id) * 3),
+      );
+    center.multiplyScalar(1 / members.length);
+    const radius = Math.max(
+      60,
+      ...members.map((n) =>
+        center.distanceTo(
+          new THREE.Vector3().fromArray(positions, nodeIndex.get(n.id) * 3),
+        ),
+      ),
+    );
+    const vertical = THREE.MathUtils.degToRad(23);
+    const fov = Math.min(
+      vertical,
+      Math.atan((Math.tan(vertical) * width) / height),
+    );
+    flyTo(center, Math.max(240, (radius / Math.sin(fov)) * 1.2));
+  }
+  function focusGroups(ids, fly = true) {
+    focusedGroups = ids == null ? null : new Set(ids);
+    selected = null;
+    hovered = null;
+    if (fly) {
+      if (focusedGroups) focusGroupCamera();
+      else flyTo(new THREE.Vector3(), baseDistance);
+    }
     updateAppearance();
   }
   function labelFrame() {
@@ -408,11 +494,56 @@ export function mount(host, options) {
       return score(b) - score(a);
     });
     const occupied = [];
+    let groupCount = 0;
+    if (!selected && options.onGroup) {
+      const candidates = groupCenters.filter(
+        (group) => !focusedGroups || focusedGroups.has(group.id),
+      );
+      for (const group of candidates) {
+        if (groupCount >= groupPool.length) break;
+        const center = group.center.clone().project(camera);
+        const x = (center.x * 0.5 + 0.5) * width,
+          y = (-center.y * 0.5 + 0.5) * height - 35;
+        const w = Math.min(200, Math.max(100, group.title.length * 12 + 40));
+        const rect = { x: x - w / 2, y, w, h: 29 };
+        if (
+          center.z < -1 ||
+          center.z > 1 ||
+          rect.x < 8 ||
+          rect.x + w > width - 8 ||
+          y < 8 ||
+          y > height - 45 ||
+          occupied.some(
+            (r) =>
+              rect.x < r.x + r.w + 10 &&
+              rect.x + w > r.x - 10 &&
+              rect.y < r.y + r.h + 8 &&
+              rect.y + 29 > r.y - 8,
+          )
+        )
+          continue;
+        const b = groupPool[groupCount++];
+        b.hidden = false;
+        b.dataset.group = group.id;
+        b.textContent = `${group.title} · ${group.count}`;
+        b.title = `${group.title} · ${group.count} 篇 · ${group.basis}`;
+        b.setAttribute(
+          "aria-label",
+          `聚焦 ${group.title}，${group.count} 篇记忆`,
+        );
+        b.style.setProperty("--group-color", group.color || colorFor(group.id));
+        b.style.transform = `translate3d(${x}px,${y}px,0) translateX(-50%)`;
+        occupied.push(rect);
+      }
+    }
+    for (let i = groupCount; i < groupPool.length; i++)
+      groupPool[i].hidden = true;
     let count = 0;
     for (const n of candidates) {
       if (count >= labelPool.length) break;
       const important = n.id === selected || n.id === hovered;
       if (selected && !focus.has(n.id) && !important) continue;
+      if (!selected && focusedGroups && !focusedGroups.has(n.group)) continue;
       projected.fromArray(positions, nodeIndex.get(n.id) * 3).project(camera);
       const x = (projected.x * 0.5 + 0.5) * width,
         y = (-projected.y * 0.5 + 0.5) * height + 15;
@@ -729,6 +860,7 @@ export function mount(host, options) {
     updateEdges,
     select,
     reset,
+    focusGroups,
     destroy,
     relayout: launchLayout,
     setDepth(value) {
@@ -769,7 +901,8 @@ function fallback(host, options) {
   box.className = "galaxy-fallback";
   host.append(box);
   let selected = null,
-    depth = 1;
+    depth = 1,
+    focusedGroups = null;
   function draw() {
     const near = neighborhood(selected, options.edges, depth);
     box.replaceChildren();
@@ -777,6 +910,8 @@ function fallback(host, options) {
     title.textContent = "当前设备使用二维记忆目录 · 正文和真实引用仍可浏览";
     box.append(title);
     for (const n of options.nodes) {
+      if (focusedGroups && !focusedGroups.has(n.group) && !near.has(n.id))
+        continue;
       const b = document.createElement("button");
       b.type = "button";
       b.textContent = n.title;
@@ -802,6 +937,12 @@ function fallback(host, options) {
     },
     reset() {
       selected = null;
+      focusedGroups = null;
+      draw();
+    },
+    focusGroups(ids) {
+      selected = null;
+      focusedGroups = ids == null ? null : new Set(ids);
       draw();
     },
     destroy() {

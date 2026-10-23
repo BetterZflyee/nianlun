@@ -1,0 +1,240 @@
+/* Local Three.js data scenes: compact, with HTML access to every visible node. */
+.insight-scene {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 210px;
+  overflow: hidden;
+  border: 1px solid #dce5d8;
+  border-radius: 17px;
+  background: radial-gradient(
+    ellipse at 40% 20%,
+    #285246 0%,
+    #15392e 58%,
+    #102c25 100%
+  );
+  color: #f0f1e5;
+  font:
+    12px/1.45 system-ui,
+    -apple-system,
+    "PingFang SC",
+    sans-serif;
+}
+.insight-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 140px;
+  overflow: hidden;
+}
+.insight-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+  outline-offset: -4px;
+}
+.insight-canvas:focus-visible {
+  outline: 2px solid #d8e7b8;
+}
+.insight-scene.is-paused .insight-canvas {
+  cursor: default;
+}
+.insight-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.insight-node-label {
+  position: absolute;
+  max-width: 156px;
+  padding: 5px 9px !important;
+  border: 1px solid #a8cdb027 !important;
+  border-radius: 8px !important;
+  background: #173a30ee !important;
+  box-shadow: 0 3px 12px #071e1922 !important;
+  color: #e9eee3 !important;
+  font:
+    11px/1.4 system-ui,
+    -apple-system,
+    "PingFang SC",
+    sans-serif !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+  text-align: center;
+  cursor: pointer;
+  transition: none !important;
+}
+.insight-node-label.is-selected {
+  border-color: #e1e7b8 !important;
+  background: #315742 !important;
+  color: #fffbea !important;
+}
+.insight-node-label[hidden] {
+  display: none !important;
+}
+.insight-group-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: #a4c0b4;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insight-tools {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  gap: 4px;
+  z-index: 3;
+}
+.insight-tools button {
+  border: 1px solid #d3e4d21f !important;
+  background: #13362cbb !important;
+  color: #dce8d7 !important;
+  box-shadow: none !important;
+  border-radius: 7px !important;
+  min-height: 25px;
+  padding: 3px 8px !important;
+  font:
+    11px/1.4 system-ui,
+    sans-serif !important;
+}
+.insight-tools button:focus-visible,
+.insight-node-button:focus-visible {
+  outline: 2px solid #eef1cb !important;
+  outline-offset: 2px;
+}
+.insight-caption {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 13px 5px;
+  color: #aec6ba;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.insight-caption [role="status"] {
+  color: #d5dfcc;
+}
+.insight-node-rail {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: auto;
+  padding: 7px 11px 9px;
+  border-top: 1px solid #d8e7d214;
+  scrollbar-width: thin;
+  scrollbar-color: #527b67 transparent;
+}
+.insight-node-button {
+  flex: none;
+  max-width: 220px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px !important;
+  border: 1px solid #d8e7d21c !important;
+  border-radius: 7px !important;
+  background: #dce5d606 !important;
+  color: #cedccf !important;
+  font:
+    11px/1.4 system-ui,
+    -apple-system,
+    "PingFang SC",
+    sans-serif !important;
+  box-shadow: none !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.insight-node-button::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--node-color, #a7d6bd);
+  flex: none;
+}
+.insight-node-button.is-selected {
+  border-color: #b9d29d9c !important;
+  color: #f5f4dd !important;
+  background: #9cbe7e22 !important;
+}
+.insight-empty,
+.insight-fallback-note {
+  margin: auto;
+  padding: 24px;
+  text-align: center;
+  color: #c7d9ca;
+  max-width: 380px;
+}
+.insight-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.insight-fallback-grid {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  align-content: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 20px;
+}
+.insight-fallback-note {
+  flex: 0 0 100%;
+  font-size: 11px;
+  padding: 3px;
+  margin: 0 0 7px;
+}
+.insight-scene.is-fallback .insight-node-rail,
+.insight-scene.is-fallback .insight-tools {
+  display: none;
+}
+.insight-scene.is-fallback .insight-caption {
+  padding: 8px 13px;
+}
+@media (max-width: 600px) {
+  .insight-scene {
+    border-radius: 13px;
+  }
+  .insight-node-label {
+    max-width: 118px;
+    font-size: 10px !important;
+  }
+  .insight-caption {
+    font-size: 9px;
+  }
+  .insight-caption .insight-gesture-hint {
+    display: none;
+  }
+  .insight-node-rail {
+    padding: 6px 8px 8px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .insight-scene * {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}

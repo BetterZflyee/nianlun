@@ -231,6 +231,7 @@ async function initialize() {
   }
   try {
     boot = await api("/api/bootstrap");
+    refreshSetupInsight();
     $("#connection").textContent = "已连接本机";
     if (boot.base_url) {
       $("#base-link").href = boot.base_url;
@@ -247,6 +248,7 @@ async function initialize() {
 async function refresh() {
   notice("");
   boot = await api("/api/bootstrap");
+  refreshSetupInsight();
   if (boot.configured) {
     const result = await run("snapshot");
     data = result.value;
@@ -258,6 +260,7 @@ async function refresh() {
 }
 async function navigate(next, reload = true) {
   cleanupGrowthOverview();
+  cleanupPageInsights();
   memoryViewCleanup();
   memoryViewCleanup = () => {};
   view = next;
@@ -283,6 +286,7 @@ async function navigate(next, reload = true) {
   try {
     if (view === "setup") {
       boot = await api("/api/bootstrap");
+      refreshSetupInsight();
       if (generation !== viewVersion) return;
       renderSetup(content);
       return;
@@ -307,7 +311,7 @@ async function navigate(next, reload = true) {
       selected ? renderProject(content) : renderProjects(content);
     }
     if (view === "todos") await renderTodos(content, generation);
-    if (view === "memory") await renderMemory23(content, generation);
+    if (view === "memory") await renderMemory27(content, generation);
     if (view === "skills") await renderSkills23(content, generation);
     if (view === "workflows") await renderWorkflows23(content, generation);
     if (view === "runs") await renderRuns23(content, generation);
@@ -325,10 +329,12 @@ async function navigate(next, reload = true) {
   }
 }
 function renderProjects(root) {
+  cleanupPageInsights();
   renderGrowthProjects(root);
 }
 function renderProject(root) {
   cleanupGrowthOverview();
+  cleanupPageInsights();
   const project = data.projects.find((p) => p.id === selected);
   if (!project) {
     selected = null;
@@ -385,7 +391,9 @@ function renderProject(root) {
         }),
       );
   }
-  root.append(summary, compactRelations(project));
+  const summaryRow = el("div", { class: "project-detail-summary" }, [summary]);
+  root.append(summaryRow, compactRelations(project));
+  quiet(addProjectInsight(summaryRow, project, viewVersion));
   const tabs = el("div", { class: "tabs" });
   for (const role of ["records", "milestones", "sites"])
     tabs.append(
@@ -1349,6 +1357,7 @@ function schedulePanel() {
               );
               toast(r.value.message);
               boot = await api("/api/bootstrap");
+              refreshSetupInsight();
               await navigate(view);
             }),
           ),
@@ -1365,14 +1374,18 @@ function schedulePanel() {
 }
 
 function setupStep(number, title, description, children) {
-  return el("section", { class: "panel setup-step" }, [
-    el("div", { class: "step-label", text: String(number).padStart(2, "0") }),
-    el("div", {}, [
-      el("h3", { text: title }),
-      el("p", { class: "subtle", text: description }),
-      ...children,
-    ]),
-  ]);
+  return el(
+    "section",
+    { class: "panel setup-step", "data-setup-step": String(number) },
+    [
+      el("div", { class: "step-label", text: String(number).padStart(2, "0") }),
+      el("div", {}, [
+        el("h3", { text: title }),
+        el("p", { class: "subtle", text: description }),
+        ...children,
+      ]),
+    ],
+  );
 }
 function renderSetup(root) {
   root.replaceChildren(
@@ -1381,6 +1394,7 @@ function renderSetup(root) {
       "安装一次，带上自己的钉钉、AI 表格和记忆库。所有设置都在这里完成。",
     ),
   );
+  quiet(addSetupInsight(root, viewVersion));
   const operations = el("div", { class: "operations-grid" });
   root.append(operations);
   quiet(renderOperationStatus(operations));
@@ -1617,6 +1631,7 @@ function renderSetup(root) {
                 withButton(event.currentTarget, async (message) => {
                   await run("tables_apply", { plan_job: result.job }, message);
                   boot = await api("/api/bootstrap");
+                  refreshSetupInsight();
                   data = null;
                   toast("表格绑定完成，并已回读验证");
                   planResult.replaceChildren(
@@ -1727,6 +1742,7 @@ function renderSetup(root) {
                 brainStatus.textContent =
                   "✓ 独立记忆空间已完成初始化、写入、回读与检索验证。";
                 boot = await api("/api/bootstrap");
+                refreshSetupInsight();
               }),
             ),
           "primary",
@@ -1807,6 +1823,7 @@ function renderSetup(root) {
                   );
                   harnessStatus.textContent = r.value.message;
                   boot = await api("/api/bootstrap");
+                  refreshSetupInsight();
                   toast("已保存宿主；定时负责人保持原设置");
                 }),
               ),
@@ -1843,12 +1860,15 @@ function renderSetup(root) {
     boot.scheduler.owner || "codex",
   );
   const preferences = boot.preferences || {},
-    schedule = preferences.schedule || {
+    schedule = {
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       growth_hours: [10, 12, 14, 16, 18, 20],
       report_weekday: "TH",
       report_hour: 9,
+      ...(preferences.schedule || {}),
     };
+  if (!Array.isArray(schedule.growth_hours))
+    schedule.growth_hours = [10, 12, 14, 16, 18, 20];
   const timezone = el("input", { value: schedule.timezone });
   const scheduleEnabled = el("input", {
     type: "checkbox",
@@ -2086,6 +2106,7 @@ function renderSetup(root) {
                       ? "设置已保存；请完成下方首次定时接入。"
                       : "设置已保存，自动生长已暂停。";
                   boot = await api("/api/bootstrap");
+                  refreshSetupInsight();
                   scheduleState.textContent = boot.scheduler.message;
                 }),
               ),
@@ -2135,6 +2156,7 @@ function renderSetup(root) {
               withButton(event.currentTarget, async (progress) => {
                 const r = await run("scheduler_check", {}, progress);
                 boot = await api("/api/bootstrap");
+                refreshSetupInsight();
                 scheduleState.textContent = r.value.active
                   ? "✓ 控制器已核验，页面时间设置已生效。"
                   : "✓ 控制器已核验，当前自动生长暂停。";

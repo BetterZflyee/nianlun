@@ -215,6 +215,8 @@ async function openRelations(project, rows) {
 }
 
 async function renderTodos23(root, generation) {
+  const insights = await import("./insight-data.js");
+  if (generation !== viewVersion) return;
   let completed = false,
     rows = [],
     visible = [],
@@ -247,6 +249,15 @@ async function renderTodos23(root, generation) {
     statusbar = el("div", { class: "selection-bar" }),
     stats = el("div", { class: "mini-stats" }),
     all = el("input", { type: "checkbox", "aria-label": "选择当前筛选待办" });
+  const landscape = insightPanel({
+    title: "行动分布",
+    description:
+      "按已匹配项目聚合当前待办。节点大小对应数量，点击即可筛选列表。",
+    onSelect(id) {
+      scope.value = id;
+      draw();
+    },
+  });
   const done = (items) =>
     bulkDialog(
       "完成 " + items.length + " 项待办",
@@ -280,6 +291,7 @@ async function renderTodos23(root, generation) {
       btn("+ 新建待办", todoDialog, "primary"),
     ]),
     stats,
+    landscape.root,
     el("div", { class: "todo-workspace" }, [
       rail,
       el("section", { class: "todo-main" }, [
@@ -399,13 +411,17 @@ async function renderTodos23(root, generation) {
     }
   }
   function draw() {
+    landscape.update({
+      ...insights.todoLandscape(rows, data.projects),
+      selectedId: scope.value === "all" ? null : scope.value,
+    });
     const q = search.value.trim().toLowerCase();
     visible = rows.filter(
       (t) =>
         t.title.toLowerCase().includes(q) &&
         (scope.value === "all" ||
           (scope.value === "unlinked"
-            ? !t.link
+            ? !data.projects.some((p) => p.id === t.link?.project_id)
             : t.link?.project_id === scope.value)) &&
         (priority.value === "all" || String(t.priority) === priority.value),
     );
@@ -550,597 +566,6 @@ async function renderTodos23(root, generation) {
 }
 
 let memoryViewCleanup = () => {};
-async function renderMemory23(root, generation) {
-  const model = await import("./galaxy-model.js");
-  if (generation !== viewVersion) return;
-  // A late workspace snapshot must not change group IDs during link hydration.
-  const memoryProjects = (data?.projects || []).map(({ id, title }) => ({
-    id,
-    title,
-  }));
-  let pages = [],
-    offset = 0,
-    group = "all",
-    graph = null,
-    selectedKey = null,
-    readSeq = 0,
-    hasMore = false,
-    disposed = false;
-  let preloading = true,
-    catalogBusy = false;
-  let loadingLinks = false,
-    stopLinks = false,
-    attempted = new Set(),
-    fullGraph = { nodes: [], edges: [], groups: [] },
-    drawSeq = 0;
-  const search = el("input", {
-    type: "search",
-    placeholder: "查找记忆，飞近一颗星…",
-    "aria-label": "查找星图记忆",
-  });
-  const results = el("div", { class: "galaxy-search-results" });
-  results.hidden = true;
-  const searchBox = el("div", { class: "galaxy-search" }, [
-    studioIcon("search"),
-    search,
-    results,
-  ]);
-  const stage = el("div", { class: "constellation-stage", "aria-live": "off" });
-  const status = el("span", { class: "graph-status" }),
-    linkStatus = el("span", { class: "galaxy-link-status", role: "status" });
-  const detail = el("aside", {
-    class: "memory-inspector galaxy-inspector",
-    "aria-label": "记忆正文",
-  });
-  detail.hidden = true;
-  const rail = el("div", { class: "galaxy-groups" }),
-    nodeList = el("div", { class: "memory-node-list" });
-  nodeList.hidden = true;
-  const more = btn("加载更多记忆", () => load(offset));
-  const pause = btn("暂停漫游", () => {
-    motion = !motion;
-    graph?.setMotion(motion);
-  });
-  let motion = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const depth = select(
-    [
-      ["1", "一层引用"],
-      ["2", "两层引用"],
-    ],
-    "1",
-  );
-  depth.setAttribute("aria-label", "关联聚焦范围");
-  depth.onchange = () => graph?.setDepth(Number(depth.value));
-  const style = select(
-    [
-      ["galaxy", "立体星系"],
-      ["disc", "舒展星盘"],
-    ],
-    "galaxy",
-  );
-  style.setAttribute("aria-label", "星图布局");
-  style.onchange = () => graph?.setMode(style.value);
-  const nodeToggle = btn("记忆目录", () => {
-    nodeList.hidden = !nodeList.hidden;
-    nodeToggle.setAttribute("aria-expanded", String(!nodeList.hidden));
-  });
-  const indexButton = el("button", { type: "button", text: "暂停读取" });
-  const controls = el("details", { class: "galaxy-controls" }, [
-    el("summary", { text: "探索星图" }),
-    el("div", { class: "galaxy-control-body" }, [
-      el("div", { class: "galaxy-settings" }, [
-        formField("空间布局", style),
-        formField("点击后聚焦", depth),
-      ]),
-      el("div", { class: "galaxy-actions" }, [pause, btn("返回全景", clear)]),
-      el("p", { class: "galaxy-rail-label", text: "颜色分组" }),
-      rail,
-      more,
-      el("p", {
-        class: "galaxy-source-hint",
-        text: "项目按标题匹配，其余按记忆目录聚类。颜色表示分组，连线只表示真实引用。",
-      }),
-    ]),
-  ]);
-  const expand = btn("展开星图", () => {
-    studio.classList.toggle("expanded");
-    expand.textContent = studio.classList.contains("expanded")
-      ? "收起星图"
-      : "展开星图";
-  });
-  const card = el("section", { class: "constellation-card galaxy-card" }, [
-    el("div", { class: "graph-toolbar" }, [
-      el("div", {}, [el("strong", { text: "记忆星图" }), status]),
-      el("div", { class: "actions" }, [nodeToggle, expand]),
-    ]),
-    stage,
-    controls,
-    el("div", { class: "galaxy-zoom" }, [
-      btn("+", () => graph?.zoom(0.8)),
-      btn("−", () => graph?.zoom(1.25)),
-    ]),
-    el("div", { class: "galaxy-bottom" }, [
-      el("div", { class: "galaxy-index" }, [linkStatus, indexButton]),
-      el("div", {
-        class: "galaxy-help",
-        text: "拖动旋转 · Shift / 右键拖动平移 · 滚轮缩放 · 点击飞近阅读 · Esc 返回全景",
-      }),
-    ]),
-    nodeList,
-  ]);
-  const studio = el("div", { class: "memory-studio galaxy-studio" }, [
-    card,
-    detail,
-  ]);
-  root.replaceChildren(
-    studioHead("项目记忆", "让积累成为星系，沿着关联找到下一条线索。", [
-      btn("刷新目录", () => navigate("memory")),
-    ]),
-    el("div", { class: "galaxy-searchbar" }, [
-      searchBox,
-      btn("全文检索", () => quiet(fullSearch())),
-    ]),
-    studio,
-  );
-  const closeExpanded = (e) => {
-    if (e.key === "Escape" && studio.classList.contains("expanded")) {
-      studio.classList.remove("expanded");
-      expand.textContent = "展开星图";
-    }
-  };
-  document.addEventListener("keydown", closeExpanded);
-  memoryViewCleanup = () => {
-    disposed = true;
-    stopLinks = true;
-    readSeq++;
-    drawSeq++;
-    graph?.destroy();
-    document.removeEventListener("keydown", closeExpanded);
-  };
-  function active() {
-    return !disposed && generation === viewVersion;
-  }
-  function clear() {
-    selectedKey = null;
-    detail.hidden = true;
-    graph?.reset();
-  }
-  function syncGraph() {
-    fullGraph = model.buildGraph(pages, memoryProjects);
-  }
-  function visibleGraph() {
-    const nodes = (
-        group === "all"
-          ? fullGraph.nodes
-          : fullGraph.nodes.filter((n) => n.group === group)
-      ).slice(0, 1500),
-      ids = new Set(nodes.map((n) => n.id));
-    return {
-      nodes,
-      edges: fullGraph.edges.filter(
-        (e) => ids.has(e.source) && ids.has(e.target),
-      ),
-      groups: fullGraph.groups,
-    };
-  }
-  function counts() {
-    const visible = visibleGraph();
-    status.textContent =
-      `${visible.nodes.length} 篇记忆 · ${visible.edges.length} 条已读取引用` +
-      (hasMore ? " · 目录可继续加载" : "");
-  }
-  function drawRail() {
-    rail.replaceChildren();
-    const options = [
-      { id: "all", title: "全部记忆", color: "#dce9df" },
-      ...fullGraph.groups,
-    ];
-    for (const g of options) {
-      const count =
-        g.id === "all"
-          ? pages.length
-          : fullGraph.nodes.filter((n) => n.group === g.id).length;
-      const b = btn(
-        "",
-        () => {
-          group = g.id;
-          selectedKey = null;
-          detail.hidden = true;
-          drawRail();
-          quiet(draw());
-        },
-        group === g.id ? "active" : "",
-      );
-      const dot = el("i", { class: "galaxy-swatch" });
-      dot.style.backgroundColor = g.color;
-      b.append(
-        dot,
-        el("span", { text: g.title }),
-        el("small", { text: count }),
-      );
-      b.setAttribute("aria-pressed", String(group === g.id));
-      b.title = g.basis || "所有已载入记忆";
-      rail.append(b);
-    }
-    more.hidden = !hasMore;
-    more.disabled = preloading || pages.length >= 1500;
-    more.textContent = preloading
-      ? "正在展开记忆目录…"
-      : pages.length >= 1500
-        ? "已达 1500 篇展示上限"
-        : "加载更多记忆";
-  }
-  async function draw() {
-    const turn = ++drawSeq;
-    syncGraph();
-    counts();
-    const visual = visibleGraph();
-    nodeList.replaceChildren(
-      el("div", { class: "galaxy-list-head" }, [
-        el("strong", { text: "已载入的记忆" }),
-        btn("关闭目录", () => {
-          nodeList.hidden = true;
-          nodeToggle.setAttribute("aria-expanded", "false");
-        }),
-      ]),
-      ...visual.nodes.map((p) =>
-        btn(p.title, () => open(p), "memory-list-node"),
-      ),
-    );
-    if (!visual.nodes.length) {
-      graph?.destroy();
-      graph = null;
-      stage.replaceChildren(
-        studioEmpty(
-          "还没有记忆页面",
-          "连接或写入自己的独立记忆空间后，已有页面会出现在这里。",
-        ),
-      );
-      return;
-    }
-    try {
-      const module = await import("./constellation.js");
-      if (!active() || turn !== drawSeq) return;
-      if (graph) graph.update(visual);
-      else {
-        stage.replaceChildren();
-        graph = module.mount(stage, {
-          ...visual,
-          onSelect: (id) => {
-            const p = pages.find((p) => model.keyFor(p) === id);
-            if (p) quiet(open(p));
-          },
-          onClear: () => {
-            selectedKey = null;
-            detail.hidden = true;
-          },
-          onMotion: (value) => {
-            motion = value;
-            pause.textContent = value ? "暂停漫游" : "开启漫游";
-            pause.setAttribute("aria-pressed", String(value));
-          },
-          onFallback: () => {
-            pause.disabled = true;
-            style.disabled = true;
-          },
-        });
-      }
-      graph.setDepth(Number(depth.value));
-      graph.setMotion(motion);
-      if (style.value !== "galaxy") graph.setMode(style.value);
-      if (selectedKey) graph.select(selectedKey, false);
-    } catch {
-      stage.replaceChildren(
-        studioEmpty("星图暂不可用", "可以通过记忆目录继续阅读。"),
-      );
-      nodeList.hidden = false;
-    }
-  }
-  function paintDetail(p) {
-    detail.replaceChildren(
-      el("div", { class: "galaxy-detail-head" }, [
-        el("span", { class: "inspector-kicker", text: "记忆页面" }),
-        btn("×", () => {
-          detail.hidden = true;
-          graph?.reset();
-          selectedKey = null;
-        }),
-      ]),
-      el("h2", { text: p.title }),
-    );
-    detail.querySelector("button").setAttribute("aria-label", "关闭记忆正文");
-    detail.append(
-      el("div", { class: "memory-meta" }, [
-        badge(p.type || "note"),
-        el("small", { text: p.updated || "原始记忆" }),
-      ]),
-      el("small", { text: p.slug }),
-    );
-    if (p.text === undefined)
-      detail.append(
-        el("p", { class: "subtle", text: "读取独立记忆空间正文…" }),
-      );
-    else
-      detail.append(
-        el("pre", { class: "memory-body", text: p.text || "此页正文为空。" }),
-      );
-    if (p.note) detail.append(el("p", { class: "form-help", text: p.note }));
-    const id = model.keyFor(p),
-      out = fullGraph.edges.filter((e) => e.source === id),
-      incoming = fullGraph.edges.filter((e) => e.target === id);
-    for (const [title, links, field] of [
-      ["引用的记忆", out, "target"],
-      ["被这些记忆引用", incoming, "source"],
-    ]) {
-      if (!links.length) continue;
-      detail.append(el("h3", { text: title }));
-      for (const e of links) {
-        const node = fullGraph.nodes.find((n) => n.id === e[field]);
-        if (node)
-          detail.append(btn(node.title, () => open(node), "reference-page"));
-      }
-    }
-    const unresolved = (p.references || []).filter(
-      (slug) => !pages.some((x) => x.slug === slug),
-    );
-    if (unresolved.length)
-      detail.append(
-        el("p", {
-          class: "form-help",
-          text: `另有 ${unresolved.length} 条正文引用尚未载入目录。可加载更多或全文检索。`,
-        }),
-      );
-    if (p.links_truncated)
-      detail.append(
-        el("p", {
-          class: "form-help",
-          text: "此页引用较多，当前仅显示已读取部分。",
-        }),
-      );
-    if (!out.length && !incoming.length)
-      detail.append(
-        el("p", {
-          class: "form-help",
-          text: p.links_verified
-            ? "在当前已载入页面中，尚无明确引用连线。"
-            : "此页引用尚未核验，已显示可读正文。",
-        }),
-      );
-  }
-  async function open(page) {
-    const current = ++readSeq;
-    selectedKey = model.keyFor(page);
-    results.hidden = true;
-    search.value = "";
-    if (
-      group !== "all" &&
-      fullGraph.nodes.find((n) => n.id === selectedKey)?.group !== group
-    ) {
-      group = "all";
-      drawRail();
-      await draw();
-    }
-    if (!active() || current !== readSeq) return;
-    detail.hidden = false;
-    graph?.select(selectedKey);
-    paintDetail(page);
-    try {
-      const p =
-        page.text !== undefined
-          ? page
-          : (await run("memory_page", { slug: page.slug, key: page.key }))
-              .value;
-      if (!active() || current !== readSeq) return;
-      const original = pages.find((p) => model.keyFor(p) === selectedKey);
-      Object.assign(page, p);
-      if (original) Object.assign(original, p);
-      syncGraph();
-      counts();
-      graph?.updateEdges(visibleGraph().edges);
-      paintDetail(page);
-    } catch (e) {
-      if (active() && current === readSeq)
-        detail.append(
-          el("p", { class: "form-error", text: e.message }),
-          btn("重试读取", () => open(page)),
-        );
-    }
-  }
-  function updateLinkStatus() {
-    const checked = pages.filter((p) => p.links_verified).length,
-      failed = pages.filter((p) => p.links_error).length;
-    linkStatus.textContent =
-      loadingLinks && !stopLinks
-        ? `后台读取引用 ${attempted.size} / ${pages.length} · 可继续浏览`
-        : stopLinks
-          ? `${failed ? "引用读取遇到问题，可重试" : loadingLinks ? "当前批完成后暂停" : "引用读取已暂停"} · 已核验 ${checked} / ${pages.length}`
-          : failed
-            ? `${checked} 篇已核验 · ${failed} 篇暂未读到引用`
-            : `已核验 ${checked} 篇引用索引` +
-              (pages.some((p) => p.links_truncated)
-                ? " · 部分引用有截断"
-                : "") +
-              (fullGraph.edges.length ? "" : " · 当前页面之间暂无明确引用");
-    indexButton.textContent = stopLinks
-      ? failed
-        ? "重试并继续"
-        : "继续读取"
-      : failed && !loadingLinks
-        ? "重试未读引用"
-        : loadingLinks
-          ? "暂停读取"
-          : "引用已就绪";
-    indexButton.disabled = !loadingLinks && !stopLinks && !failed;
-    if (failed && !loadingLinks && !stopLinks)
-      indexButton.onclick = () => {
-        for (const p of pages.filter((p) => p.links_error)) {
-          attempted.delete(model.keyFor(p));
-          delete p.links_error;
-        }
-        quiet(loadLinks());
-      };
-    else
-      indexButton.onclick = () => {
-        stopLinks = !stopLinks;
-        if (!stopLinks) {
-          for (const p of pages.filter((p) => p.links_error)) {
-            attempted.delete(model.keyFor(p));
-            delete p.links_error;
-          }
-        }
-        updateLinkStatus();
-        if (!stopLinks) quiet(loadLinks());
-      };
-  }
-  async function loadLinks() {
-    if (loadingLinks || stopLinks || !active()) return;
-    loadingLinks = true;
-    updateLinkStatus();
-    try {
-      while (active() && !stopLinks) {
-        const batch = pages
-          .filter((p) => p.key && !attempted.has(model.keyFor(p)))
-          .slice(0, 6);
-        if (!batch.length) break;
-        try {
-          const value = (
-            await run("memory_relations", { keys: batch.map((p) => p.key) })
-          ).value;
-          if (!active()) return;
-          for (const p of batch) {
-            const found = value.pages.find((x) => x.key === p.key);
-            attempted.add(p.key);
-            p.links_verified = found?.verified === true;
-            if (p.links_verified) {
-              p.links = found.links;
-              p.links_truncated = found.truncated;
-              delete p.links_error;
-            } else p.links_error = found?.error || "引用暂未读到";
-          }
-        } catch (e) {
-          if (!active()) return;
-          for (const p of batch) {
-            attempted.add(p.key);
-            p.links_error = e.message;
-          }
-          stopLinks = true;
-        }
-        syncGraph();
-        counts();
-        graph?.updateEdges(visibleGraph().edges);
-        const currentPage = pages.find((p) => model.keyFor(p) === selectedKey);
-        if (currentPage && currentPage.text !== undefined && !detail.hidden) {
-          const top = detail.scrollTop;
-          paintDetail(currentPage);
-          detail.scrollTop = top;
-        }
-        updateLinkStatus();
-      }
-    } finally {
-      loadingLinks = false;
-      if (active()) {
-        updateLinkStatus();
-        if (!selectedKey && !stopLinks) graph?.relayout?.();
-      }
-    }
-  }
-  async function load(at) {
-    if (catalogBusy) return false;
-    catalogBusy = true;
-    more.disabled = true;
-    if (!pages.length) loading(stage, "正在读取自己的记忆目录…");
-    try {
-      const r = (await run("memory_catalog", { offset: at })).value;
-      if (!active()) return;
-      const map = new Map(pages.map((p) => [model.keyFor(p), p]));
-      for (const p of r.pages)
-        if (!map.has(model.keyFor(p))) map.set(model.keyFor(p), p);
-      pages = [...map.values()].slice(0, 1500);
-      offset = r.next_offset;
-      hasMore = r.has_more;
-      syncGraph();
-      drawRail();
-      await draw();
-      updateLinkStatus();
-      quiet(loadLinks());
-      return true;
-    } catch (e) {
-      if (active())
-        stage.replaceChildren(
-          studioEmpty("记忆目录未能读取", e.message),
-          btn("重试目录", () => load(at)),
-        );
-    } finally {
-      catalogBusy = false;
-      more.disabled = preloading || pages.length >= 1500;
-    }
-  }
-  function showResults() {
-    const q = search.value.trim().toLowerCase();
-    results.replaceChildren();
-    results.hidden = !q;
-    if (!q) return;
-    const matches = fullGraph.nodes
-      .filter((n) => (n.title + " " + n.slug).toLowerCase().includes(q))
-      .slice(0, 8);
-    if (!matches.length)
-      results.append(el("p", { text: "已载入目录中暂无匹配，可用全文检索。" }));
-    for (const p of matches) results.append(btn(p.title, () => open(p)));
-  }
-  search.oninput = showResults;
-  search.onkeydown = (e) => {
-    if (e.key === "Escape") {
-      results.hidden = true;
-      search.value = "";
-    }
-    if (e.key === "Enter") {
-      const first = results.querySelector("button");
-      if (first) {
-        e.preventDefault();
-        first.click();
-      }
-    }
-  };
-  async function fullSearch() {
-    if (!search.value.trim()) {
-      toast("先输入要检索的关键词");
-      return;
-    }
-    const current = ++readSeq;
-    results.hidden = true;
-    detail.hidden = false;
-    loading(detail, "正在检索记忆全文…");
-    try {
-      const r = (await run("memory_query", { query: search.value })).value;
-      if (!active() || current !== readSeq) return;
-      detail.replaceChildren(
-        el("div", { class: "galaxy-detail-head" }, [
-          el("h3", { text: `全文检索 · ${r.pages.length} 项` }),
-          btn("关闭", () => {
-            detail.hidden = true;
-          }),
-        ]),
-      );
-      if (!r.pages.length)
-        detail.append(studioEmpty("暂无匹配", "可以更换简称或关键词。"));
-      for (const p of r.pages)
-        detail.append(btn(p.title, () => open(p), "reference-page"));
-    } catch (e) {
-      if (active() && current === readSeq)
-        detail.replaceChildren(
-          studioEmpty("全文检索未完成", e.message),
-          btn("重试", fullSearch),
-        );
-    }
-  }
-  await load(0);
-  // Preload a bounded metadata overview, not the page bodies, without blocking the visible graph.
-  while (active() && hasMore && pages.length < 600)
-    if (!(await load(offset))) break;
-  preloading = false;
-  if (active()) drawRail();
-}
-
 function skillCategory(s) {
   const text = (s.name + " " + s.description).toLowerCase();
   return /图|视频|设计|slide|image|video|design|visual|ppt/.test(text)
@@ -1155,6 +580,7 @@ function skillCategory(s) {
 }
 let workflowSkills23 = [];
 async function renderSkills23(root, generation) {
+  const insights = await import("./insight-data.js");
   const catalog = (await run("capabilities")).value;
   if (generation !== viewVersion) return;
   const chosen = new Set(),
@@ -1172,6 +598,16 @@ async function renderSkills23(root, generation) {
   let category = "all",
     onlyEnabled = false,
     source = "all";
+  const landscape = insightPanel({
+    title: "方法星座",
+    description: "按用途组织已加载能力。点选类别查看方法，启用数量随操作更新。",
+    onSelect(id) {
+      category = id;
+      onlyEnabled = false;
+      drawRail();
+      draw();
+    },
+  });
   const addRoot = (e) =>
     quiet(
       withButton(e.currentTarget, async () => {
@@ -1231,6 +667,7 @@ async function renderSkills23(root, generation) {
       btn("选择 Skill 文件夹", addRoot, "primary"),
     ]),
     summary,
+    landscape.root,
     el("div", { class: "capability-workspace" }, [
       rail,
       el("div", {}, [
@@ -1357,6 +794,10 @@ async function renderSkills23(root, generation) {
     );
   }
   function draw() {
+    landscape.update({
+      ...insights.capabilityLandscape(catalog.skills, enabled, skillCategory),
+      selectedId: category === "all" ? null : category,
+    });
     summary.replaceChildren(
       el("div", {}, [
         el("strong", { text: catalog.skills.length }),
@@ -1532,11 +973,39 @@ async function renderWorkflows23(root, generation) {
       ]),
     ),
   );
+  const landscape = insightPanel({
+    title: "这次工作的路径",
+    description:
+      "这是执行前的组合预览，不表示任务已经开始。点选步骤可继续配置。",
+    kind: "pipeline",
+    onSelect(id) {
+      if (id === "project") project.focus();
+      if (id === "methods") skillSearch.focus();
+      if (id === "host")
+        studioDrawer(
+          "所选宿主",
+          el("div", {}, [
+            el("h2", { text: boot.harness?.name || "AI 宿主" }),
+            el("p", {
+              text: boot.harness?.embedded_workflow
+                ? "当前支持在页面执行，开始前由用户提交工作流。"
+                : "当前通用工作流采用接续方式。此预览不会启动任务。",
+            }),
+            btn("查看宿主设置", () => {
+              $("#modal").close();
+              navigate("setup");
+            }),
+          ]),
+        );
+      if (id === "result") question.focus();
+    },
+  });
   const selectionSummary = el("div", {
     class: "workflow-selection-summary",
     "aria-live": "polite",
   });
   const form = el("form", { class: "workflow-builder" }, [
+    landscape.root,
     flow,
     selectionSummary,
     el("div", { class: "workflow-editor" }, [
@@ -1580,6 +1049,45 @@ async function renderWorkflows23(root, generation) {
     const selectedNames = available
       .filter((s) => chosen.has(s.id))
       .map((s) => s.name);
+    landscape.update({
+      nodes: [
+        {
+          id: "project",
+          label: title,
+          group: "01 · 项目背景",
+          status: "configured",
+          detail: "点击选择项目",
+        },
+        {
+          id: "methods",
+          label: chosen.size ? chosen.size + " 项能力" : "宿主选择方法",
+          group: "02 · 方法",
+          status: chosen.size ? "ready" : "idle",
+          detail: selectedNames.join("、") || "点击查找能力",
+        },
+        {
+          id: "host",
+          label: boot.harness?.name || "AI 宿主",
+          group: "03 · 执行",
+          status: boot.harness_configured ? "configured" : "idle",
+          detail: boot.harness?.embedded_workflow
+            ? "支持页面执行 · 尚未提交"
+            : "当前为宿主接续模式",
+        },
+        {
+          id: "result",
+          label: "工作成果",
+          group: "04 · 产物",
+          status: "idle",
+          detail: "提交后依实际执行结果产生",
+        },
+      ],
+      edges: [
+        { source: "project", target: "methods" },
+        { source: "methods", target: "host" },
+        { source: "host", target: "result" },
+      ],
+    });
     const steps = flow.querySelectorAll(".flow-step");
     steps[0].querySelector("small").textContent = title;
     steps[1].querySelector("small").textContent = chosen.size
@@ -1705,6 +1213,7 @@ function jobRow23(j, open) {
   ]);
 }
 async function renderRuns23(root, generation) {
+  const insights = await import("./insight-data.js");
   const reads = new Set([
     "snapshot",
     "todos",
@@ -1754,6 +1263,27 @@ async function renderRuns23(root, generation) {
       "aria-label": "搜索执行记录",
     }),
     list = el("div", { class: "run-list" });
+  async function openJob(j) {
+    const full = await api("/api/jobs/" + j.id);
+    if (generation !== viewVersion) return;
+    const raw = el("details", {}, [
+      el("summary", { text: "查看原始回执" }),
+      el("pre", {
+        text: JSON.stringify(full.result || { error: full.error }, null, 2),
+      }),
+    ]);
+    studioDrawer(jobNames[j.op] || j.op, el("div", {}, [taskPanel(full), raw]));
+  }
+  const landscape = insightPanel({
+    title: "行动时间线",
+    description:
+      "展示当前筛选中最近 80 次执行。沿时间排列，颜色表示状态；点击查看真实回执。",
+    kind: "timeline",
+    onSelect(id) {
+      const job = rows.find((j) => j.id === id);
+      if (job) quiet(openJob(job));
+    },
+  });
   root.replaceChildren(
     studioHead("执行记录", "每一次行动，都有明确的状态与回执。", [
       btn("运行状态与待完成步骤", () => navigate("setup")),
@@ -1782,6 +1312,7 @@ async function renderRuns23(root, generation) {
         el("div", {}, [el("span", { text: t }), el("strong", { text: v })]),
       ),
     ),
+    landscape.root,
     el("div", { class: "list-tools" }, [search, filter, state]),
     list,
   );
@@ -1801,24 +1332,33 @@ async function renderRuns23(root, generation) {
           .toLowerCase()
           .includes(q),
     );
-    list.replaceChildren(
-      ...shown.map((j) =>
-        jobRow23(j, async () => {
-          const full = await api("/api/jobs/" + j.id);
-          const panel = taskPanel(full);
-          const raw = el("details", {}, [
-            el("summary", { text: "查看原始回执" }),
-            el("pre", {
-              text: JSON.stringify(
-                full.result || { error: full.error },
-                null,
-                2,
-              ),
-            }),
-          ]);
-          studioDrawer(jobNames[j.op] || j.op, el("div", {}, [panel, raw]));
-        }),
+    const labels = {
+      queued: "排队中",
+      running: "执行中",
+      succeeded: "已完成",
+      waiting_harness: "等待宿主",
+      prepared: "接续材料已准备",
+      failed: "未完成",
+      interrupted: "需核验",
+    };
+    const latest = [...shown]
+      .sort(
+        (a, b) =>
+          (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0),
+      )
+      .slice(0, 80);
+    landscape.update(
+      insights.executionLandscape(
+        latest.map((j) => ({
+          ...j,
+          status: uiJobState23(j),
+          title: j.human_request?.slice(0, 40) || jobNames[j.op] || j.op,
+        })),
+        (j) => labels[uiJobState23(j)] || j.status,
       ),
+    );
+    list.replaceChildren(
+      ...shown.map((j) => jobRow23(j, () => quiet(openJob(j)))),
     );
     if (!shown.length)
       list.append(

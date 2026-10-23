@@ -72,7 +72,7 @@ class PlanningTests(unittest.TestCase):
     def test_reports_reuse_unchanged_facts_but_refresh_new_progress(self):
         calls=[]
         def publish(*args,**kwargs):calls.append(args);return {'url':'https://example.test/report','project_id':self.pid}
-        with patch('flow.harness.reason',return_value={'answer':'自动汇报正文'}) as reason,patch('flow.g.publish_report',side_effect=publish):
+        with patch('flow.harness.reason',return_value={'answer':'Lead: 需要推进交付。\n\n## A 本期判断\n按项目目标推进。[P1]'}) as reason,patch('flow.g.publish_report',side_effect=publish):
             flow.report_projects(self.config,[self.pid],'2026-10-01','2026-10-31',{})
             self.cloud.rows['projects'][0]['cells']['projects-report']='https://example.test/report'
             flow.report_projects(self.config,[self.pid],'2026-10-01','2026-10-31',{})

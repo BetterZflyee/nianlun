@@ -1086,7 +1086,14 @@ function reportDialog(project) {
   });
   const form = el("form", {}, [
     el("p", {
-      text: "结合 AI 表格和独立记忆空间的项目材料，由所选 AI 宿主撰写阶段回顾，按已选报告方法排版，上传并确认主表链接。DeepSeek 自动完成，无需复制请求。关闭窗口后仍会继续，可从右上角通知查看。",
+      text: "结合项目表格和记忆，提炼本期判断、关键变化与下一步。正文只保留重点，引用依据可展开查看。关闭窗口后仍会继续，可从右上角通知查看。",
+    }),
+    el("p", {
+      class: "muted",
+      text:
+        "成稿方法：" +
+        (boot.report_method?.name || "年轮默认文本") +
+        " · 精简阶段回顾",
     }),
     el("div", { class: "two-cols" }, [
       formField("开始日期", since),
@@ -1111,13 +1118,28 @@ function reportDialog(project) {
     save.disabled = true;
     error.textContent = "";
     try {
-      const { job_id } = await api("/api/actions", { op: "report", data: {
-        project_id: project.id, since: since.value, until: until.value, request_id: requestId,
-      }});
+      const { job_id } = await api("/api/actions", {
+        op: "report",
+        data: {
+          project_id: project.id,
+          since: since.value,
+          until: until.value,
+          request_id: requestId,
+        },
+      });
       submitted = true;
-      form.querySelectorAll("input,button").forEach(node => { node.disabled = true; });
+      form.querySelectorAll("input,button").forEach((node) => {
+        node.disabled = true;
+      });
       save.textContent = "报告任务已提交";
-      form.append(taskPanel({ id: job_id, op: "report", status: "queued", created_at: new Date().toISOString() }));
+      form.append(
+        taskPanel({
+          id: job_id,
+          op: "report",
+          status: "queued",
+          created_at: new Date().toISOString(),
+        }),
+      );
     } catch (e) {
       error.textContent = e.message;
       save.disabled = false;

@@ -1,10 +1,35 @@
 """Evidence-preserving report renderer for live AITable reads."""
 from html import escape as e
 from urllib.parse import urlparse
+import re
 
 
 def safe_url(url):
     return url if isinstance(url, str) and urlparse(url).scheme == 'https' else ''
+
+
+def brief_html(summary,title,since,until):
+    """Safe, deliberately small text fallback when no visual skill is selected."""
+    from report_brief import CITATION
+    def inline(text):
+        text=re.sub(r'\*\*([^*]+)\*\*',r'<b>\1</b>',e(text))
+        return CITATION.sub(lambda m:'<a href="#source-'+m[1]+'">['+m[1]+']</a>',text)
+    sections=re.split(r'^##\s+(.+)$',summary,flags=re.M)
+    lead=re.sub(r'^Lead:\s*','',sections[0].strip())
+    cards=[]
+    for i in range(1,len(sections),2):
+        body=[];fenced=False
+        for line in sections[i+1].strip().splitlines():
+            if line.startswith('```'):
+                body.append('</pre>' if fenced else '<pre>');fenced=not fenced
+            elif fenced:body.append(e(line)+'\n')
+            elif line.strip():body.append('<p>'+inline(line)+'</p>')
+        if fenced:body.append('</pre>')
+        cards.append('<section><h2>'+inline(sections[i])+'</h2>'+''.join(body)+'</section>')
+    css='*{box-sizing:border-box}body{margin:0;background:#f4f6f0;color:#213d30;font:16px/1.8 system-ui,sans-serif}main{max-width:1080px;margin:auto;padding:40px 24px}h1{font-size:32px;line-height:1.35}h2{font-size:21px;margin:0 0 16px}header{padding-bottom:24px}.lead{font-size:22px;font-weight:600}.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}section{padding:24px;background:#fff;border:1px solid #dfe7dc;border-radius:16px}p{margin:10px 0;overflow-wrap:anywhere}a{color:#386c53}pre{white-space:pre-wrap;font:14px/1.7 inherit}@media(max-width:700px){.cards{grid-template-columns:1fr}main{padding:24px 16px}}'
+    return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>'+e(title)+'</title><style>'+css+'</style></head><body><main><header><h1>'+e(title)+'</h1><p>'+e(since+' — '+until)+
+        '</p><p class="lead">'+inline(lead)+'</p></header><div class="cards">'+''.join(cards)+'</div></main></body></html>')
 
 
 def render(state, projects, since, until, title, summary=''):
@@ -12,6 +37,8 @@ def render(state, projects, since, until, title, summary=''):
     records = [r for r in state['records'] if chosen.intersection(r.get('project_ids', [])) and since <= r.get('date', '') <= until]
     undated = [r for r in state['records'] if chosen.intersection(r.get('project_ids', [])) and not r.get('date')]
     milestones = [r for r in state['milestones'] if chosen.intersection(r.get('project_ids', []))]
+    if summary.strip():
+        return brief_html(summary,title,since,until),summary,len(records)
     sections = []
     md = [f'# {title}', '', f'记录范围：{since} — {until}', f'数据读取时间：{state["fetched_at"]}', '',
           '数据源：钉钉 AI 表格。里程碑为读取时的完整计划；预期效益不代表已实现收益。', '', summary, '']

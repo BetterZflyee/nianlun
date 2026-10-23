@@ -111,7 +111,7 @@ class PublishRetry(unittest.TestCase):
         try:
             pid=case.work.mutate(case.create())['record_id']
             case.config['growth'].update(brain_dir='/dummy',report_folder='folder',switches={'reports':True})
-            with patch('flow.g.Gateway',side_effect=case.cloud.gateway),patch('flow.memory.retrieve',return_value={'pages':[],'matched':False,'text':''}) as memory,patch('flow.harness.report_reason',return_value={'answer':'# 报告'}) as model,patch('flow.g.publish_report',side_effect=[n.Error('upload failed'),{'url':'https://example.test/report'}]) as publish:
+            with patch('flow.g.Gateway',side_effect=case.cloud.gateway),patch('flow.memory.retrieve',return_value={'pages':[],'matched':False,'text':''}) as memory,patch('flow.harness.report_reason',return_value={'answer':'Lead: 项目回顾。\n\n## A 当前状态\n以项目档案为准。[P1]'}) as model,patch('flow.g.publish_report',side_effect=[n.Error('upload failed'),{'url':'https://example.test/report'}]) as publish:
                 args=(case.config,[pid],'2026-10-01','2026-10-22',{})
                 with self.assertRaises(n.Error):flow.report_projects(*args,request_dir=case.dir/'reports')
                 result=flow.report_projects(*args,request_dir=case.dir/'reports')[0]

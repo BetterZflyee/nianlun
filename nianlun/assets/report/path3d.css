@@ -1,0 +1,137 @@
+.nl-flow-wrap {
+  position: relative;
+  margin-block: 10px;
+}
+.nl-path-open {
+  display: block;
+  margin: 5px 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--line, #d3dfd3);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-2, #42634e);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.nl-path-dialog {
+  width: min(860px, 94vw);
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid #c4d1c4;
+  border-radius: 18px;
+  background: #f5f6ef;
+  color: #223c2e;
+  box-shadow: 0 24px 90px #0b1b1244;
+}
+.nl-path-dialog::backdrop {
+  background: #14251bd0;
+  backdrop-filter: blur(5px);
+}
+.nl-path-dialog header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.nl-path-dialog h2 {
+  font: 600 19px/1.4 system-ui;
+  margin: 0;
+}
+.nl-path-dialog button {
+  cursor: pointer;
+  font-family: inherit;
+}
+.nl-path-dialog header button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 26px;
+  padding: 0 8px;
+}
+.nl-path-hint {
+  font-size: 12px;
+  color: #607667;
+  margin: 6px 0 12px;
+}
+.nl-path-stage {
+  position: relative;
+  height: clamp(210px, 42vh, 360px);
+  background: radial-gradient(ellipse at center, #ffffff, #e8eee4);
+  border: 1px solid #dde5d9;
+  border-radius: 12px;
+  overflow: hidden;
+  touch-action: none;
+}
+.nl-path-stage canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+}
+.nl-path-stage canvas:active {
+  cursor: grabbing;
+}
+.nl-path-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border: 0;
+  background: #f6f8eee8;
+  color: #233e30;
+  border-radius: 5px;
+  padding: 4px 6px;
+  max-width: 150px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: normal;
+}
+.nl-path-label.selected {
+  background: #254d39;
+  color: #fff;
+}
+.nl-path-nodes {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.nl-path-nodes button,
+.nl-path-reset {
+  border: 1px solid #d2dece;
+  background: #fff;
+  color: #385b45;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.nl-path-nodes [aria-pressed="true"] {
+  background: #254d39;
+  color: #fff;
+  border-color: #254d39;
+}
+.nl-path-dialog button:focus-visible,
+.nl-path-open:focus-visible {
+  outline: 2px solid #af2926;
+  outline-offset: 3px;
+}
+@media (max-width: 500px) {
+  .nl-path-dialog {
+    padding: 12px;
+  }
+  .nl-path-label {
+    max-width: 95px;
+    font-size: 11px;
+    padding: 3px;
+  }
+  .nl-path-stage {
+    height: 240px;
+  }
+}
+@media print {
+  .nl-path-dialog,
+  .nl-path-open {
+    display: none !important;
+  }
+}

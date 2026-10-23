@@ -50,6 +50,8 @@ def render(method,markdown,folder,title,appendix_html='',subtitle=''):
         text=True,encoding='utf-8',capture_output=True,timeout=120,env=env)
     if result.returncode or not target.is_file():raise n.Error('可视化汇报渲染未完成，已保留草稿；未上传不完整报告')
     if appendix_html:n.save(target,attach_appendix(target.read_text(encoding='utf-8'),appendix_html))
+    import report_visual
+    n.save(target,report_visual.enhance(target.read_text(encoding='utf-8')))
     result=subprocess.run([sys.executable,str(editor),str(target)],text=True,encoding='utf-8',capture_output=True,timeout=120)
     if result.returncode:raise n.Error('汇报编辑层生成失败，请修复所选 Skill 后继续')
     return target.read_text(encoding='utf-8')

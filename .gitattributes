@@ -2,3 +2,5 @@
 *.cmd text eol=crlf
 *.png binary
 *.zip binary
+# Generated Three.js bundle contains upstream GLSL template-string whitespace.
+nianlun/assets/report/path3d.bundle.js -whitespace linguist-generated=true

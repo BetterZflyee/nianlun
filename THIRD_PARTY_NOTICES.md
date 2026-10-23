@@ -22,6 +22,12 @@ The two browser ESM build files were minified with esbuild 0.28.2; the core impo
 renamed to the local `.min.js` filename. No CDN, telemetry, or remote font is used.
 Full license: `nianlun/assets/portal/vendor/three-LICENSE.txt`.
 
+The optional report path explorer also bundles this same pinned Three.js build.
+Its local source is `nianlun/assets/report/path3d.js`, bundled as an IIFE with
+esbuild 0.25.12. The generated report embeds the bundle and its original MIT
+license header; no CDN or network request is required. WebGL is initialized
+only when the reader chooses the three-dimensional view.
+
 ## 交互设计参考：Galaxy View
 
 2.5 的三维记忆探索参考了 [Galaxy View](https://github.com/Longwind1984/galaxy-view) 的发光节点、飞近和邻域聚焦交互（上游 MIT）。本版本没有复制或分发插件源码，没有引入 Obsidian；年轮使用自己的 Three.js 渲染器和只读记忆适配。

@@ -4,7 +4,7 @@
 
 年轮是一套可接入不同 AI 宿主的本地项目管理工具。它通过 DWS CLI 连接你自己的钉钉 AI 表格，用独立记忆空间保存长期记忆，由已登录的 AI 宿主分析信息。界面、采集、去重和写后核验由年轮负责。
 
-代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.5.3 发布候选版**；各平台的验证范围见下表。
+代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.6.0 发布候选版**；各平台的验证范围见下表。
 
 ## 能做什么
 
@@ -23,6 +23,12 @@ flowchart LR
   Core <--> Brain[自己的独立记忆空间]
   Core --> Todo[本人钉钉待办与摘要]
 ```
+
+## 2.6 工作空间视觉与探索
+
+项目工作台加入本地 Three.js 概览：真实项目成为可点选的空间节点，深绿轮廓与微光表达持续积累。卡片与列表可切换，按名称、目标或编码搜索，按活跃状态、待跟进记录、里程碑和场地筛选；最近记录直接通向对应项目。轮廓是视觉表达，不表示项目依赖或完成百分比。
+
+工作流的项目、已选能力和宿主现在随选择联动展示；记忆星图的高级控件默认收起。画面动效可暂停，遵循系统减少动态效果设置，WebGL 不可用时保留项目按钮和列表。沿用原有采集、报告和宿主执行方式，升级不会恢复已暂停的自动生长。详见 [2.6 发布说明](docs/PRODUCT_RELEASE_2.6.md)、[使用说明](docs/USER_GUIDE.md#26工作空间视觉与探索)、[设计参考](docs/UI_RESEARCH_2.6.md) 和 [验收范围](docs/VALIDATION_2.6.md)。
 
 ## 2.5.3 紧凑交互报告
 
@@ -68,11 +74,11 @@ flowchart LR
 - 汇报生成后可预览并选择项目群，通过 DWS CLI 发送并核验投递；支持按月选择范围。
 - 能力中心支持多个自选 Skill 目录；丰声待办完成状态继续双向回写并验证。
 
-详细步骤见 [产品使用说明书](docs/USER_GUIDE.md)，功能说明见 [2.3 产品发布说明书](docs/PRODUCT_RELEASE_2.3.md)，[2.1 发布叙事](docs/PRODUCT_RELEASE_2.1.md) 保留归档。[版本规则](docs/VERSIONING.md) 规定大版本用于里程碑，小版本承载增量。新增来源与自动动作默认需在页面开启，升级保留原绑定。
+详细步骤见 [产品使用说明书](docs/USER_GUIDE.md)，功能说明见 [2.6 产品发布说明书](docs/PRODUCT_RELEASE_2.6.md)，[2.1 发布叙事](docs/PRODUCT_RELEASE_2.1.md) 保留归档。[版本规则](docs/VERSIONING.md) 规定大版本用于里程碑，小版本承载增量。新增来源与自动动作默认需在页面开启，升级保留原绑定。
 
 ## 安装
 
-2.5 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.5.3-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
+2.6 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.6.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、钉钉连接工具和记忆引擎，不要求预装 Python 或记忆工具。

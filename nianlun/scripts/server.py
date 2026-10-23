@@ -64,7 +64,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.5.3','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.6.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -568,6 +568,8 @@ class Handler(BaseHTTPRequestHandler):
             if file.stat().st_size>200*1024*1024:return self.respond(413,{'error':'文件较大，请从本机产物目录打开'})
             return self.respond(200,file.read_bytes(),'application/octet-stream')
         files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/workspace.js':'workspace.js','/studio.js':'studio.js','/studio.css':'studio.css','/relations.js':'relations.js','/relations-model.js':'relations-model.js','/relations.css':'relations.css','/constellation.js':'constellation.js','/galaxy-model.js':'galaxy-model.js','/galaxy-worker.js':'galaxy-worker.js','/vendor/echarts-sankey.min.js':'vendor/echarts-sankey.min.js','/vendor/three.module.min.js':'vendor/three.module.min.js','/vendor/three.core.min.js':'vendor/three.core.min.js'}
+        files.update({ '/experience.js':'experience.js', '/experience.css':'experience.css',
+            '/growth-scene.js':'growth-scene.js', '/growth-scene-model.js':'growth-scene-model.js' })
         if path in files:
             file=ASSETS/files[path]
             return self.respond(200,file.read_bytes(),mimetypes.guess_type(str(file))[0]+'; charset=utf-8')

@@ -257,6 +257,7 @@ async function refresh() {
   await navigate(view, false);
 }
 async function navigate(next, reload = true) {
+  cleanupGrowthOverview();
   memoryViewCleanup();
   memoryViewCleanup = () => {};
   view = next;
@@ -277,6 +278,7 @@ async function navigate(next, reload = true) {
       setup: "接入与运行",
     }[view];
   const content = $("#content");
+  content.dataset.view = view;
   loading(content);
   try {
     if (view === "setup") {
@@ -323,133 +325,10 @@ async function navigate(next, reload = true) {
   }
 }
 function renderProjects(root) {
-  const active = data.projects.filter((p) => p.active === true);
-  const open = data.records.filter((r) => r.status !== "已解决");
-  const milestones = data.milestones.filter((r) => r.status !== "已完成");
-  root.replaceChildren(
-    heading(
-      "让工作，持续生长。",
-      "每一次推进、每一个决定，都沉淀在你自己的项目空间。",
-      [
-        btn("运行一次生长", growthDialog),
-        btn("+ 新建项目", () => editRow("projects"), "primary"),
-      ],
-    ),
-  );
-  const stats = el("div", { class: "stats" });
-  for (const [label, value, unit] of [
-    ["活跃项目", active.length, "个"],
-    ["待推进里程碑", milestones.length, "个"],
-    ["待跟进记录", open.length, "条"],
-    ["已连接场地", data.sites.length, "处"],
-  ])
-    stats.append(
-      el("div", { class: "stat" }, [
-        el("span", { text: label }),
-        el("strong", { text: value }),
-        el("small", { text: unit }),
-      ]),
-    );
-  root.append(stats);
-  const search = el("input", {
-    class: "search",
-    placeholder: "搜索项目名称、目标或描述",
-    type: "search",
-    "aria-label": "搜索项目",
-  });
-  const filter = select([
-    ["all", "全部项目"],
-    ["active", "未完成"],
-    ["done", "已完成"],
-  ]);
-  const grid = el("div", { class: "project-grid" });
-  function draw() {
-    const query = search.value.trim().toLowerCase();
-    const projects = data.projects.filter(
-      (p) =>
-        [p.title, p.description, p.goal]
-          .join(" ")
-          .toLowerCase()
-          .includes(query) &&
-        (filter.value === "all" ||
-          (filter.value === "done"
-            ? p.status === "已完成"
-            : active.includes(p))),
-    );
-    grid.replaceChildren();
-    for (const project of projects) {
-      const records = data.records.filter((r) =>
-        r.project_ids?.includes(project.id),
-      );
-      const ms = data.milestones.filter((r) =>
-        r.project_ids?.includes(project.id),
-      );
-      const card = el(
-        "article",
-        {
-          class: "project-card",
-          tabIndex: 0,
-          role: "button",
-          "aria-label": "打开项目 " + project.title,
-        },
-        [
-          el("div", { class: "card-top" }, [
-            badge(project.status),
-            el("small", { text: project.priority || "项目" }),
-          ]),
-          el("h3", { text: project.title }),
-          el("p", {
-            text:
-              project.description ||
-              project.goal ||
-              "从记录第一条进展开始，让项目留下清晰的轨迹。",
-          }),
-          el("div", { class: "card-footer" }, [
-            el("span", {
-              text: records.length + " 条记录 · " + ms.length + " 个里程碑",
-            }),
-            el("span", { text: "查看项目 ↗" }),
-          ]),
-        ],
-      );
-      card.onclick = () => {
-        selected = project.id;
-        renderProject(root);
-      };
-      card.onkeydown = (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          card.click();
-        }
-      };
-      grid.append(card);
-    }
-    if (!projects.length)
-      grid.append(
-        empty(
-          "还没有匹配的项目",
-          "在这里创建项目，数据会直接写入你的 AI 表格。",
-        ),
-      );
-  }
-  search.oninput = draw;
-  filter.onchange = draw;
-  root.append(el("div", { class: "toolbar" }, [search, filter]), grid);
-  draw();
-  root.append(
-    el("p", {
-      class: "subtle",
-      text:
-        "数据读取于 " +
-        data.fetched_at.replace("T", " ") +
-        " · " +
-        (data.warnings?.length
-          ? data.warnings.join("；")
-          : "已完整读取四张子表"),
-    }),
-  );
+  renderGrowthProjects(root);
 }
 function renderProject(root) {
+  cleanupGrowthOverview();
   const project = data.projects.find((p) => p.id === selected);
   if (!project) {
     selected = null;
@@ -467,7 +346,7 @@ function renderProject(root) {
     ),
   );
   root.append(
-    el("div", { class: "detail-title" }, [
+    el("div", { class: "detail-title project-detail-hero" }, [
       heading(
         project.title,
         (project.number ? "项目编码：" + project.number + " · " : "") +

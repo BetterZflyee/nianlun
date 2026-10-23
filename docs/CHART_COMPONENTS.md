@@ -36,3 +36,21 @@ esbuild nianlun/assets/report/path3d.js --bundle --minify --format=iife --target
 ```
 
 报告渲染时内联 CSS、bundle 与 MIT 许可，在既有 CSP 中加入准确 SHA-256。只读取 am 已渲染的 SVG 节点、边与坐标，不推断项目关系。默认二维；读者选择后才创建 WebGL。只有交互和尺寸改变请求一帧，关闭即释放资源。不支持的复杂坐标变换保持原 SVG。
+
+## 项目空间概览（2.6）
+
+`experience.js` 负责工作台布局、真实项目集合、筛选和页面生命周期；`growth-scene-model.js` 将项目标识与明确关联转换为稳定节点；`growth-scene.js` 使用已有的本地 `vendor/three.module.min.js` 绘制概览。无需引入新依赖或让最终用户运行前端构建。
+
+模块入口为同步的 `mount(host, options)`，支持 `projects`、`records`、`milestones`、`sites`、`onSelect(projectId)`、`onReady({mode,total,shown,overflow})`、`onError(error)`、`reducedMotion` 与 `showCaption`。返回 `destroy()`、`setPaused(boolean)`、`focus(id)`、`clearFocus()`、`reset()`。宿主提供容器尺寸；选择回调只打开项目，不进行业务写入。
+
+项目节点使用确定布局，最多显示 40 个，数量溢出通过回调提示；轮廓与星尘仅用于视觉表达，不生成项目关系。状态颜色使用项目已有值，关联数量只统计明确项目关联。完整项目入口由外层卡片和列表保留。
+
+持续动画最高 30 FPS，设备像素比最高 1.75。隐藏标签页或离开视口时暂停；减少动态效果设置下没有持续动画，交互与尺寸改变仍可请求绘制。退出视图释放几何体、材质和渲染器，移除事件、观察器与动画回调。WebGL 不可用或上下文丢失时提供真实项目按钮，不能阻断外层工作台。
+
+模型验证可在仓库根目录运行：
+
+```sh
+node --test tools/test_growth_scene.js
+```
+
+模型测试用于校验项目身份、关联统计和布局边界，不替代浏览器交互或业务写回验收。实现参考 [Three.js 按需渲染](https://threejs.org/manual/pages/rendering-on-demand.html) 和 [资源释放](https://threejs.org/manual/pages/how-to-dispose-of-objects.html)，实际验证见 [2.6 验收记录](VALIDATION_2.6.md)。

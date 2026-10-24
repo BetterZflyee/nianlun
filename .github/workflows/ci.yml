@@ -66,5 +66,7 @@ jobs:
           node --test tools/test_relations.js
           node --check nianlun/assets/report/path3d.js
           node --test tools/test_report_path.js
+          node --check nianlun/assets/report/visual-blocks.js
+          node --test tools/test_report_charts.js
       - name: Build installer
         run: python packaging/build.py

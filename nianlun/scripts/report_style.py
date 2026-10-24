@@ -21,6 +21,8 @@ def method(path=None):
     sections=re.split(r'(?=^## )',text,flags=re.M)
     guidance='\n'.join(section for section in sections if section.startswith(('## STE ','## 引擎B：')))
     if not guidance:raise n.Error('所选汇报 Skill 缺少引擎 B 契约，请核验版本')
+    visual_contract=path.parent/'references/visual-contract.md'
+    if visual_contract.is_file():guidance+='\n'+visual_contract.read_text(encoding='utf-8')
     return {'name':'transcript-visual-recap','path':str(path),'engine':'B / sheet','guidance':guidance}
 
 
@@ -49,6 +51,8 @@ def render(method,markdown,folder,title,appendix_html='',subtitle=''):
     if theme.is_file():shutil.copyfile(theme,themes/'wetype-recap.json')
     import json
     from report_brief import linked_markdown, attach_appendix
+    import report_blocks
+    markdown,blocks=report_blocks.parse(markdown)
     markdown=linked_markdown(markdown.replace("&","&amp;").replace("<","&lt;"))
     markdown=re.sub(r'!\[([^\]]*)\]\([^)]*\)',r'\1（图片未自动加载）',markdown)
     draft='---\ntemplate: sheet\ntheme: wetype-recap\ntitle: '+json.dumps(title,ensure_ascii=False)+'\nsubtitle: '+json.dumps(subtitle,ensure_ascii=False)+'\n---\n'+markdown
@@ -67,13 +71,14 @@ def render(method,markdown,folder,title,appendix_html='',subtitle=''):
             raise n.Error('报告渲染结果不完整，正文已保留；未上传，请重试生成页面。')
         return output
     checked()
+    if blocks:n.save(target,report_blocks.restore(target.read_text(encoding='utf-8'),blocks))
     if appendix_html:n.save(target,attach_appendix(target.read_text(encoding='utf-8'),appendix_html))
-    import report_visual
-    n.save(target,report_visual.enhance(target.read_text(encoding='utf-8')))
     try:
         result=subprocess.run([sys.executable,str(editor),str(target)],text=True,encoding='utf-8',capture_output=True,timeout=120)
     except (OSError,subprocess.TimeoutExpired) as exc:
         raise n.Error('汇报编辑层生成未完成，正文已保留；请修复所选 Skill 后重试。') from exc
     if result.returncode:raise n.Error('汇报编辑层生成失败，请修复所选 Skill 后继续')
-    output=checked();target.replace(folder/'visual.html')
+    import report_visual
+    output=report_visual.enhance(report_blocks.enhance(checked()))
+    n.save(target,output);target.replace(folder/'visual.html')
     return output

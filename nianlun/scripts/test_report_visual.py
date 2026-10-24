@@ -32,5 +32,11 @@ class VisualTests(unittest.TestCase):
     def test_bundle_can_be_safely_embedded(self):
         self.assertNotIn('</script',(ASSETS/'path3d.bundle.js').read_text().lower())
 
+    def test_library_body_literal_does_not_corrupt_script_or_csp(self):
+        page='<html><head></head><body><main class="am-sheet"><figure class="am-flow"><svg></svg></figure></main><script id="prior">const value="</body>";</script></body></html>'
+        html=enhance(page)
+        self.assertIn('<script id="prior">const value="</body>";</script>',html)
+        self.assertLess(html.index('</script>'),html.index('<script id="nianlun-path-3d">'))
+
 
 if __name__=='__main__':unittest.main()

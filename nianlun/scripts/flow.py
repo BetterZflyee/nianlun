@@ -161,7 +161,7 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
         summary=folder/'summary.md';context_path=folder/'context.json'
         if context_path.exists():
             context=n.load(context_path)
-            if context['facts_hash']!=n.digest(facts):raise n.Error('接续期间项目事实已变化。原任务保留，请按新事实重新生成汇报')
+            if context['facts_hash']!=n.digest(facts):raise n.ReportStale('项目资料在生成后已更新。原稿保留，请按最新资料重新生成。')
         else:
             history={'pages':[],'text':'未连接独立记忆空间','matched':False}
             legacy_input=folder/'harness/request-input.json'
@@ -176,6 +176,8 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
             context={'facts_hash':n.digest(facts),'memory':history,'method':method,'captured_at':n.stamp(config)}
             n.save(context_path,context)
         history=context['memory'];method=context.get('method',method)
+        progress('正在检查报告页面生成环境')
+        report_style.preflight(method)
         source_index=report_brief.sources(facts,history.get('pages',[]))
         report_brief.compose(project,since,until,source_index,method,folder,binary,progress,cancelled)
         before_publish()

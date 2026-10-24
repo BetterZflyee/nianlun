@@ -48,7 +48,43 @@ class BriefTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp,patch('harness.report_reason',return_value={'answer':'无法形成合格报告'}) as model:
             with self.assertRaisesRegex(n.Error,'未上传'):
                 brief.compose(FACTS['projects'][0],'2026-10-01','2026-10-23',brief.sources(FACTS,[]),{},Path(tmp),{},lambda _:None,lambda:False)
-            self.assertEqual(model.call_count,2);self.assertFalse((Path(tmp)/'summary.md').exists())
+            self.assertEqual(model.call_count,3);self.assertFalse((Path(tmp)/'summary.md').exists())
+
+    def test_harmless_lead_formats_do_not_require_model_rewrite(self):
+        variants=[DRAFT.replace('Lead:', 'Lead：'),DRAFT.replace('Lead:', '**Lead：**'),
+            DRAFT.replace('Lead:', 'lead :'),DRAFT.removeprefix('Lead: '),'\ufeff'+DRAFT.replace('\n','\r\n'),
+            '```markdown\n'+DRAFT+'\n```']
+        for variant in variants:
+            with self.subTest(variant=variant[:25]),tempfile.TemporaryDirectory() as tmp,patch('harness.report_reason',return_value={'answer':variant}) as model:
+                value=brief.compose(FACTS['projects'][0],'2026-10-01','2026-10-23',brief.sources(FACTS,[]),{},Path(tmp),{},lambda _:None,lambda:False)
+                self.assertEqual(value,DRAFT);self.assertEqual(model.call_count,1)
+
+    def test_failed_rewrites_advance_on_explicit_retry_without_replaying_bad_cache(self):
+        with tempfile.TemporaryDirectory() as tmp,patch('harness.report_reason',side_effect=[{'answer':'缺少依据'}]*3+[{'answer':DRAFT}]) as model:
+            args=(FACTS['projects'][0],'2026-10-01','2026-10-23',brief.sources(FACTS,[]),{},Path(tmp),{},lambda _:None,lambda:False)
+            with self.assertRaisesRegex(n.Error,'未上传'):brief.compose(*args)
+            self.assertEqual(brief.compose(*args),DRAFT)
+            self.assertEqual(model.call_count,4)
+            paths=[str(call.args[1]) for call in model.call_args_list]
+            self.assertEqual(len(set(paths)),4)
+            self.assertTrue((Path(tmp)/'composition/draft-0001.md').is_file())
+            self.assertEqual(brief.compose(*args),DRAFT);self.assertEqual(model.call_count,4)
+
+    def test_interrupted_revision_resumes_same_request_and_can_be_cancelled(self):
+        from deepseek_report import Cancelled
+        with tempfile.TemporaryDirectory() as tmp,patch('harness.report_reason',side_effect=[{'answer':'缺少依据'},n.Error('network'),{'answer':DRAFT}]) as model:
+            args=(FACTS['projects'][0],'2026-10-01','2026-10-23',brief.sources(FACTS,[]),{},Path(tmp),{},lambda _:None,lambda:False)
+            with self.assertRaisesRegex(n.Error,'network'):brief.compose(*args)
+            self.assertEqual(brief.compose(*args),DRAFT)
+            self.assertEqual(model.call_args_list[1].args,model.call_args_list[2].args)
+            with self.assertRaises(Cancelled):brief.compose(*args[:-1],lambda:True)
+            self.assertEqual(model.call_count,3)
+
+    def test_normalization_does_not_hide_unsafe_or_unsupported_content(self):
+        evidence=brief.sources(FACTS,[])
+        for source in (DRAFT+' [R999]',DRAFT+'\n<script>bad</script>',DRAFT+'\n'+('长'*1801),'# 标题\n'+DRAFT):
+            value,_=brief.normalize(source)
+            self.assertTrue(brief.issues(value,evidence))
 
     def test_interrupted_generation_keeps_its_original_host_request(self):
         with tempfile.TemporaryDirectory() as tmp,patch('harness.report_reason',return_value={'answer':DRAFT}) as model:

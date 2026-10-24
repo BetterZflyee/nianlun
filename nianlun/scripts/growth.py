@@ -663,7 +663,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     gw=Gateway(config);self_identity(gw);state=n.fetch(config,gw.table());p=n.select_projects(state,[project])[0]
     if not state['complete']:raise n.Error('表格读取不完整，未发布汇报')
     if expected_facts is not None and n.digest(evidence(state,p['id']))!=expected_facts:
-        raise n.Error('生成期间项目事实已变化，请重新生成本期汇报')
+        raise n.ReportStale('生成期间项目事实已变化，请按最新资料重新生成本期汇报。')
     if not config['growth']['switches'].get('reports'):raise n.Error('阶段汇报开关关闭')
     date=datetime.strptime(until,'%Y-%m-%d');datetime.strptime(since,'%Y-%m-%d')
     if since>until:raise n.Error('时间范围错误')
@@ -679,7 +679,10 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         **({'method':report_method.get('name')} if report_method else {})})[:16]
     folder=root(config)/'reports'/key;folder.mkdir(parents=True,exist_ok=True)
     receipt_file=folder/'receipt.json';receipt=n.load(receipt_file) if receipt_file.exists() else {}
-    if receipt.get('status')=='verified':return {**receipt,'report_id':key,'already_present':True}
+    if receipt.get('status')=='verified':
+        if p.get('report')!=receipt.get('url'):
+            raise n.Error('这份报告已发布，但主表目前指向另一份汇报；原报告保留，未覆盖最新链接。')
+        return {**receipt,'report_id':key,'already_present':True}
     if receipt.get('in_flight'):
         if receipt['in_flight'].get('step')!='upload':raise n.Error('报告存在待核验步骤')
         receipt=reconcile_report_upload(config,gw,folder,receipt)
@@ -703,10 +706,13 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         if not item:raise n.Error('上传返回未包含可核验的节点与链接，保留回执待对账')
         receipt.update(node_id=item.get('nodeId') or item['fileId'],url=item.get('url') or item['docUrl']);receipt.pop('in_flight',None);n.save(receipt_file,receipt)
     progress('正在核验报告链接并写回项目主表')
-    current=n.fetch(config,gw.table());now=next(x for x in current['projects'] if x['id']==p['id'])
+    current=n.fetch(config,gw.table())
+    if not current['complete']:raise n.Error('报告已上传，但主表回读不完整；重试将核验原链接，不会重复上传。')
+    now=next(x for x in current['projects'] if x['id']==p['id'])
     if now.get('report') not in (receipt['previous_link'],receipt['url']):raise n.Error('主表汇报链接被其他人更新')
     f=config['tables']['projects']['fields']['report']['fieldId']
-    table_write(config,gw,'projects',{f:receipt['url']},p['id'])
+    if now.get('report')!=receipt['url']:
+        table_write(config,gw,'projects',{f:receipt['url']},p['id'])
     receipt.update(status='verified',project_id=p['id'],report_id=key);n.save(receipt_file,receipt)
     return receipt
 

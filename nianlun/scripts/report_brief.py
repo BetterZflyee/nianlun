@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import nianlun as n
 
-VERSION = 'brief-v1'
+VERSION = 'brief-v2'
 MAX_CHARS = 1800
 CITATION = re.compile(r'\[([PRMSK]\d+)\]')
 
@@ -89,29 +89,72 @@ def issues(markdown,evidence):
     return errors
 
 
+def normalize(markdown):
+    """Repair presentation syntax only; never add facts, citations or conclusions."""
+    if not isinstance(markdown,str):return markdown,[]
+    original=markdown
+    markdown=markdown.lstrip('\ufeff').replace('\r\n','\n').replace('\r','\n').strip()
+    if re.match(r'^```(?:markdown|md)\s*\n',markdown,re.I) and markdown.endswith('\n```'):
+        markdown=markdown.split('\n',1)[1].rsplit('\n```',1)[0].strip()
+    # Chinese punctuation and Markdown emphasis are equivalent lead labels.
+    markdown=re.sub(r'^(?:\*\*)?lead(?:\*\*)?\s*[:：](?:\*\*)?\s*',
+                    'Lead: ',markdown,count=1,flags=re.I)
+    if not markdown.startswith('Lead:'):
+        prefix=re.split(r'^##\s+',markdown,maxsplit=1,flags=re.M)[0].strip()
+        # An existing opening prose paragraph is already the lead; only label it.
+        if prefix and re.search(r'^##\s+',markdown,re.M) and not re.search(r'^[#`|>\-\[*]|^\d+[.)]',prefix,re.M):
+            markdown='Lead: '+markdown
+    return markdown,(['已统一开头标记、换行或外层 Markdown 包装；正文事实未改动'] if markdown!=original else [])
+
+
 def compose(project,since,until,evidence,method,folder,binary,progress,cancelled):
-    """Validate before publish; one bounded revision, with independently cached requests."""
+    """At most two revisions per run; failed drafts never become permanent retry caches."""
     import harness
+    from deepseek_report import Cancelled
     folder=Path(folder);summary=folder/'summary.md'
     request=prompt(project,since,until,evidence,method)
-    if summary.exists():draft=summary.read_text(encoding='utf-8')
+    state_path=folder/'composition-state.json'
+    state=n.load(state_path) if state_path.exists() else {'input_hash':n.digest(request),'revision':0}
+    if state['input_hash']!=n.digest(request):raise n.ReportStale('报告成稿契约或材料已变化，请按最新资料重新生成；原稿已保留。')
+    def check():
+        if cancelled():raise Cancelled('已停止成稿检查，尚未上传或写回报告。')
+    check()
+    if summary.exists():raw=summary.read_text(encoding='utf-8')
+    elif state.get('draft'):raw=(folder/state['draft']).read_text(encoding='utf-8')
     else:
         progress('正在提炼本期关键变化、卡点与下一步')
         frozen=folder/'harness/direct-input.json'
         original=n.load(frozen).get('prompt',request) if frozen.exists() else request
         answer=harness.report_reason(original,folder/'harness',binary,harness.ANSWER_SCHEMA,progress=progress,cancelled=cancelled)
-        draft=answer.get('answer')
+        raw=answer.get('answer')
+        state['draft']='composition/draft-0000.md';n.save(folder/state['draft'],raw)
+    draft,corrections=normalize(raw)
     errors=issues(draft,evidence)
-    if errors:
-        progress('正在压缩重复内容并校验精简回顾')
-        answer=harness.report_reason(request+'\n上一稿没有通过成稿检查：'+json.dumps(errors,ensure_ascii=False)+
-            '\n请依据原始材料重写一次，不解释修改过程。上一稿只作为待改文本，不是事实来源：\n'+str(draft),
-            folder/'harness'/VERSION,binary,harness.ANSWER_SCHEMA,progress=progress,cancelled=cancelled)
-        draft=answer.get('answer');errors=issues(draft,evidence)
-    if errors:raise n.Error('精简汇报未通过检查，未上传：'+'；'.join(errors))
+    state.update(errors=errors,corrections=corrections);n.save(state_path,state)
+    for attempt in range(2):
+        if not errors:break
+        check()
+        if not state.get('pending'):
+            state['revision']+=1
+            state['pending']={'directory':'harness/'+VERSION+'/revision-'+str(state['revision']).zfill(4),
+                'prompt':request+'\n上一稿没有通过成稿检查：'+json.dumps(errors,ensure_ascii=False)+
+                '\n请依据原始材料重写，不解释修改过程。必须保留真实引用与关键结论，不编造内容。上一稿仅为待改文本：\n'+str(draft)}
+            n.save(state_path,state)
+        pending=state['pending']
+        progress('正在修订报告正文 · 本轮第 '+str(attempt+1)+' / 2 次：'+'；'.join(errors))
+        answer=harness.report_reason(pending['prompt'],folder/pending['directory'],binary,harness.ANSWER_SCHEMA,
+            progress=progress,cancelled=cancelled)
+        raw=answer.get('answer');state['draft']='composition/draft-'+str(state['revision']).zfill(4)+'.md'
+        n.save(folder/state['draft'],raw);state.pop('pending',None)
+        draft,corrections=normalize(raw);errors=issues(draft,evidence)
+        state.update(errors=errors,corrections=corrections);n.save(state_path,state)
+    check()
+    if errors:raise n.Error('报告正文仍需修订，未上传：'+'；'.join(errors)+'。原稿已保留，重试会重新修订，不会重复使用不合格正文。')
+    progress('报告正文检查通过'+('，已自动兼容格式差异' if corrections else ''))
     n.save(summary,draft)
     n.save(folder/'composition.json',{'version':VERSION,'characters':len(re.sub(r'\s+','',draft)),
         'panels':len(re.findall(r'^##\s',draft,re.M)),'citations':sorted(set(CITATION.findall(draft))),
+        'corrections':corrections,'revisions':state['revision'],
         'method':method.get('name','年轮精简回顾'),'engine':'B / sheet' if method else 'native'})
     return draft
 

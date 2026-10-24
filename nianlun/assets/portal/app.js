@@ -1099,6 +1099,11 @@ async function downloadArtifact(job, name) {
 
 async function showWorkflow(root, jid, generation) {
   let existing = await api("/api/jobs/" + jid);
+  if (generation !== viewVersion) return;
+  if (existing.automatic_workflow) {
+    root.replaceChildren(taskPanel(existing));
+    return;
+  }
   if (existing.op === "workflow_request") {
     while (
       ["queued", "running"].includes(existing.status) &&
@@ -1131,7 +1136,7 @@ async function showWorkflow(root, jid, generation) {
     quiet(
       withButton(event.currentTarget, async () => {
         await api("/api/workflow-control", { action: "cancel", job_id: jid });
-        toast("已向 Codex 请求停止，已产生的结果会保留。");
+        toast("已向宿主请求停止，已产生的结果会保留。");
       }),
     ),
   );
@@ -1156,7 +1161,7 @@ async function showWorkflow(root, jid, generation) {
     nonce === workflowPoll
   ) {
     const job = await api("/api/jobs/" + jid),
-      terminal = ["succeeded", "failed", "interrupted"].includes(job.status);
+      terminal = ["succeeded", "failed", "interrupted", "cancelled"].includes(job.status);
     status.textContent = terminal
       ? job.error || "宿主已结束本次执行，请查看实际结果与产物。"
       : job.phase || "正在排队";
@@ -1768,14 +1773,16 @@ function renderSetup(root) {
       ...meta.modes.map((mode) =>
         el("option", {
           value: mode,
-          text: mode === "cli" ? "由年轮调用已登录的 CLI" : "在宿主中接续",
+          text: mode === "cli" ? "由年轮调用已登录的 CLI" : hostChoice.value === "deepseek" ? "汇报与文档工作流自动执行；其他分析接续" : "在宿主中接续",
         }),
       ),
     );
     if (hostChoice.value === boot.harness.provider)
       hostMode.value = boot.harness.mode;
     binaryPath.hidden = hostMode.value !== "cli";
-    hostHelp.textContent = meta.embedded_workflow
+    hostHelp.textContent = hostChoice.value === "deepseek"
+      ? "阶段汇报和文档工作流可直接调用本机 DeepSeek，进度和结果显示在年轮里；生长决策仍沿用接续方式。"
+      : meta.embedded_workflow
       ? "可在页面运行分析与工具工作流；需要授权时展示宿主请求。"
       : "工具工作流在宿主原生界面执行。接续模式会保留分析请求，返回结果后由年轮继续校验与写入。";
   }

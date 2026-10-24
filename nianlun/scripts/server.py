@@ -31,6 +31,7 @@ import planning
 import run_control
 import recovery
 import deepseek_report
+import deepseek_workflow
 import scheduler
 import project_actions
 import nianlun as n
@@ -64,7 +65,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.7.1','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.8.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -100,6 +101,9 @@ class Application:
                     row['project_title']=result.get('project_title','')
                     if row['status']=='succeeded':row['phase']='报告已上传，项目主表链接已回读确认'
                     elif row['status']=='failed':row['phase']=self.jobs[row['id']].get('error','汇报未完成，可重试原报告')
+                if row['op']=='workflow' and self.jobs[row['id']].get('workflow_engine')=='deepseek':
+                    if row['status']=='succeeded':row['phase']='DeepSeek 工作流已完成，点击查看正文和结果文件'
+                    elif row['status']=='failed':row['phase']=self.jobs[row['id']].get('error','工作流未完成，可重试原任务')
                 if row['op']=='bulk_mutate' and result.get('failed'):
                     row.update(status='failed',phase='成功 '+str(result['succeeded'])+' 项；失败 '+str(result['failed'])+' 项，可继续原请求处理失败项')
         config=n.load(self.config) if self.config.exists() else {}
@@ -143,18 +147,18 @@ class Application:
             if getattr(self,'closing',False):raise n.Error('本机服务正在退出，请重新打开年轮')
             if op=='resume':
                 original=self.jobs.get(data.get('job_id'))
-                if original and original['op']=='report':
+                if original and (original['op']=='report' or (original['op']=='workflow' and original.get('workflow_engine')=='deepseek')):
                     if original['status'] in ('queued','running'):return {'job_id':original['id']}
                     view=self.job_view(original)
-                    if not view['can_resume']:raise n.Error('此汇报任务不需要重试')
+                    if not view['can_resume']:raise n.Error('此任务不需要重试')
                     if original.get('handoff') and not view.get('handoff_ready') and not view.get('automatic_report'):
                         raise n.Error('所选宿主尚未返回报告')
                     original.update(status='queued',cancel_requested=False,attempt=original.get('attempt',1)+1)
                     original.setdefault('previous_attempts',[]).append({'progress':original.get('progress',[]),'error':original.get('error'),'finished_at':original.get('finished_at')})
-                    original.update(progress=[],phase='等待重试原报告');original.pop('phase_at',None)
+                    original.update(progress=[],phase='等待重试原'+('报告' if original['op']=='report' else '工作流'));original.pop('phase_at',None)
                     for key in ('error','finished_at','started_at'):original.pop(key,None)
                     self.persist_job(original)
-                    self.write_pool.submit(self.execute,original['id'],'report',original['resume_data'])
+                    self.write_pool.submit(self.execute,original['id'],original['op'],original['resume_data'])
                     return {'job_id':original['id']}
             if op=='report':
                 for original in self.jobs.values():
@@ -168,10 +172,18 @@ class Application:
                     if job.get('request_id')==key:
                         if job['op']!=op or job.get('input_hash')!=n.digest(data):raise n.Error('同一请求编号对应的内容发生变化')
                         if job['status'] not in ('failed','interrupted') or op in ('workflow','report'):return {'job_id':job['id']}
+            if op=='workflow' and harness.selection(self.config).get('provider')=='deepseek':
+                intent={k:v for k,v in data.items() if k!='request_id'}
+                for original in self.jobs.values():
+                    previous={k:v for k,v in original.get('resume_data',{}).items() if k!='request_id'}
+                    if original['op']=='workflow' and original.get('workflow_engine')=='deepseek' and original['status'] in ('queued','running') and previous==intent:
+                        return {'job_id':original['id']}
             jid=uuid.uuid4().hex
             job={'id':jid,'op':op,'status':'queued','created_at':datetime.now().astimezone().isoformat(timespec='seconds'),
                 'request_id':key,'input_hash':n.digest(data)}
             if op=='report':job.update(resume_data=data,attempt=1)
+            if op=='workflow' and harness.selection(self.config).get('provider')=='deepseek':
+                job.update(resume_data=data,attempt=1,workflow_engine='deepseek',human_request=data.get('question',''))
             self.jobs[jid]=job;self.persist_job(job)
         if op=='schedule_pause':
             self.execute(jid,op,data)
@@ -196,6 +208,10 @@ class Application:
         if job['op']=='report':
             result['automatic_report']=harness.selection(self.config).get('provider')=='deepseek'
             result['can_cancel']=job['status']=='queued' or (job['status']=='running' and job.get('report_cancellable',False))
+        if job['op']=='workflow' and job.get('workflow_engine')=='deepseek':
+            result['automatic_workflow']=True
+            result['can_resume']=job['status'] in ('failed','interrupted','cancelled') and 'resume_data' in job
+            result['can_cancel']=job['status'] in ('queued','running')
         if job.get('handoff'):
             try:
                 item=host_bridge.pending(self.config,job['handoff']['id'])
@@ -211,6 +227,7 @@ class Application:
         try:
             if job.get('cancel_requested'):
                 if op=='report':raise deepseek_report.Cancelled('已停止生成，尚未上传或写回报告。')
+                if job.get('workflow_engine')=='deepseek':raise deepseek_report.Cancelled('工作流已停止，未执行')
                 raise n.Error('工作流已取消，未执行')
             if op.startswith('setup_') or op in ('profiles','inspect','create_resource','table_plan','tables_apply','memory_connect','configure'):
                 with file_lock(self.setup.directory/'setup.lock'):
@@ -401,6 +418,8 @@ class Application:
 
     def workflow(self,jid,data,export_only=False):
         choice=harness.selection(self.config,self.settings.get('codex_bin'))
+        if not export_only and (choice['provider']=='deepseek' or self.jobs[jid].get('workflow_engine')=='deepseek'):
+            return deepseek_workflow.execute(self,jid,data)
         if not export_only and not harness.describe(choice)['embedded_workflow']:
             raise n.Error('此宿主的工作流请通过「交给宿主执行」继续，页面不代替它处理权限请求')
         question=text(data.get('question'),'工作要求',20000,True)

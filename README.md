@@ -4,7 +4,7 @@
 
 年轮是一套可接入不同 AI 宿主的本地项目管理工具。它通过 DWS CLI 连接你自己的钉钉 AI 表格，用独立记忆空间保存长期记忆，由已登录的 AI 宿主分析信息。界面、采集、去重和写后核验由年轮负责。
 
-代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.7.1 发布候选版**；各平台的验证范围见下表。
+代码采用 [Apache-2.0](LICENSE) 许可证。当前为 **2.8.0 发布候选版**；各平台的验证范围见下表。
 
 ## 能做什么
 
@@ -24,7 +24,13 @@ flowchart LR
   Core --> Todo[本人钉钉待办与摘要]
 ```
 
-## 2.7.1 把操作区留给工作
+## 2.8 DeepSeek 工作流直接执行
+
+选择项目、勾选能力、填写要求后点击「交给 DeepSeek 执行」。年轮读取项目事实和相关记忆，加载所选 Skill 及其目录内的 Markdown 引用，由本机已登录的 DeepSeek 生成分析、复盘、交接或文档；页面显示阶段、耗时、停止、原任务重试和结果下载，通知与执行记录可重新打开结果。
+
+本版自动工作流交付本地 Markdown 与 HTML 文档。对外发送、业务写入和任意脚本执行继续通过对应业务入口或宿主原生工具处理，不将草稿视为已执行动作。阶段汇报的上传与写回链路保持原样。详见 [2.8 发布说明](docs/PRODUCT_RELEASE_2.8.md) 与 [验收记录](docs/VALIDATION_2.8.md)，v2.7.1 保留供回退。
+
+## 2.7.1 把操作区留给工作（历史）
 
 能力中心、工作流和执行记录移除 Three.js 图景，直接展示能力分类与列表、工作流表单、执行记录筛选与详情，不恢复旧版流程图。搜索、批量启用、配置提交、任务详情、重试与接续等原有操作继续保留。
 
@@ -64,7 +70,7 @@ Three.js 视图延伸到各主页面：待办按项目聚合，能力按类别�
 
 在项目中选择时间范围即可调用本机 DeepSeek Harness：读取 AI 表格、检索独立记忆、生成正文、按所选方法排版、上传报告并回读项目链接。页面展示阶段与耗时；关闭弹窗继续运行，失败可重试同一报告。通知支持多选、全部已读和未读筛选，完成或失败的新状态会再次提示。
 
-需要用户已安装并登录的 `dsh` headless JSON 接口。模型只负责分析，写入仍由年轮执行；其他 DeepSeek 工作流继续使用宿主接续。详见 [2.4 发布说明](docs/PRODUCT_RELEASE_2.4.md) 和 [验收记录](docs/VALIDATION_2.4.md)。
+需要用户已安装并登录的 `dsh` headless JSON 接口。模型只负责分析，写入仍由年轮执行；2.8 起文档工作流也支持直接执行，其他分析仍沿用接续。详见 [2.4 发布说明](docs/PRODUCT_RELEASE_2.4.md) 和 [验收记录](docs/VALIDATION_2.4.md)。
 
 ## 2.3 工作台重构
 
@@ -90,7 +96,7 @@ Three.js 视图延伸到各主页面：待办按项目聚合，能力按类别�
 
 ## 安装
 
-2.7.1 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.7.1-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
+2.8.0 安装包由 `python packaging/build.py` 生成，文件名为 `nianlun-v2.8.0-mac-windows.zip`。已发布版本见 [Releases](https://github.com/BetterZflyee/nianlun/releases)，解压后：
 
 1. Mac 打开 `安装年轮.command`；Windows 打开 `安装年轮.cmd`。
 2. 向导会准备个人运行环境、钉钉连接工具和记忆引擎，不要求预装 Python 或记忆工具。
@@ -110,7 +116,8 @@ Three.js 视图延伸到各主页面：待办按项目聚合，能力按类别�
 | Windows x64 / ARM64 | 提供安装器、依赖选择和路径实现 | 原生完整安装及业务闭环待验证 |
 | Codex | 已登录 CLI 分析、页面工具工作流、原生定时核验 | 已有本机实测 |
 | Claude Code | CLI 适配和结构化接续 | 命令与登录已检查；实际推理测试超时，待补验 |
-| WorkBuddy / DeepSeek Harness | 通用 Skill / CLI 与结构化接续 | 协议夹具已验证；原生客户端闭环待补验 |
+| WorkBuddy | 通用 Skill / CLI 与结构化接续 | 协议夹具已验证；原生客户端闭环待补验 |
+| DeepSeek Harness | 阶段汇报与文档工作流自动执行；其他分析接续 | 本机 headless 合成资料调用已验证；Windows 原生调用待验 |
 
 “结构化接续”表示年轮保存请求和证据，由所选宿主分析，再由年轮继续校验、执行和回读。它不等于已经安装官方连接器，也不等于该宿主的周期任务已经注册。详见 [宿主契约](nianlun/references/host-contract.md) 与 [验收说明](packaging/验收说明.md)。
 

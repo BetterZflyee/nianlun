@@ -27,7 +27,8 @@ function taskPanel(job) {
   );
   let latest = job, timer, polling = false, ticks = 0;
   const stages = el("div", { class: "report-stages", "aria-label": "汇报处理阶段" });
-  if (job.op === "report") box.insertBefore(stages, phase);
+  if (job.op === "report" || job.automatic_workflow) box.insertBefore(stages, phase);
+  if (job.automatic_workflow) stages.setAttribute("aria-label", "工作流处理阶段");
   async function retryReport() {
     const { job_id } = await api("/api/actions", { op: "resume", data: { job_id: latest.id } });
     update(await api("/api/jobs/" + job_id));
@@ -60,6 +61,18 @@ function taskPanel(job) {
       ),
     );
     actions.replaceChildren();
+    if (value.automatic_workflow) {
+      const messages = (value.progress || []).map(p => p.message);
+      const labels = ["项目资料", "所选方法", "相关记忆", "DeepSeek 执行", "保存结果"];
+      const patterns = [/项目事实|恢复原工作流/, /加载所选能力/, /检索独立记忆/, /DeepSeek/, /正在保存|已保存并核验/];
+      const index = value.status === "queued" ? -1 : Math.max(0, ...patterns.map((p,i) => messages.some(m => p.test(m)) ? i : -1));
+      stages.replaceChildren(...labels.map((text,i) => el("span", {class: value.status === "succeeded" || i < index ? "done" : i === index ? "active" : "", text: (i+1) + " · " + text})));
+      if (value.can_cancel) actions.append(btn(value.cancel_requested ? "正在停止…" : "停止工作流", e => quiet(withButton(e.currentTarget, async () => {
+        await api("/api/workflow-control", {job_id: value.id, action:"cancel"});
+        update(await api("/api/jobs/" + value.id));
+      }))));
+      if (value.can_resume) actions.append(btn("重试此工作流", e => quiet(withButton(e.currentTarget, retryReport)), "primary"));
+    }
     if (value.op === "report") {
       const messages = (value.progress || []).map(p => p.message);
       const labels = ["读取项目", "检索记忆", "AI 撰写", "生成页面", "上传报告", "写回确认"];
@@ -115,7 +128,7 @@ function taskPanel(job) {
           "primary",
         ),
       );
-    } else if (value.can_resume && value.op !== "report")
+    } else if (value.can_resume && value.op !== "report" && !value.automatic_workflow)
       actions.append(
         btn("核验并重试原请求", (e) =>
           quiet(
@@ -166,7 +179,7 @@ function taskPanel(job) {
       return;
     }
     updateClock();
-    if (latest.op === "report" && ["running", "queued"].includes(latest.status) && !polling && ++ticks % 2 === 0) {
+    if ((latest.op === "report" || latest.automatic_workflow) && ["running", "queued"].includes(latest.status) && !polling && ++ticks % 2 === 0) {
       polling = true;
       api("/api/jobs/" + latest.id).then(update).catch(() => {
         phase.textContent = "暂时无法读取进度，后台任务不会因此取消；正在重连…";
@@ -189,6 +202,13 @@ function handoffText(job) {
 function showTaskResult(box, job) {
   const r = job.result || {};
   box.replaceChildren();
+  if (job.automatic_workflow) {
+    if (r.answer) box.append(memoryText27(r.answer));
+    if (r.methods?.length) box.append(el("p", {class:"form-help",text:"采用方法："+r.methods.join("、")}));
+    box.append(el("p", {class:"form-help",text:r.memory_note || "结合 " + (r.memory_pages?.length || 0) + " 篇相关记忆；正文与文件已保存在本机。"}));
+    if (r.artifacts?.length) box.append(el("div", {class:"actions"}, r.artifacts.map(file => btn("下载 " + file.name, () => quiet(downloadArtifact(job.id,file.name))))));
+    return;
+  }
   if (job.op !== "report" && (r.answer || r.summary))
     box.append(el("p", { text: r.answer || r.summary }));
   if (r.url && /^https:\/\//.test(r.url))
@@ -443,6 +463,8 @@ function setupNotifications() {
         if (j.op === "report" && ["running", "queued"].includes(previous[j.id]) && ["succeeded", "failed"].includes(j.status)) {
           toast(j.status === "succeeded" ? (j.project_title || "阶段") + "汇报已写回，请从通知查看" : "阶段汇报未完成，可从通知查看原因并重试");
         }
+        if (j.op === "workflow" && ["running", "queued"].includes(previous[j.id]) && ["succeeded", "failed"].includes(j.status))
+          toast(j.status === "succeeded" ? "工作流已完成，可从通知查看结果" : "工作流未完成，可从通知查看原因并重试");
       }
       previous = Object.fromEntries(jobs.map(j => [j.id, j.status]));
       const count = jobs.filter(j => ["succeeded", "failed", "interrupted", "waiting_harness", "cancelled"].includes(j.status) && !j.read).length;

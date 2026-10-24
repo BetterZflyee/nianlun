@@ -47,8 +47,8 @@ def status(preferred=None):
         result=subprocess.run(argv+['--profile','headless','--help'],capture_output=True,text=True,
                               encoding='utf-8',timeout=20,env=runtime_env())
         supported=result.returncode==0 and '--json' in result.stdout
-        return {'available':supported,'logged_in':None,'automatic_reports':supported,
-                'message':'DeepSeek 自动汇报接口可用；模型登录将在调用时验证' if supported else '当前 dsh 不支持 headless JSON 事件，请更新宿主后重试'}
+        return {'available':supported,'logged_in':None,'automatic_reports':supported,'automatic_workflows':supported,
+                'message':'DeepSeek 自动汇报与文档工作流接口可用；模型登录将在调用时验证' if supported else '当前 dsh 不支持 headless JSON 事件，请更新宿主后重试'}
     except (OSError,subprocess.TimeoutExpired,n.Error) as exc:
         return {'available':False,'logged_in':None,'automatic_reports':False,
                 'message':str(exc) if isinstance(exc,n.Error) else 'DeepSeek 命令未响应，请检查安装'}
@@ -65,22 +65,27 @@ def failure_message(text):
     return 'DeepSeek 本次未正常完成。已保留项目材料，请检查宿主模型设置后重试原任务。'
 
 
-def parse_answer(text,schema):
+def parse_answer(text,schema,task_kind='report'):
     import host_bridge
     value=text.strip()
     if value.startswith('```') and value.endswith('```'):
         value=value.split('\n',1)[-1].rsplit('```',1)[0].strip()
     try:answer=json.loads(value)
-    except ValueError:raise n.Error('DeepSeek 返回格式不完整；没有发布报告，可重试原任务。')
+    except ValueError:raise n.Error('DeepSeek 返回格式不完整；未生成最终结果，可重试原任务。')
     host_bridge.validate(answer,schema)
     if not isinstance(answer.get('answer'),str) or not answer['answer'].strip():
-        raise n.Error('DeepSeek 返回了空报告；没有发布报告，可重试原任务。')
+        raise n.Error('DeepSeek 返回了空结果，可重试原任务。')
     return answer
 
 
-def generate(prompt,directory,preferred=None,schema=None,timeout=900,progress=lambda message:None,cancelled=lambda:False):
+def generate(prompt,directory,preferred=None,schema=None,timeout=900,progress=lambda message:None,cancelled=lambda:False,task_kind='report'):
     from harness import runtime_env, ANSWER_SCHEMA
     schema=schema or ANSWER_SCHEMA
+    if task_kind not in ('report','workflow'):raise n.Error('未知的 DeepSeek 任务类型')
+    report_progress=progress
+    if task_kind=='workflow':
+        def progress(message):
+            report_progress(message.replace('报告','工作流').replace('继续核验与写回','继续保存结果').replace('并准备排版','并保存文件'))
     directory=Path(directory).resolve();directory.mkdir(parents=True,exist_ok=True)
     with file_lock(directory/'direct-report.lock'):
         key=n.digest({'prompt':prompt,'schema':schema})
@@ -88,7 +93,7 @@ def generate(prompt,directory,preferred=None,schema=None,timeout=900,progress=la
         if cached.exists():
             saved=n.load(cached)
             if saved['input_hash']!=key:raise n.Error('原报告材料已变化，请重新生成，未复用旧结论。')
-            answer=parse_answer(json.dumps(saved['answer'],ensure_ascii=False),schema)
+            answer=parse_answer(json.dumps(saved['answer'],ensure_ascii=False),schema,task_kind)
             progress('已复用本任务的 DeepSeek 报告正文，继续核验与写回')
             return answer
         if cancelled():raise Cancelled('已停止生成，尚未上传或写回报告。')
@@ -97,7 +102,7 @@ def generate(prompt,directory,preferred=None,schema=None,timeout=900,progress=la
         n.save(patch,[{'id':'tools','config':{'mode':'native'}},
             {'insert':[{'id':'nianlun-report-policy','name':str(n.SKILL/'assets/deepseek-report-policy.js'),'inject':['tools']}]}])
         task=(prompt+'\n\n输出契约优先于写作方法：只返回一个 JSON 对象，不包裹代码块。'
-              'answer 为报告 Markdown 字符串。不要输出 HTML，不使用工具，不添加对象以外的文字。\n'+json.dumps(schema,ensure_ascii=False))
+              'answer 为完整结果的 Markdown 字符串。不要输出 HTML，不使用工具，不添加对象以外的文字。\n'+json.dumps(schema,ensure_ascii=False))
         n.save(directory/'direct-input.json',{'input_hash':key,'prompt':prompt,'schema':schema})
         progress('正在连接本机 DeepSeek，准备自动撰写报告')
         env=runtime_env();env['DSH_PERMISSION_MODE']='read-only'
@@ -161,7 +166,7 @@ def generate(prompt,directory,preferred=None,schema=None,timeout=900,progress=la
                 raise n.Error(failure_message(''.join(diagnostics)))
             if not policy:raise n.Error('未收到 DeepSeek 工具隔离确认，未发布报告。')
             if not isinstance(final,str):raise n.Error('DeepSeek 未返回最终报告，可重试原任务。')
-            answer=parse_answer(final,schema)
+            answer=parse_answer(final,schema,task_kind)
             n.save(cached,{'input_hash':key,'answer':answer})
             progress('DeepSeek 正文已生成，正在校验报告并准备排版')
             return answer

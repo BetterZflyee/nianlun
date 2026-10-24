@@ -82,3 +82,9 @@ node --test tools/test_insight_data.js
 两组测试覆盖真实标识、去重、显式关联、数量上限、确定布局、中文状态、项目聚合和配置含义，不替代浏览器操作或业务写回验收。CI 同时检查新增场景与面板 JavaScript 语法；实际执行结果见 [2.7 验收记录](VALIDATION_2.7.md)。
 
 2.7.1 只调整页面挂载范围，没有新增渲染库、CDN 或外部数据服务。2.7 的历史实现与验收记录保留，当前修订的实际检查见 [2.7.1 验收记录](VALIDATION_2.7.1.md)。
+
+## 图文回顾（2.9.0）
+
+`report_blocks.py` 校验并编译 `visual` 围栏；`visual-blocks.js` 只接受已声明的 status/graph/bar/line 数据，不接受任意 ECharts option。`tools/report-charts-entry.js` 从已有锁定版本 ECharts 6.1.0、ZRender 6.1.0、tslib 2.3.0 构建自包含 IIFE（esbuild 0.25.12），格式 `--bundle --minify --format=iife --global-name=RecapCharts --target=es2020 --legal-comments=inline`，输出到 `nianlun/assets/report/charts.bundle.js`。相应许可证沿用 `assets/portal/vendor/`。
+
+默认静态图随 HTML 保存。交互按钮触发 ECharts SVG 渲染；只有明确推进关系才提供既有 Three.js 立体查看。原始数据表与节点依据不会因交互隐藏而丢失。实现参考 [ECharts Canvas 与 SVG](https://echarts.apache.org/handbook/en/best-practices/canvas-vs-svg/) 与 [Three.js 按需渲染](https://threejs.org/manual/pages/rendering-on-demand.html)。

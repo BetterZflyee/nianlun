@@ -34,13 +34,14 @@ import deepseek_report
 import deepseek_workflow
 import scheduler
 import project_actions
+import intake
 import nianlun as n
 from setup import Setup, default_home
 from workbench import Workbench, text
 from file_lock import file_lock
 
 ASSETS=n.SKILL/'assets/portal'
-READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
+READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','mail_probe','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
 
 
 class Application:
@@ -65,7 +66,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.9.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.9.1','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -311,9 +312,11 @@ class Application:
         if op=='grow':
             return flow.grow(self.config,choice,lambda message:self.phase(jid,message),data.get('since'),data.get('until'),data.get('selection'))
         if op=='group_search':return project_actions.groups(n.load(self.config),data.get('query'))
-        if op=='mailboxes':
+        if op in ('mailboxes','mail_probe'):
             config,gw,_=self.work.connection()
-            return {'emails':[x['email'] for x in gw.call(['mail','mailbox','list']).get('emailAccounts',[]) if x.get('email')]}
+            if op=='mailboxes':return {'emails':intake.mailboxes(gw)}
+            end=datetime.now(n.time_zone(config))
+            return intake.mail_probe(gw,data.get('email'),end-timedelta(days=1),end,lambda message:self.phase(jid,message))
         if op=='send_report':
             config=n.load(self.config)
             with g.locked(config):return project_actions.send_report(config,data)

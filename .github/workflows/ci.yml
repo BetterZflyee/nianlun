@@ -47,6 +47,7 @@ jobs:
         run: |
           node --check nianlun/assets/deepseek-report-policy.js
           node --check nianlun/assets/portal/app.js
+          node --test tools/test_mail_ui.js
           node --check nianlun/assets/portal/workspace.js
           node --check nianlun/assets/portal/studio.js
           node --check nianlun/assets/portal/experience.js

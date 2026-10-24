@@ -225,7 +225,7 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
         if errors:raise source_state.Incomplete('; '.join(errors),count)
         return count
     for name,fn in [('minutes',minutes),('mentions',mentions),('direct',direct),('groups',groups),
-                    ('mail',lambda:intake.mail(gw,settings,start,end,add,instant))]:
+                    ('mail',lambda:intake.mail(gw,settings,start,end,add,instant,progress))]:
         if name in allowed:section(name,fn)
     if 'lark_minutes' in allowed:
         section('lark_minutes',lambda:source_state.lark_minutes(settings,start,end,folder,add))

@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '2.9.0'
+VERSION = '2.9.1'
 
 
 def options(*names):
@@ -350,8 +350,8 @@ class Setup:
         if sources.get('groups') and not checked:raise n.Error('请先搜索并选择要采集的群')
         mailbox=preferences.get('mailbox',settings.get('mailbox',''))
         if sources.get('mail'):
-            accounts=gw.call(['mail','mailbox','list']).get('emailAccounts',[])
-            if not mailbox or sum(x.get('email')==mailbox for x in accounts)!=1:raise n.Error('请从当前身份的邮箱列表中选择一个邮箱')
+            from intake import check_mailbox
+            check_mailbox(gw,mailbox)
         folder=preferences.get('report_folder') or settings.get('report_folder')
         if folder and '://' in folder:folder=parse_base(folder)[0]
         if switches['reports'] and not folder: raise n.Error('请先选择或创建阶段汇报文件夹')

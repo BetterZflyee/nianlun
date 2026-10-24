@@ -162,7 +162,7 @@ PROVIDERS={
     'codex':{'name':'Codex','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':True,'timer':'native_verified'},
     'claude':{'name':'Claude Code','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':False,'timer':'host_managed'},
     'workbuddy':{'name':'WorkBuddy','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
-    'deepseek':{'name':'DeepSeek Harness','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
+    'deepseek':{'name':'DeepSeek Harness','modes':['delegated'],'reasoning':False,'embedded_workflow':True,'timer':'host_managed'},
     'generic':{'name':'其他 AI 宿主','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
 }
 
@@ -195,7 +195,8 @@ def selection(config_path,legacy=None):
 def describe(value):
     choice=normalize(value);meta=PROVIDERS[choice['provider']]
     return {**meta,'provider':choice['provider'],'mode':choice['mode'],'binary':choice.get('binary'),
-            'embedded_workflow':meta['embedded_workflow'] and choice['mode']=='cli',
+            'embedded_workflow':choice['provider']=='deepseek' or (meta['embedded_workflow'] and choice['mode']=='cli'),
+            'workflow_scope':'documents' if choice['provider']=='deepseek' else 'native_tools',
             'direct_reasoning':meta['reasoning'] and choice['mode']=='cli',
             'automatic_reports':choice['provider']=='deepseek' or (meta['reasoning'] and choice['mode']=='cli')}
 

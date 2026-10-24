@@ -899,7 +899,7 @@ async function renderWorkflows23(root, generation) {
     submit = el("button", {
       type: "submit",
       class: "primary",
-      text: boot.harness?.embedded_workflow ? "开始执行 →" : "准备宿主接续 →",
+      text: boot.harness?.provider === "deepseek" ? "交给 DeepSeek 执行 →" : boot.harness?.embedded_workflow ? "开始执行 →" : "准备宿主接续 →",
     });
   const presets = [
     ["阶段汇报", "梳理阶段进展，说明成果、风险和下一步。"],
@@ -958,7 +958,9 @@ async function renderWorkflows23(root, generation) {
         formField("这次希望完成什么", question),
         el("p", {
           class: "form-help",
-          text: boot.harness?.embedded_workflow
+          text: boot.harness?.provider === "deepseek"
+            ? "DeepSeek 自动结合项目资料、相关记忆和所选方法，生成分析、复盘、交接或文档。结果在这里查看和下载；关闭页面仍会继续。对外发送、修改业务数据请使用对应操作入口。"
+            : boot.harness?.embedded_workflow
             ? "将在本机执行，权限确认会显示在页面。"
             : "当前采用接续模式：生成请求 → 在 " +
               (boot.harness?.name || "所选宿主") +
@@ -1030,18 +1032,23 @@ async function renderWorkflows23(root, generation) {
   skillSearch.oninput = drawSkills;
   drawSkills();
   updateSelectionSummary();
+  let submittedContent = "", submittedId = "";
   form.onsubmit = async (e) => {
     e.preventDefault();
     submit.disabled = true;
     error.textContent = "";
     try {
+      const input = {question: question.value, skill_ids: [...chosen], project_id: project.value || null};
+      const contentKey = JSON.stringify(input);
+      if (contentKey !== submittedContent) {
+        submittedContent = contentKey;
+        submittedId = crypto.randomUUID();
+      }
       const response = await api("/api/actions", {
         op: boot.harness?.embedded_workflow ? "workflow" : "workflow_request",
         data: {
-          request_id: crypto.randomUUID(),
-          question: question.value,
-          skill_ids: [...chosen],
-          project_id: project.value || null,
+          request_id: submittedId,
+          ...input,
         },
       });
       currentWorkflow = response.job_id;

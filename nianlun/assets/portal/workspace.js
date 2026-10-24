@@ -11,7 +11,8 @@ function taskPanel(job) {
     history = el("details", {}, [el("summary", { text: "查看处理步骤" })]),
     lines = el("ol"),
     actions = el("div", { class: "actions" }),
-    output = el("div", { class: "ai-answer" });
+    output = el("div", { class: "ai-answer" }),
+    help = el("p", { class: "form-help" });
   history.append(lines);
   box.append(
     el("div", { class: "entry-top" }, [title, status]),
@@ -20,10 +21,7 @@ function taskPanel(job) {
     actions,
     history,
     output,
-    el("p", {
-      class: "form-help",
-      text: job.op === "report" ? "关闭窗口后仍会继续。可从右上角通知回来查看；失败后重试会保留已完成步骤。" : "关闭窗口不会取消任务。在右上角通知或执行记录中，可查看状态、结果和接续步骤。",
-    }),
+    help,
   );
   let latest = job, timer, polling = false, ticks = 0;
   const stages = el("div", { class: "report-stages", "aria-label": "汇报处理阶段" });
@@ -35,6 +33,11 @@ function taskPanel(job) {
   }
   function update(value) {
     latest = value;
+    help.textContent = ["failed", "interrupted", "cancelled", "waiting_harness"].includes(value.status)
+      ? "任务当前已停止；已保存的材料和正文保留。修复原因后重试，会从未完成步骤继续。"
+      : value.status === "succeeded"
+        ? "任务已完成。结果保留在执行记录中，可随时查看。"
+        : "关闭窗口不会取消任务。可从右上角通知或执行记录回来查看进度与结果。";
     box.dataset.job = value.id;
     title.textContent = jobNames[value.op] || value.op;
     status.textContent =
@@ -76,7 +79,7 @@ function taskPanel(job) {
     if (value.op === "report") {
       const messages = (value.progress || []).map(p => p.message);
       const labels = ["读取项目", "检索记忆", "AI 撰写", "生成页面", "上传报告", "写回确认"];
-      const patterns = [/项目事实/, /独立记忆/, /DeepSeek|正文|自动撰写/, /排版|可视化|生成汇报并上传/, /上传报告到/, /写回项目主表|回读确认/];
+      const patterns = [/项目事实/, /独立记忆/, /DeepSeek|正文|自动撰写|提炼|修订/, /按所选汇报样式|生成汇报并上传/, /上传报告到/, /写回项目主表|回读确认/];
       let index = -1;
       if (value.status !== "queued") index = Math.max(0, ...patterns.map((p,i) => messages.some(m => p.test(m)) ? i : -1));
       stages.replaceChildren(...labels.map((text,i) => el("span", { class: value.status === "succeeded" || i < index ? "done" : i === index ? "active" : "", text: (i + 1) + " · " + text })));
@@ -87,6 +90,11 @@ function taskPanel(job) {
       if (value.can_resume && (value.status !== "waiting_harness" || value.automatic_report || value.handoff_ready)) {
         actions.append(btn(value.status === "waiting_harness" ? "由 DeepSeek 自动继续" : "重试此报告", e => quiet(withButton(e.currentTarget, retryReport)), "primary"));
       }
+      if (value.report_needs_refresh) actions.append(btn("按最新资料重新生成", e => quiet(withButton(e.currentTarget, async () => {
+        const prior = value.resume_data;
+        const { job_id } = await api("/api/actions", {op:"report", data:{project_id:prior.project_id, since:prior.since, until:prior.until, request_id:crypto.randomUUID()}});
+        update(await api("/api/jobs/" + job_id));
+      })), "primary"));
     }
     if (value.status === "waiting_harness" && value.op === "report" && value.automatic_report) {
       phase.textContent = "原报告材料已保留。点击自动继续，由本机 DeepSeek 生成并写回，无需复制请求。";

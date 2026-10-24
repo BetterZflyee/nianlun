@@ -65,7 +65,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.8.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.8.1','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -156,7 +156,7 @@ class Application:
                     original.update(status='queued',cancel_requested=False,attempt=original.get('attempt',1)+1)
                     original.setdefault('previous_attempts',[]).append({'progress':original.get('progress',[]),'error':original.get('error'),'finished_at':original.get('finished_at')})
                     original.update(progress=[],phase='等待重试原'+('报告' if original['op']=='report' else '工作流'));original.pop('phase_at',None)
-                    for key in ('error','finished_at','started_at'):original.pop(key,None)
+                    for key in ('error','error_code','finished_at','started_at'):original.pop(key,None)
                     self.persist_job(original)
                     self.write_pool.submit(self.execute,original['id'],original['op'],original['resume_data'])
                     return {'job_id':original['id']}
@@ -208,6 +208,9 @@ class Application:
         if job['op']=='report':
             result['automatic_report']=harness.selection(self.config).get('provider')=='deepseek'
             result['can_cancel']=job['status']=='queued' or (job['status']=='running' and job.get('report_cancellable',False))
+            stale=job.get('error_code')=='report_stale' or any(x in job.get('error','') for x in ('接续期间项目事实已变化','生成期间项目事实已变化'))
+            result['report_needs_refresh']=job['status']=='failed' and stale and 'resume_data' in job
+            if result['report_needs_refresh']:result['can_resume']=False
         if job['op']=='workflow' and job.get('workflow_engine')=='deepseek':
             result['automatic_workflow']=True
             result['can_resume']=job['status'] in ('failed','interrupted','cancelled') and 'resume_data' in job
@@ -234,12 +237,14 @@ class Application:
                     result=self.setup_action(op,data)
             else:result=self.action(jid,op,data)
             with self.guard:
-                job.update(status='succeeded',result=result);job.pop('error',None);job.pop('handoff',None)
+                job.update(status='succeeded',result=result);job.pop('error',None);job.pop('error_code',None);job.pop('handoff',None)
         except host_bridge.Waiting as exc:
             with self.guard:job.update(status='waiting_harness',handoff=exc.request,resume_data=data,error=str(exc))
             self.phase(jid,'等待 '+harness.PROVIDERS[exc.request['provider']]['name']+' 返回分析结果；当前没有继续执行')
         except deepseek_report.Cancelled as exc:
             with self.guard:job.update(status='cancelled',error=str(exc))
+        except n.ReportStale as exc:
+            with self.guard:job.update(status='failed',error=str(exc),error_code='report_stale')
         except Exception as exc:
             with self.guard:job.update(status='failed',error=str(exc)[:2000])
         with self.guard:

@@ -38,6 +38,10 @@ class Error(Exception):
     pass
 
 
+class ReportStale(Error):
+    """A report's frozen input cannot be safely reused with current project facts."""
+
+
 def save(path, obj):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

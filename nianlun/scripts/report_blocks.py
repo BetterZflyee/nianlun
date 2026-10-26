@@ -101,10 +101,11 @@ def validate(config, evidence=None):
         rows = config.get('rows')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('甘特图须为 1 至 12 个对象')
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source'}:
+            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source', 'note'}:
                 raise ValueError('甘特行字段不合法')
             text(row.get('label'), 26, 'label'); source(row.get('source'))
             if row.get('state') not in STATES: raise ValueError('甘特行状态不合法')
+            if row.get('note'): text(row['note'], 120, '行补充说明')
             segs = row.get('segments') or []
             if not isinstance(segs, list) or len(segs) > 6: raise ValueError('每行分段须为 0 至 6 段')
             for seg in segs:
@@ -463,11 +464,17 @@ def gantt_html(config, uid):
             body.append('<span class="gt-gap"></span>'
                         '<span class="gt-empty">本期无记录 · 需补进场与进度日期</span>')
         body.append('</span></summary>')
-        if detail:
-            body.append('<div class="gt-detail"><ul>' + ''.join(detail)
-                        + f'<li class="gt-detail-src">依据 {refs(row["source"])}</li></ul></div>')
+        note = escape(row.get('note') or '')
+        if note or detail:
+            parts = []
+            if note:
+                parts.append(f'<p class="gt-detail-note">{note}</p>')
+            if detail:
+                parts.append('<ul class="gt-detail-tl">' + ''.join(detail) + '</ul>')
+            parts.append(f'<p class="gt-detail-src">依据 {refs(row["source"])}</p>')
+            body.append('<div class="gt-detail">' + ''.join(parts) + '</div>')
         else:
-            body.append('<div class="gt-detail"><ul><li>本期没有可展开的节点记录</li></ul></div>')
+            body.append('<div class="gt-detail"><p class="gt-detail-note">本期没有可展开的节点记录</p></div>')
         body.append('</details>')
     body.append('</div>')
 

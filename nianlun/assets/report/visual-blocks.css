@@ -442,3 +442,31 @@
   .gt-empty{font-size:10px;padding-left:6px}
   .gt-hint-sw{display:inline}
 }
+
+/* 展开态重做：左对齐名称列 + 12px 正文（不再比主行大字）+ 只放图上没有的信息 */
+.gt-detail{padding:8px 0 14px 236px;background:#FAFBFB;border-top:1px dashed #EEF0F2}
+.gt-detail-note{margin:0 0 8px;font-size:12.5px;line-height:1.7;color:#3C4247;max-width:70ch}
+.gt-detail-note::before{content:"";display:inline-block;width:3px;height:12px;background:#3D7A61;
+  border-radius:2px;margin-right:8px;vertical-align:-1px}
+.gt-detail-tl{margin:0 0 6px;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:6px 16px}
+.gt-detail-tl li{font-size:12px;color:#5B6167;line-height:1.6}
+.gt-detail-tl li b{color:#1D1D1F;font-weight:600;margin-right:6px;font-variant-numeric:tabular-nums}
+.gt-detail-src{margin:0;font-size:11px;color:#8A9199}
+.gt-detail-src a{color:#8A9199;text-decoration:none}
+@media (max-width:760px){
+  .gt-detail{padding:8px 0 12px 118px}
+  .gt-detail-note{font-size:11.5px}
+  .gt-detail-tl li{font-size:11px}
+}
+
+/* 展开内容带一条从属引导线，避免"这行属于谁"的断裂 */
+.gt-detail{position:relative;padding-left:250px}
+.gt-detail::before{content:"";position:absolute;left:236px;top:10px;bottom:22px;width:2px;
+  background:#DCE8E2;border-radius:1px}
+.gt-detail::after{content:"";position:absolute;left:236px;top:14px;width:7px;height:2px;
+  background:#DCE8E2}
+@media (max-width:760px){
+  .gt-detail{padding-left:126px}
+  .gt-detail::before{left:112px}
+  .gt-detail::after{left:112px}
+}

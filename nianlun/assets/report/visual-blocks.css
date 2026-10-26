@@ -151,8 +151,8 @@
 .rv-gantt{
   --name-col:236px; --g-row:48px; --g-bar:26px; --g-radius:3px;
   --g-week:#DFE4E7; --g-today:#1F2937;
-  --g-ink:#1D1D1F; --g-ink2:#5B6167; --g-ink3:#767D84;
-  --s-done:#2F6350; --s-live:#3D7A61; --s-idle:#8A9199; --s-risk:#E41E2C;
+  --g-ink:#1D1D1F; --g-ink2:#5B6167; --g-ink3:#6E757C;
+  --s-done:#2F6350; --s-live:#3D7A61; --s-idle:#6E757C; --s-risk:#E41E2C;
   margin:14px 0; color:var(--g-ink);
   font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1;
 }
@@ -162,7 +162,7 @@
 .gt-kpi{display:flex;align-items:baseline;gap:40px;margin:0 0 18px 2px;flex-wrap:wrap}
 .gt-kpi-i{display:flex;align-items:baseline;gap:6px}
 .gt-kpi-i b{font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1}
-.gt-kpi-i b span{font-size:15px;font-weight:400;opacity:.55}
+.gt-kpi-i b span{font-size:15px;font-weight:400;color:inherit}
 .gt-kpi-i em{font-style:normal;font-size:12px;color:var(--g-ink2)}
 .gt-kpi--done b{color:var(--s-done)}
 .gt-kpi--live b{color:var(--s-live)}
@@ -170,14 +170,14 @@
 .gt-kpi--idle b{color:var(--s-idle)}
 
 /* 里程碑区 */
-.gt-marks{position:relative;height:var(--mark-h,40px);margin-left:var(--name-col);
-  margin-right:2px;padding-bottom:10px}
+.gt-marks{position:relative;height:var(--mark-h,40px);padding-bottom:10px}
 .gt-mark{position:absolute;top:calc(var(--lane,0) * 15px + 2px);transform:translateX(-50%);
-  text-align:center;white-space:nowrap;font-size:11px;color:#8A6A1F;
-  display:flex;flex-direction:column;align-items:center;gap:0}
-.gt-mark i{display:block;width:1px;height:10px;background:currentColor;opacity:.55}
+  text-align:center;white-space:nowrap;font-size:11px;color:#7A5C18;
+  display:flex;flex-direction:column;align-items:center;gap:0;z-index:2}
+.gt-mark b{background:rgba(255,255,255,.92);padding:0 3px;border-radius:2px}
+.gt-mark i{display:block;width:1px;height:10px;background:currentColor}
 .gt-mark b{font-weight:500;font-size:11px}
-.gt-mark em{font-style:normal;font-size:10px;opacity:.8}
+.gt-mark em{font-style:normal;font-size:10px}
 .gt-today{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;
   align-items:center;gap:2px;font-size:11px;color:var(--g-today);white-space:nowrap;z-index:3}
 .gt-today i{display:block;width:2px;height:14px;background:var(--g-today)}
@@ -187,6 +187,7 @@
 .gt-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;padding:4px 0}
 .gt-head{display:grid;grid-template-columns:var(--name-col) minmax(0,1fr);
   border-bottom:1px solid #E6EAEC}
+.gt-head--marks{border-bottom:none}
 .gt-corner{font-size:11px;color:var(--g-ink3);display:flex;align-items:flex-end;padding-bottom:7px}
 .gt-days{position:relative;height:30px}
 .gt-day{position:absolute;bottom:0;height:30px;line-height:30px;font-size:11px;color:var(--g-ink3);
@@ -211,14 +212,14 @@
 .gt-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .gt-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0}
 .gt-stage{font-style:normal;font-size:11px;line-height:1;padding:2px 5px;border-radius:4px;
-  border:1px solid currentColor;opacity:.9;white-space:nowrap;flex:0 0 auto}
+  border:1px solid currentColor;white-space:nowrap;flex:0 0 auto}
 .gt-cell a{display:none!important}
 
 /* 轨道：所有图形元素都在这里，百分比即轨道百分比 */
 .gt-track{position:relative;min-height:var(--g-row);min-width:0}
 .gt-week{position:absolute;top:0;bottom:0;width:1px;background:var(--g-week);z-index:0}
 .gt-track--today::before{content:"";position:absolute;top:0;bottom:0;left:var(--today-pct,50%);
-  width:1px;background:var(--g-today);opacity:.32;z-index:1}
+  width:2px;margin-left:-1px;background:#8A9199;z-index:1}
 .gt-bar{position:absolute;top:calc((var(--g-row) - var(--g-bar)) / 2);height:var(--g-bar);
   border-radius:var(--g-radius);display:flex;align-items:center;padding:0 9px;z-index:2}
 .gt-bar em{font-style:normal;font-size:12px;font-weight:400;color:#fff;
@@ -274,11 +275,12 @@
 .gt-far{display:inline-flex;align-items:baseline;gap:5px;padding:3px 9px;border-radius:20px;
   background:#FDF8EE;border:1px solid #EFDFC2;font-size:11.5px;color:#7A5C18}
 .gt-far b{font-weight:500}
-.gt-far em{font-style:normal;font-size:10.5px;opacity:.8}
+.gt-far em{font-style:normal;font-size:10.5px}
 
 /* ---------- 桌面 ≥761px ---------- */
 @media (min-width:761px){
-  .gt-days,.gt-track{min-width:560px}
+  /* 400px 足以容纳 24 天（约 16.7px/天），560 会在 761-796px 视口造成横向溢出 */
+  .gt-days,.gt-track{min-width:400px}
 }
 
 /* ---------- 移动 ≤760px ---------- */
@@ -321,3 +323,13 @@
   .gt-pt-lbl{margin-left:9px;padding:0 4px;transform:none}
   .gt-pt-lbl--left{margin-left:9px;transform:none}
 }
+
+/* 901px 以下 track 变窄，里程碑名称必然互相压叠：只留日期，名称走 title 与展开 */
+@media (max-width:900px){
+  .gt-mark b{display:none}
+  .gt-mark em{display:block;font-size:10px}
+  .gt-marks{padding-bottom:6px}
+}
+/* 里程碑日期与日期刻度之间留出空隙，避免两行数字贴在一起 */
+.gt-marks{padding-bottom:14px}
+.gt-head--marks{border-bottom:none}

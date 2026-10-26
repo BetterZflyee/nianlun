@@ -327,8 +327,8 @@ GANTT_TONE = {
     'done':    ('#e8f0ea', '#2F6350', '#ffffff'),
     'active':  ('#e5efe9', '#3D7A61', '#ffffff'),
     'blocked': ('#fbe9e6', '#E41E2C', '#ffffff'),
-    'planned': ('#f1f2f4', '#8A9199', '#ffffff'),
-    'unknown': ('#f4f5f6', '#8A9199', '#ffffff'),
+    'planned': ('#f1f2f4', '#6E757C', '#ffffff'),
+    'unknown': ('#f4f5f6', '#6E757C', '#ffffff'),
 }
 
 
@@ -491,7 +491,9 @@ def gantt_html(config, uid):
     for m in sorted(marks, key=lambda x: x['date']):
         d = datetime.date.fromisoformat(m['date'])
         pos = pct(d)
-        half = max(2.6, len(m['label']) * 0.62)   # 标签半宽（百分比，经验值）
+        # 标签半宽（百分比）。宽屏（≥901px）track≈900px，1% ≈ 9px，中文 11px ≈ 1.2%/字，
+        # 经验系数 0.62 恰好；窄屏由 CSS 隐藏里程碑名称（只留日期），故此处无需放大。
+        half = max(2.6, len(m['label']) * 0.62)
         lane = 0
         while True:
             clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)
@@ -547,11 +549,13 @@ def gantt_html(config, uid):
     today_var = (f'--today-x:{pct(today):.4f}%') if today else '--today-x:100%'
     today_var += f';--days:{total}'
     return (f'<div class="gt" style="{today_var}">' + kpi +
-            f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
             '<div class="gt-scroll">'
+            f'<div class="gt-head gt-head--marks" style="--mark-h:{mark_height}px">'
+            '<div class="gt-corner"></div>'
+            f'<div class="gt-marks">{"".join(marks_html)}{today_html}</div></div>'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + ''.join(body) +
-            '</div></div>' + legend + far_html +
+            '</div>' + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')
 

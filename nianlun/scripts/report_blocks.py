@@ -1,5 +1,6 @@
 """Small declarative report visuals. Model output is data, never HTML or ECharts code."""
 import base64
+import datetime
 import hashlib
 import json
 import math
@@ -29,9 +30,10 @@ def validate(config, evidence=None):
     common = {'type', 'title', 'caption'}
     fields = {'status': {'items'}, 'graph': {'nodes', 'links'},
               'matrix': {'stages', 'items'},
+              'gantt': {'start', 'end', 'today', 'milestones', 'rows'},
               'bar': {'categories', 'series', 'unit', 'source'},
               'line': {'categories', 'series', 'unit', 'source'}}
-    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、bar、line')
+    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、gantt、bar、line')
     if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
     def source(value):
@@ -63,6 +65,46 @@ def validate(config, evidence=None):
             if row.get('next') is not None and row['next'] != '': text(row['next'], 60, 'next')
         # 统一按推进节奏排序：已完成/最接近完成的在前，筹备与未启动的在后；同阶段内保持原顺序。
         config['items'] = sorted(rows, key=lambda r: stages.index(r['stage']), reverse=True)
+    elif kind == 'gantt':
+        def day(value, label):
+            text(value, 10, label)
+            try:
+                return datetime.date.fromisoformat(value)
+            except ValueError as exc:
+                raise ValueError(f'{label} 须为 YYYY-MM-DD 日期') from exc
+        first, last = day(config.get('start'), 'start'), day(config.get('end'), 'end')
+        if last <= first: raise ValueError('gantt 的 end 须晚于 start')
+        if config.get('today'): day(config['today'], 'today')
+        marks = config.get('milestones') or []
+        if not isinstance(marks, list) or len(marks) > 8: raise ValueError('里程碑须为 0 至 8 个')
+        for m in marks:
+            if not isinstance(m, dict) or set(m) - {'date', 'label', 'source'}:
+                raise ValueError('里程碑字段不合法')
+            day(m.get('date'), '里程碑日期'); text(m.get('label'), 18, '里程碑说明')
+            source(m.get('source'))
+        rows = config.get('rows')
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('甘特图须为 1 至 12 个对象')
+        for row in rows:
+            if not isinstance(row, dict) or set(row) - {'label', 'state', 'segments', 'points', 'source'}:
+                raise ValueError('甘特行字段不合法')
+            text(row.get('label'), 26, 'label'); source(row.get('source'))
+            if row.get('state') not in STATES: raise ValueError('甘特行状态不合法')
+            segs = row.get('segments') or []
+            if not isinstance(segs, list) or len(segs) > 6: raise ValueError('每行分段须为 0 至 6 段')
+            for seg in segs:
+                if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state'}:
+                    raise ValueError('分段字段不合法')
+                a, b = day(seg.get('from'), '分段起点'), day(seg.get('to'), '分段终点')
+                if b < a: raise ValueError('分段终点早于起点')
+                text(seg.get('label'), 12, '分段说明')
+                if seg.get('state') and seg['state'] not in STATES: raise ValueError('分段状态不合法')
+            pts = row.get('points') or []
+            if not isinstance(pts, list) or len(pts) > 6: raise ValueError('每行节点须为 0 至 6 个')
+            for pt in pts:
+                if not isinstance(pt, dict) or set(pt) - {'date', 'label', 'state'}:
+                    raise ValueError('节点字段不合法')
+                day(pt.get('date'), '节点日期'); text(pt.get('label'), 14, '节点说明')
+                if pt.get('state') and pt['state'] not in STATES: raise ValueError('节点状态不合法')
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')
         if not isinstance(rows, list) or not 2 <= len(rows) <= 9: raise ValueError('关系图须为 2 至 9 个节点')
@@ -160,6 +202,72 @@ def graph_svg(config, uid):
     return ''.join(out) + '</svg>'
 
 
+def gantt_svg(config):
+    """时间轴甘特：左侧对象名，右侧时间轴；分段画区间，节点画完成点，竖虚线画里程碑。"""
+    first = datetime.date.fromisoformat(config['start'])
+    last = datetime.date.fromisoformat(config['end'])
+    today = datetime.date.fromisoformat(config['today']) if config.get('today') else None
+    rows = config['rows']
+    marks = config.get('milestones') or []
+    left, right, top, rowh = 164, 934, 86, 38
+    span = max(1, (last - first).days)
+    height = top + len(rows) * rowh + 26
+    def x(d):
+        return left + (d - first).days / span * (right - left)
+    out = [f'<svg viewBox="0 0 960 {height}" role="img" aria-label="{escape(config["title"])}">']
+    # 纵向月份网格
+    cursor = datetime.date(first.year, first.month, 1)
+    if cursor < first:
+        cursor = (cursor.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    while cursor <= last:
+        px = x(cursor)
+        out.append(f'<line x1="{px:.1f}" x2="{px:.1f}" y1="{top-8}" y2="{height-20}" stroke="#dce3d7" stroke-width="1"/>')
+        out.append(f'<text x="{px+4:.1f}" y="{top-14}" font-size="11" fill="#7d8f83">{cursor.month}月</text>')
+        cursor = (cursor.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
+    # 里程碑：竖向虚线 + 顶部标签（交错两行避免重叠）
+    for i, m in enumerate(marks):
+        px = x(datetime.date.fromisoformat(m['date']))
+        out.append(f'<line x1="{px:.1f}" x2="{px:.1f}" y1="{top-34}" y2="{height-22}" stroke="#c58a2e" '
+                   f'stroke-width="1.2" stroke-dasharray="4 3" opacity="0.85"/>')
+        ly = top - 50 + (i % 3) * 13
+        out.append(f'<text x="{px:.1f}" y="{ly}" text-anchor="middle" font-size="9.5" fill="#a5751f">'
+                   f'{escape(m["label"])}</text>')
+    # 今天
+    if today:
+        px = x(today)
+        out.append(f'<line x1="{px:.1f}" x2="{px:.1f}" y1="{top-8}" y2="{height-20}" stroke="#bc4941" stroke-width="1.6"/>')
+        out.append(f'<text x="{px:.1f}" y="{height-8}" text-anchor="middle" font-size="10" fill="#bc4941">今天</text>')
+    # 每行
+    for idx, row in enumerate(rows):
+        y = top + idx * rowh
+        label, color = STATES[row['state']]
+        out.append(f'<text x="0" y="{y+17}" font-size="12" fill="#21372d">{escape(row["label"])}</text>')
+        out.append(f'<circle cx="{8}" cy="{y+14}" r="0" fill="none"/>')
+        for seg in (row.get('segments') or []):
+            a = datetime.date.fromisoformat(seg['from']); b = datetime.date.fromisoformat(seg['to'])
+            x1, x2 = x(a), x(b)
+            w = max(7.0, x2 - x1)
+            _, sc = STATES[seg.get('state') or row['state']]
+            out.append(f'<rect x="{x1:.1f}" y="{y+3}" width="{w:.1f}" height="18" rx="4" fill="{sc}" opacity="0.9"/>')
+            if seg.get('label') and w > 54:
+                out.append(f'<text x="{x1+5:.1f}" y="{y+16}" font-size="9.5" fill="#ffffff">{escape(seg["label"])}</text>')
+        if not (row.get('segments') or row.get('points')):
+            out.append(f'<text x="{left+8}" y="{y+16}" font-size="10" fill="#9bb09d">本期无记录</text>')
+        for pt in (row.get('points') or []):
+            px = x(datetime.date.fromisoformat(pt['date']))
+            _, pc = STATES[pt.get('state') or row['state']]
+            out.append(f'<circle cx="{px:.1f}" cy="{y+12}" r="5.5" fill="{pc}" stroke="#ffffff" stroke-width="2"/>')
+            if pt.get('label'):
+                d = datetime.date.fromisoformat(pt['date'])
+                txt = pt['label'] + ' ' + f'{d.month}-{d.day}'
+                anchor = 'end' if px > right - 120 else 'start'
+                tx = px - 11 if anchor == 'end' else px + 11
+                out.append(f'<text x="{tx:.1f}" y="{y+16}" text-anchor="{anchor}" font-size="10" '
+                           f'fill="{pc}" font-weight="600">{escape(txt)}</text>')
+    out.append('</svg>')
+    return ''.join(out)
+
+
 def chart_svg(config):
     width,height=720,300;left,right,top,bottom=64,696,30,238
     values=[v for s in config['series'] for v in s['data']]
@@ -235,6 +343,8 @@ def figure(config, uid):
         out.append('<div class="rv-interactive" role="img" aria-label="' + escape(config['title']) + '" hidden></div>')
         if kind == 'matrix':
             pass
+        elif kind == 'gantt':
+            out.append('<figure class="am-flow rv-static-gantt">' + gantt_svg(config) + '</figure>')
         elif kind == 'graph':
             out.append('<figure class="am-flow rv-static-graph">' + graph_svg(config, uid) + '</figure>')
             out.append('<details class="rv-data"><summary>节点说明与依据</summary><ul>')

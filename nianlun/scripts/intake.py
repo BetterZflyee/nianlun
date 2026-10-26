@@ -38,15 +38,70 @@ class PlainText(HTMLParser):
         if not self.hidden:self.parts.append(data)
 
 
-def mail(gw, settings, start, end, add, instant):
-    email=settings.get('mailbox')
+def mailboxes(gw):
+    data=gw.call(['mail','mailbox','list'])
+    accounts=data.get('emailAccounts')
+    if not isinstance(accounts,list):raise n.Error('邮箱列表未完整返回，请重试读取；未认定为没有邮箱')
+    emails=[]
+    for account in accounts:
+        email=account.get('email') if isinstance(account,dict) else None
+        if not isinstance(email,str) or not re.fullmatch(r'[^@\s]+@[^@\s]+',email):
+            raise n.Error('邮箱地址返回异常，请重新读取邮箱列表')
+        if email in emails:raise n.Error('当前身份的邮箱列表存在重复，请检查钉钉账号')
+        emails.append(email)
+    return emails
+
+
+def check_mailbox(gw,email):
     if not isinstance(email,str) or not re.fullmatch(r'[^@\s]+@[^@\s]+',email):
-        raise n.Error('请先选择本人邮箱，未默认选取第一个账号')
-    accounts=gw.call(['mail','mailbox','list']).get('emailAccounts',[])
-    if sum(x.get('email')==email for x in accounts)!=1:raise n.Error('所选邮箱不在当前身份的邮箱列表中')
+        raise n.Error('请先读取并选择本人邮箱')
+    if email not in mailboxes(gw):raise n.Error('所选邮箱不在当前身份的邮箱列表中，请重新读取并选择')
+
+
+def mail_body(detail,mid):
+    if detail.get('id')!=mid:raise n.Error('邮件详情编号不符')
+    if detail.get('bodyHasMore') is True:raise n.Error('邮件正文返回不完整，保留补采窗口')
+    body=detail.get('markdownBody') or detail.get('body')
+    if isinstance(body,dict):
+        content=body.get('content','')
+        if str(body.get('contentType','')).lower()=='html':
+            parser=PlainText();parser.feed(content);content=''.join(parser.parts)
+        body=content
+    if not isinstance(body,str) or not body.strip():raise n.Error('邮件正文尚未获取')
+    return body
+
+
+def mail_probe(gw,email,start,end,progress=lambda message:None):
+    """Read one recent message without storing its content or changing collection settings."""
+    progress('正在核验所选邮箱')
+    check_mailbox(gw,email)
+    progress('正在查询最近 24 小时的邮件')
+    data=gw.call(['mail','+search-mail','--email',email,'--query',
+        'date>='+start.isoformat()+' AND date<'+end.isoformat(),'--size','1'])
+    messages=data.get('messages')
+    if not isinstance(messages,list):raise n.Error('邮件列表未完整返回，读取验证未通过')
+    if not messages:
+        if data.get('meta',{}).get('pagination',{}).get('endpoint_exhausted') is not True:
+            raise n.Error('邮件列表未确认结束，无法判断近期是否有邮件')
+        return {'email':email,'list_readable':True,'body_readable':None,'sample_count':0,
+                'since':start.isoformat(),'until':end.isoformat()}
+    mid=messages[0].get('messageId')
+    if not mid:raise n.Error('邮件列表缺少稳定编号，尚未读取正文')
+    progress('正在验证一封邮件的正文读取')
+    detail=gw.call(['mail','+message','--email',email,'--id',mid]).get('value',{})
+    mail_body(detail,mid)
+    return {'email':email,'list_readable':True,'body_readable':True,'sample_count':1,
+            'since':start.isoformat(),'until':end.isoformat()}
+
+
+def mail(gw, settings, start, end, add, instant, progress=lambda message:None):
+    email=settings.get('mailbox')
+    progress('本人邮箱：正在核验账号')
+    check_mailbox(gw,email)
     query='date>='+start.isoformat()+' AND date<'+end.isoformat()
     token=None;tokens=set();found={};errors=[]
     for _ in range(100):
+        progress('本人邮箱：正在读取邮件列表第 '+str(_+1)+' 页')
         args=['mail','+search-mail','--email',email,'--query',query,'--size','100']
         if token:args+=['--cursor',token]
         data=gw.call(args)
@@ -61,23 +116,20 @@ def mail(gw, settings, start, end, add, instant):
             errors.append('邮件分页未能确认结束，保留补采窗口');break
         tokens.add(token)
     else:errors.append('邮件分页达到本轮上限')
-    for mid,item in found.items():
+    read=0;failed=0
+    for index,(mid,item) in enumerate(found.items(),1):
+        progress('本人邮箱：正在读取第 '+str(index)+' / '+str(len(found))+' 封正文')
         try:
             detail=gw.call(['mail','+message','--email',email,'--id',mid]).get('value',{})
-            if detail.get('id')!=mid:raise n.Error('邮件详情编号不符')
+            body=mail_body(detail,mid)
             date=detail.get('receivedDateTime') or detail.get('sentDateTime') or item.get('date')
             if not date:raise n.Error('邮件缺少可核验时间')
             when=instant(date,end.tzinfo)
             if not start<=when<end:continue
-            body=detail.get('markdownBody') or detail.get('body')
-            if isinstance(body,dict):
-                content=body.get('content','')
-                if str(body.get('contentType','')).lower()=='html':
-                    parser=PlainText();parser.feed(content);content=''.join(parser.parts)
-                body=content
-            if not isinstance(body,str) or not body.strip():raise n.Error('邮件正文尚未获取')
             add('mail',email+':'+mid,detail.get('subject') or item.get('subject') or '邮件',
                 body,when.isoformat(),content_kind='mail_body')
-        except n.Error as exc:errors.append(str(exc))
-    if errors:raise Incomplete('; '.join(dict.fromkeys(errors)),len(found))
+            read+=1
+        except n.Error as exc:
+            failed+=1;errors.append(str(exc))
+    if errors:raise Incomplete('邮件已采集 '+str(read)+' 封，正文失败 '+str(failed)+' 封；'+ '; '.join(dict.fromkeys(errors)),len(found))
     return len(found)

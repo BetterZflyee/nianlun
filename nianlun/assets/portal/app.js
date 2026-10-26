@@ -69,6 +69,7 @@ const jobNames = {
   send_report: "发送项目汇报",
   group_search: "搜索项目群",
   mailboxes: "读取本人邮箱",
+  mail_probe: "验证邮件读取",
   capability_roots: "保存能力目录",
   setup_dependencies: "安装运行环境",
   setup_login: "钉钉授权",
@@ -1984,16 +1985,60 @@ function renderSetup(root) {
     ],
     preferences.mailbox || "",
   );
+  mailbox.setAttribute("aria-label", "采集邮箱");
+  const mailStatus = el("p", { class: "form-help", role: "status", "aria-live": "polite",
+    text: preferences.mailbox
+      ? "已保存邮箱：" + preferences.mailbox + "。可验证邮件列表与正文是否可读。"
+      : "先读取本人邮箱，再验证邮件读取；选定后勾选「我选择的邮箱」并保存运行设置。",
+  });
+  const testMail = btn("验证邮件读取", (e) => quiet(withButton(e.currentTarget, async () => {
+    const email = mailbox.value;
+    if (!email) { mailStatus.textContent = "请先读取并选择本人邮箱。"; return; }
+    loadMail.disabled = mailbox.disabled = true;
+    mailStatus.textContent = "正在核验邮箱与最近邮件，请稍候…";
+    try {
+      const result = (await run("mail_probe", { email }, (message) => {
+        mailStatus.textContent = message;
+      })).value;
+      mailStatus.textContent = result.body_readable
+        ? "验证通过：邮件列表和正文均可读取。勾选「我选择的邮箱」并保存运行设置后，所选邮箱才会参与采集。"
+        : "邮件查询正常，最近 24 小时无邮件；本次未验证正文。选定邮箱后可保存运行设置。";
+    } catch (error) {
+      mailStatus.textContent = "验证未通过：" + error.message;
+      throw error;
+    } finally { loadMail.disabled = mailbox.disabled = false; }
+  })));
+  testMail.disabled = !mailbox.value;
+  mailbox.onchange = () => {
+    testMail.disabled = !mailbox.value;
+    mailStatus.textContent = mailbox.value
+      ? "已选择 " + mailbox.value + "。可先验证读取，再保存运行设置。"
+      : "请选择本人邮箱。";
+  };
   const loadMail = btn("读取我的邮箱", (e) =>
     quiet(
-      withButton(e.currentTarget, async () => {
-        const emails = (await run("mailboxes")).value.emails,
-          old = mailbox.value;
-        mailbox.replaceChildren(
-          el("option", { value: "", text: "请选择本人邮箱" }),
-          ...emails.map((email) => el("option", { value: email, text: email })),
-        );
-        mailbox.value = emails.includes(old) ? old : "";
+      withButton(e.currentTarget, async (progress) => {
+        progress("正在读取本人邮箱…");
+        mailStatus.textContent = "正在读取当前钉钉身份的邮箱，请稍候…";
+        mailbox.disabled = testMail.disabled = true;
+        try {
+          const emails = (await run("mailboxes")).value.emails,
+            old = mailbox.value;
+          mailbox.replaceChildren(
+            el("option", { value: "", text: emails.length ? "请选择本人邮箱" : "当前账号未返回可用邮箱" }),
+            ...emails.map((email) => el("option", { value: email, text: email })),
+          );
+          // A single result is only preselected in this form, never saved or enabled implicitly.
+          mailbox.value = emails.includes(old) ? old : emails.length === 1 ? emails[0] : "";
+          mailStatus.textContent = !emails.length
+            ? "当前钉钉身份未返回可用邮箱，请确认在丰声 / 钉钉中已开通并绑定邮箱。"
+            : "已读取 " + emails.length + " 个邮箱。" + (mailbox.value
+              ? "当前选择：" + mailbox.value + "。可点击「验证邮件读取」。"
+              : "请选择要采集的邮箱，再验证邮件读取。");
+        } catch (error) {
+          mailStatus.textContent = "读取失败：" + error.message;
+          throw error;
+        } finally { mailbox.disabled = false; testMail.disabled = !mailbox.value; }
       }),
     ),
   );
@@ -2048,7 +2093,7 @@ function renderSetup(root) {
         ),
         formField(
           "采集邮箱",
-          el("div", { class: "actions" }, [mailbox, loadMail]),
+          el("div", {}, [el("div", { class: "actions" }, [mailbox, loadMail, testMail]), mailStatus]),
         ),
         el("h3", { text: "自动操作" }),
         switchBox,
@@ -2107,14 +2152,23 @@ function renderSetup(root) {
                     },
                     progress,
                   );
-                  scheduleState.textContent = result.value.scheduler_active
-                    ? "设置已保存，原生调度已验证。"
-                    : scheduleEnabled.checked
-                      ? "设置已保存；请完成下方首次定时接入。"
-                      : "设置已保存，自动生长已暂停。";
+                  const warnings = result.value.warnings || [];
+                  const saved =
+                    result.value.scheduler_active
+                      ? "设置已保存，原生调度已验证。"
+                      : scheduleEnabled.checked
+                        ? "设置已保存；请完成下方首次定时接入。"
+                        : "设置已保存，自动生长已暂停。";
                   boot = await api("/api/bootstrap");
                   refreshSetupInsight();
-                  scheduleState.textContent = boot.scheduler.message;
+                  // 未启用的来源要明确告知，但不能覆盖掉"已保存"本身。
+                  if (warnings.length) {
+                    scheduleState.textContent =
+                      saved + " 以下来源未启用（其余设置已生效）：" + warnings.join("；");
+                    toast("已保存，但有 " + warnings.length + " 个来源未启用");
+                  } else {
+                    scheduleState.textContent = saved + (boot.scheduler?.message ? " " + boot.scheduler.message : "");
+                  }
                 }),
               ),
             "primary",

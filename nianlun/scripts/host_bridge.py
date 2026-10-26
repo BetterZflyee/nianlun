@@ -1,4 +1,5 @@
 """Durable, scoped reasoning handoff. Answers are data, never execution approval."""
+import json
 import re
 from pathlib import Path
 from datetime import datetime, timezone
@@ -69,6 +70,48 @@ def pending(config_path, identifier=None):
             for item in [n.load(path)] if item.get('status')=='waiting_harness']
 
 
+CONTRACT_REQUIRED=('op','project','source_id','quote')
+
+
+def check_actions(value,item):
+    """Refuse an off-contract decision at submit time instead of failing later in plan.
+
+    A host that read a different skill version's contract used to be able to post
+    `action`/`project_ids` with no evidence at all; the run then stayed active and
+    locked every configuration change. Validate the shape (and, when the frozen
+    evidence is still on disk, the evidence itself) before accepting the answer.
+    """
+    raw=value.get('actions_json')
+    if raw in (None,''):return
+    if not isinstance(raw,str):raise n.Error('actions_json 必须是 JSON 字符串')
+    try:actions=json.loads(raw)
+    except ValueError as exc:raise n.Error('actions_json 不是合法 JSON：'+str(exc)[:80])
+    if not isinstance(actions,list):raise n.Error('actions_json 必须是动作数组')
+    if not actions:return
+    sources={}
+    evidence_path=Path(item.get('directory') or '')/'evidence.json'
+    if evidence_path.is_file():
+        try:
+            evidence=n.load(evidence_path)
+            sources={str(x.get('id')):str(x.get('text') or '') for x in evidence.get('sources',[])}
+        except (OSError,ValueError):sources={}
+    for index,action in enumerate(actions,1):
+        if not isinstance(action,dict):raise n.Error(f'第 {index} 个动作不是 JSON 对象')
+        if 'action' in action and 'op' not in action:
+            raise n.Error(f'第 {index} 个动作使用旧字段 action，当前契约要求 op，且必须同时给出 project、source_id、quote；'
+                          '请按 core/references/automation.md 的决策结构重写')
+        if action.get('op')=='noop':continue
+        missing=[key for key in CONTRACT_REQUIRED if not str(action.get(key) or '').strip()]
+        if missing:raise n.Error(f'第 {index} 个动作缺少必需字段：'+'、'.join(missing)+'（当前契约 op/project/source_id/quote 必填）')
+        if sources:
+            source_id=str(action['source_id'])
+            if source_id not in sources:
+                raise n.Error(f'第 {index} 个动作的 source_id 不在本轮证据中：'+source_id[:60])
+            quote=str(action['quote'])
+            if quote not in sources[source_id]:
+                raise n.Error(f'第 {index} 个动作的 quote 不是来源逐字摘录：'+quote[:60])
+
+
 def answer(config_path, identifier, value):
     root=queue_root(config_path)
     with file_lock(root/'queue.lock'):
@@ -76,6 +119,7 @@ def answer(config_path, identifier, value):
         config=n.load(config_path) if Path(config_path).exists() else {}
         if item.get('binding')!=n.digest(config):raise n.Error('配置已变化，请重新发起交接；旧回答未用于写入')
         validate(value,item['schema'])
+        check_actions(value,item)
         if item.get('status')=='answered':
             if item.get('answer')!=value:raise n.Error('此请求已经回答，不能覆盖原结果')
             return {'id':identifier,'status':'answered','reused':True}

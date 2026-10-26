@@ -28,9 +28,10 @@ def validate(config, evidence=None):
     kind = config.get('type')
     common = {'type', 'title', 'caption'}
     fields = {'status': {'items'}, 'graph': {'nodes', 'links'},
+              'matrix': {'stages', 'items'},
               'bar': {'categories', 'series', 'unit', 'source'},
               'line': {'categories', 'series', 'unit', 'source'}}
-    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、bar、line')
+    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、bar、line')
     if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
     def source(value):
@@ -49,6 +50,19 @@ def validate(config, evidence=None):
         for row in rows:
             item(row, {'label', 'detail', 'state', 'next', 'source'})
             if row.get('next') is not None and row.get('next')!='':text(row['next'], 100, 'next')
+    elif kind == 'matrix':
+        stages, rows = config.get('stages'), config.get('items')
+        if not isinstance(stages, list) or not 2 <= len(stages) <= 6: raise ValueError('矩阵须为 2 至 6 个阶段')
+        for name in stages:
+            text(name, 8, '阶段名')
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('矩阵须为 1 至 12 个对象')
+        for row in rows:
+            item(row, {'label', 'stage', 'state', 'detail', 'next', 'source'})
+            if row.get('stage') not in stages: raise ValueError('矩阵行的阶段须在 stages 中')
+            if row.get('detail') is not None: text(row['detail'], 60, 'detail')
+            if row.get('next') is not None and row['next'] != '': text(row['next'], 60, 'next')
+        # 统一按推进节奏排序：已完成/最接近完成的在前，筹备与未启动的在后；同阶段内保持原顺序。
+        config['items'] = sorted(rows, key=lambda r: stages.index(r['stage']), reverse=True)
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')
         if not isinstance(rows, list) or not 2 <= len(rows) <= 9: raise ValueError('关系图须为 2 至 9 个节点')
@@ -93,7 +107,7 @@ def parse(markdown, evidence=None):
         except (ValueError, TypeError, KeyError) as exc: raise ValueError('可视化格式：' + str(exc)) from exc
         token = 'NLVISUAL' + hashlib.sha256(match[0].encode()).hexdigest()[:20].upper() + str(len(blocks))
         blocks.append((token, config))
-        if len(blocks) > 3: raise ValueError('精简汇报最多 3 张图')
+        if len(blocks) > 6: raise ValueError('精简汇报最多 6 张图')
         return '\n\n' + token + '\n\n'
     return FENCE.sub(replace, markdown), blocks
 
@@ -178,7 +192,37 @@ def chart_svg(config):
 
 def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
-    if kind == 'status':
+    if kind == 'matrix':
+        stages = config['stages']
+        # 当前段填色与 RAG 灯同源：绿=正常（深绿已完成／中绿推进中）、琥珀=待核、红=受阻、灰=未启动
+        RAG = {'blocked': ('受阻', '#bc4941'), 'unknown': ('待核', '#c58a2e'),
+               'done': ('已完成', '#2f6350'), 'active': ('推进中', '#4a8a6a'), 'planned': ('未启动', '#a8b8ad')}
+        done_count = sum(1 for r in config['items'] if r['state'] == 'done')
+        total = len(config['items'])
+        out.append(f'<div class="rv-lanes"><p class="rv-lanes-cap">{done_count}/{total} 个对象已完成</p>')
+        for row in config['items']:
+            rag_name, rag_color = RAG.get(row['state'], ('—', '#a8b8ad'))
+            here = stages.index(row['stage'])
+            segs = []
+            for i, stage in enumerate(stages):
+                if i < here:
+                    segs.append(f'<span class="rv-seg rv-seg-past"><b>{escape(stage)}</b></span>')
+                elif i == here:
+                    segs.append(f'<span class="rv-seg rv-seg-now" style="--state:{rag_color}">'
+                                f'<b>{escape(stage)}</b></span>')
+                else:
+                    segs.append(f'<span class="rv-seg rv-seg-future"><b>{escape(stage)}</b></span>')
+            desc = escape(row.get('detail', ''))
+            next_step = ('<em>下一步：' + escape(row['next']) + '</em>') if row.get('next') else ''
+            out.append('<div class="rv-lane">'
+                       '<span class="rv-lane-name">'
+                       f'<span class="rv-rag" style="--rag:{rag_color}"></span>{escape(row["label"])}</span>'
+                       '<span class="rv-lane-track">' + ''.join(segs) + '</span>'
+                       f'<span class="rv-lane-state" style="--rag:{rag_color}">{rag_name}</span>'
+                       f'<span class="rv-lane-desc">{desc}{next_step} {refs(row["source"])}</span>'
+                       '</div>')
+        out.append('</div>')
+    elif kind == 'status':
         out.append('<div class="rv-status-grid">')
         for i, row in enumerate(config['items'], 1):
             label, color = STATES[row['state']]
@@ -189,7 +233,9 @@ def figure(config, uid):
         # JSON is escaped inert text, not executable script or an arbitrary option object.
         out.append('<div class="rv-spec" hidden>' + escape(json.dumps(config, ensure_ascii=False)) + '</div>')
         out.append('<div class="rv-interactive" role="img" aria-label="' + escape(config['title']) + '" hidden></div>')
-        if kind == 'graph':
+        if kind == 'matrix':
+            pass
+        elif kind == 'graph':
             out.append('<figure class="am-flow rv-static-graph">' + graph_svg(config, uid) + '</figure>')
             out.append('<details class="rv-data"><summary>节点说明与依据</summary><ul>')
             for node in config['nodes']:
@@ -234,10 +280,36 @@ def restore(html, blocks):
     return html
 
 
+def widen_wide_panels(html):
+    """矩阵等宽表必须横跨全部网格列，否则在分栏布局中被压成一团看不清。"""
+    if 'rv-matrix' not in html:return html
+    out=[];pos=0
+    for match in re.finditer(r'<section\b[^>]*class="[^"]*\bam-panel\b[^"]*"[^>]*>', html):
+        chunk=html[match.start():match.start()+40000]
+        end=chunk.find('</section>')
+        if end<0 or 'rv-matrix' not in chunk[:end]:continue
+        out.append(html[pos:match.start()])
+        tag=match.group(0)
+        # 保留原 class，追加内联栅格跨列 + 全宽标记
+        if 'grid-column' not in tag:
+            tag=tag[:-1]+' style="grid-column:1/-1;max-width:none" data-wide-panel="1">'
+        out.append(tag);pos=match.end()
+    if not out:return html
+    out.append(html[pos:])
+    return ''.join(out)
+
+
 def enhance(html):
-    if 'data-recap-visual=' not in html or 'id="rv-visual-style"' in html:return html
+    if 'data-recap-visual=' not in html:return html
     css=(ASSETS/'visual-blocks.css').read_text(encoding='utf-8')
-    html=html.replace('</head>','<style id="rv-visual-style">'+css+'</style></head>',1)
+    # 所选汇报技能可能自带同 id 的旧版样式；核心必须用本安装的版本覆盖，
+    # 否则新图形（矩阵条带等）会因为旧样式而完全失去排版。
+    style='<style id="rv-visual-style">'+css+'</style>'
+    if 'id="rv-visual-style"' in html:
+        html=re.sub(r'<style id="rv-visual-style">.*?</style>', lambda m: style, html, count=1, flags=re.S)
+    else:
+        html=html.replace('</head>',style+'</head>',1)
+    html=widen_wide_panels(html)
     if not re.search(r'data-recap-visual="(?:graph|bar|line)"',html):return html
     script=(ASSETS/'charts.bundle.js').read_text(encoding='utf-8')+'\n'+(ASSETS/'visual-blocks.js').read_text(encoding='utf-8')
     meta=re.search(r'<meta\b[^>]*http-equiv=["\']Content-Security-Policy["\'][^>]*>',html,re.I)

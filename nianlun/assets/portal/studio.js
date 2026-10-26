@@ -1129,6 +1129,7 @@ async function renderRuns23(root, generation) {
     "growth_status",
     "group_search",
     "mailboxes",
+    "mail_probe",
     "recovery_status",
     "cdbi_status",
     "cdbi_datasets",

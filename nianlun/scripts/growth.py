@@ -225,7 +225,7 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
         if errors:raise source_state.Incomplete('; '.join(errors),count)
         return count
     for name,fn in [('minutes',minutes),('mentions',mentions),('direct',direct),('groups',groups),
-                    ('mail',lambda:intake.mail(gw,settings,start,end,add,instant))]:
+                    ('mail',lambda:intake.mail(gw,settings,start,end,add,instant,progress))]:
         if name in allowed:section(name,fn)
     if 'lark_minutes' in allowed:
         section('lark_minutes',lambda:source_state.lark_minutes(settings,start,end,folder,add))
@@ -326,6 +326,35 @@ def project_for(bundle,a):
     return n.select_projects(bundle['tables'],[a.get('project','')])[0]
 
 
+# 语音转写常把场地编号听错。只收录已核实过的映射，其余未知编号一律打回，
+# 避免把错编号写进表格后污染里程碑、报告和记忆页。
+ASR_SITE_TRAPS={'752A':'755RA','755RD':'755RA','755RA-':'755RA'}
+SITE_CODE=re.compile(r'(?<![0-9A-Za-z])(\d{3}[A-Z]{1,3})(?![0-9A-Za-z])')
+
+
+def normalize_site_codes(bundle,action):
+    """Rewrite known ASR mishearings to the real site code; refuse unknown codes.
+
+    Codes come from the live site table, so a new venue needs no code change.
+    Only title/description are rewritten; quote stays verbatim because it is evidence.
+    """
+    codes={str(s.get('code') or '').strip().upper() for s in bundle.get('tables',{}).get('sites',[]) if s.get('code')}
+    if not codes:return action
+    known=', '.join(sorted(codes))
+    for field in ('title','description'):
+        value=action.get(field)
+        if not isinstance(value,str) or not value:continue
+        def fix(match):
+            found=match.group(1).upper()
+            if found in codes:return found
+            target=ASR_SITE_TRAPS.get(found)
+            if target and target in codes:return target
+            raise n.Error(f'{field} 里的场地编号「{found}」不在场地表中，请核对后重新提交。'
+                          f'当前表内编号：{known}')
+        action[field]=SITE_CODE.sub(fix,value)
+    return action
+
+
 def validate(config,bundle,decision):
     if decision.get('run_id')!=bundle['run_id'] or bundle['binding']!=n.digest(config):raise n.Error('运行或绑定已变化')
     if not isinstance(decision.get('summary'),str) or not decision['summary'].strip():raise n.Error('缺少本轮行文总结')
@@ -337,6 +366,7 @@ def validate(config,bundle,decision):
     for a in decision['actions']:
         s=evidence(bundle,a); p=project_for(bundle,a); op=a['op']; a=dict(a)
         if a['source_id'] in deferred:raise n.Error('尚未处理的来源不能同时生成写入动作')
+        normalize_site_codes(bundle,a)
         if op in ('create_record','update_status'):
             c={**a,'source':s}
             if op=='update_status':
@@ -694,6 +724,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
             import report_style
             progress('正在按所选汇报样式生成可视化报告')
             html=report_style.render(report_method,md,folder,p['title']+' · 阶段回顾',appendix_html=source_details,subtitle=since+' — '+until)
+        html=report_brief.citation_tooltips(html,source_index)
         n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
         progress('正在上传报告到已绑定的文件夹')
         receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)

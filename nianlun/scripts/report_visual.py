@@ -11,6 +11,9 @@ ASSETS = Path(__file__).resolve().parent.parent / 'assets' / 'report'
 def enhance(html):
     from report_layout import apply
     html = apply(html)
+    # 布局重排会重建 section 标签，宽表面板的跨列标记必须在其之后补上。
+    from report_blocks import widen_wide_panels
+    html = widen_wide_panels(html)
     if 'id="nianlun-path-3d"' in html:
         return html
     if not re.search(r'<figure\b[^>]*class=["\'][^"\']*\bam-flow\b', html):

@@ -34,13 +34,14 @@ import deepseek_report
 import deepseek_workflow
 import scheduler
 import project_actions
+import intake
 import nianlun as n
 from setup import Setup, default_home
 from workbench import Workbench, text
 from file_lock import file_lock
 
 ASSETS=n.SKILL/'assets/portal'
-READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
+READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snapshot','todos','memory_query','setup_probe','profiles','inspect','harness_status','capabilities','scheduler_request','growth_status','group_search','mailboxes','mail_probe','recovery_status','memory_project','cdbi_status','cdbi_datasets','cdbi_fields','cdbi_preview'}
 
 
 class Application:
@@ -65,7 +66,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.9.0','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':'2.9.1','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},
@@ -311,9 +312,11 @@ class Application:
         if op=='grow':
             return flow.grow(self.config,choice,lambda message:self.phase(jid,message),data.get('since'),data.get('until'),data.get('selection'))
         if op=='group_search':return project_actions.groups(n.load(self.config),data.get('query'))
-        if op=='mailboxes':
+        if op in ('mailboxes','mail_probe'):
             config,gw,_=self.work.connection()
-            return {'emails':[x['email'] for x in gw.call(['mail','mailbox','list']).get('emailAccounts',[]) if x.get('email')]}
+            if op=='mailboxes':return {'emails':intake.mailboxes(gw)}
+            end=datetime.now(n.time_zone(config))
+            return intake.mail_probe(gw,data.get('email'),end-timedelta(days=1),end,lambda message:self.phase(jid,message))
         if op=='send_report':
             config=n.load(self.config)
             with g.locked(config):return project_actions.send_report(config,data)
@@ -627,6 +630,46 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(400,{'error':str(exc)})
 
 
+def stable_token(runtime):
+    """Keep one long-lived local token so an already-open page survives a restart.
+
+    The token authorises this machine's own bound page only; it never leaves
+    127.0.0.1 and the file is 0600. Rotating it on every start would silently
+    break every open tab (the page falls back to its stored copy).
+    """
+    path=runtime/'token'
+    try:
+        value=path.read_text(encoding='utf-8').strip()
+        if len(value)>=32:return value
+    except OSError:pass
+    value=secrets.token_urlsafe(32)
+    n.save(path,value)
+    if os.name!='nt':
+        try:path.chmod(0o600)
+        except OSError:pass
+    return value
+
+
+def bind_server(requested, previous_url):
+    """Prefer the previous port so a restart keeps working page URLs alive."""
+    candidates=[]
+    if requested: candidates.append(requested)
+    else:
+        try:
+            port=urlsplit(previous_url).port
+            if port: candidates.append(port)
+        except ValueError:pass
+        candidates.append(0)
+    last=None
+    for port in candidates:
+        try:
+            return HTTPServer(('127.0.0.1',port),Handler)
+        except OSError as exc:
+            last=exc
+            if port==0: raise
+    raise n.Error('工作台上次使用的端口仍被占用，请关闭占用进程后重试：'+str(last))
+
+
 def main():
     parser=argparse.ArgumentParser(description='年轮本机工作台')
     parser.add_argument('--home',default=str(default_home()))
@@ -636,9 +679,11 @@ def main():
     args=parser.parse_args()
     app=Application(args.home,args.config)
     with file_lock(app.runtime/'server.lock'):
-        server=HTTPServer(('127.0.0.1',args.port),Handler);server.app=app;server.token=secrets.token_urlsafe(32)
-        url='http://127.0.0.1:'+str(server.server_port)+'/#'+server.token
         session=app.runtime/'session.json'
+        previous=n.load(session) if session.exists() else {}
+        server=bind_server(args.port,previous.get('url',''))
+        server.app=app;server.token=stable_token(app.runtime)
+        url='http://127.0.0.1:'+str(server.server_port)+'/#'+server.token
         n.save(session,{'url':url,'pid':os.getpid(),'started_at':datetime.now().astimezone().isoformat()})
         if os.name!='nt':session.chmod(0o600)
         print('年轮工作台已启动：http://127.0.0.1:'+str(server.server_port),flush=True)

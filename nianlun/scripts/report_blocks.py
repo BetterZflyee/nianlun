@@ -349,19 +349,22 @@ def _gantt_span(config):
     if not dates:
         today = datetime.date.today()
         return today - datetime.timedelta(days=7), today + datetime.timedelta(days=14), list(config.get('milestones') or [])
-    first = min(dates) - datetime.timedelta(days=2)
-    core = max(dates) + datetime.timedelta(days=3)
-    # 里程碑分两类：紧邻数据窗口的纳入焦点窗（否则会被画到轴外、与左列重叠），
-    # 明显滞后的远期节点放在轴外右侧，避免为它把整条轴拉长
+    # 甘特图要呈现「项目从开始至今」的完整历程，不是近两三周的节点窗。
+    # 起点 = 最早数据/里程碑；终点 = 今天（报告基准日），只有未来的里程碑才放到轴外。
+    today = datetime.date.fromisoformat(config['today']) if config.get('today') else max(dates)
+    start_candidates = list(dates)
+    marks = config.get('milestones') or []
+    for m in marks:
+        start_candidates.append(datetime.date.fromisoformat(m['date']))
+    first = min(start_candidates)
     near, far = [], []
-    for m in (config.get('milestones') or []):
+    for m in marks:
         md = datetime.date.fromisoformat(m['date'])
-        if first - datetime.timedelta(days=10) <= md <= core + datetime.timedelta(days=10):
-            near.append(m)
-            first = min(first, md - datetime.timedelta(days=1))
-            core = max(core, md + datetime.timedelta(days=1))
-        else:
-            far.append(m)
+        # 今天及以前的里程碑全部上图；晚于今天的属于「未来排期」，放轴外右侧
+        (near if md <= today else far).append(m)
+    # 轴向右留 2 天余量给「今天」，向左留 1 天让最早节点不贴边
+    first = first - datetime.timedelta(days=1)
+    core = max(today, max(dates)) + datetime.timedelta(days=4)   # 右侧留白放得下末端标签
     return first, core, far
 
 
@@ -387,6 +390,30 @@ def gantt_html(config, uid):
     else:
         tick = max(1, total // 14)
 
+    # 先排候选标签，再做避让：月初标签优先，与相邻标签过近时让掉间距不足的那个，
+    # 否则 9/30 与 10/1 会挨在一起显示成「300/1」
+    cand = []
+    cursor, idx = first, 0
+    while cursor <= last:
+        month_start = (cursor.day == 1 or idx == 0)
+        if month_start:
+            cand.append((cursor, f'{cursor.month}/{cursor.day}', 2, idx))
+        elif idx % tick == 0:
+            cand.append((cursor, str(cursor.day), 1, idx))
+        cursor += datetime.timedelta(days=1)
+        idx += 1
+    # 贪心：按位置从左到右，与前一个保留标签距离 < 6% 时，优先级低的让位
+    kept = []   # (pos, pri, idx, lbl)
+    for d, lbl, pri, i in sorted(cand, key=lambda x: pct(x[0])):
+        pos = pct(d)
+        if kept:
+            prev_pos, prev_pri = kept[-1][0], kept[-1][1]
+            if pos - prev_pos < 6.0:
+                if pri <= prev_pri:
+                    continue
+                kept.pop()          # 月初更重要，替换掉前一个刻度
+        kept.append((pos, pri, i, lbl))
+    lbl_map = {k[2]: (k[3], k[0]) for k in kept}
     head = ['<div class="gt-days">']
     cursor, idx = first, 0
     while cursor <= last:
@@ -395,15 +422,8 @@ def gantt_html(config, uid):
             cls += ' gt-day--weekend'
         if today and cursor == today:
             cls += ' gt-day--today'
-        # 月初与首日一定标月份，其余按刻度标日，便于跨月阅读
-        if cursor.day == 1 or idx == 0:
-            lbl = f'{cursor.month}/{cursor.day}'
-        elif idx % tick == 0:
-            lbl = str(cursor.day)
-        else:
-            lbl = ''
-        if lbl:
-            pos = pct(cursor)
+        if idx in lbl_map:
+            lbl, pos = lbl_map[idx]
             edge = ' gt-day--edge-l' if pos < 4 else (' gt-day--edge-r' if pos > 96 else '')
             head.append(f'<span class="{cls}{edge}" style="left:{pos:.4f}%">{lbl}</span>')
         else:
@@ -487,7 +507,7 @@ def gantt_html(config, uid):
                         abs(pct(datetime.date.fromisoformat(sg['to'])) - x) < 0.6
                         for sg in segs
                     )
-                    side = '' if (on_bar_right or x <= 76) else 'gt-pt-lbl--left'
+                    side = 'gt-pt-lbl--left' if (x > 88 or (not on_bar_right and x > 76)) else ''
                     body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
                                 f'<i class="gt-pt-lbl-t">{lbl}</i><b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
@@ -528,8 +548,14 @@ def gantt_html(config, uid):
         # 0.62 是按 1440px（track≈900px）的标定值；取 1.0 作折中，
         # 让 761-1000 的平板带（track≈500-760px）也不叠字，代价是宽屏偶尔多分一层
         half = max(3.2, len(m['label']) * 1.0)
+        today_pos = pct(today) if today else None
         lane = 0
         while True:
+            # 「今天」胶囊固定占 lane 0 的对应位置，里程碑与之重叠时错到下一层
+            if (today_pos is not None and lane == 0
+                    and abs(pos - today_pos) < max(half, 6.0)):
+                lane += 1
+                continue
             clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)
                         for l, lp, rp in placed)
             if not clash:

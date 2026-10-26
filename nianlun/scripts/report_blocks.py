@@ -545,7 +545,7 @@ def figure(config, uid):
             out.append('<figure class="am-flow rv-static-graph">' + graph_svg(config, uid) + '</figure>')
             out.append('<details class="rv-data"><summary>节点说明与依据</summary><ul>')
             for node in config['nodes']:
-                out.append('<li><b>' + escape(node['label']) + '</b> · ' + escape(node['detail']) + ' ' + refs(node['source']) + '</li>')
+                out.append('<li><b>' + escape(node['label']) + '</b> · ' + escape(node.get('detail','')) + ' ' + refs(node.get('source','')) + '</li>')
             for link in config['links']:
                 labels = {n['id']: n['label'] for n in config['nodes']}
                 out.append('<li>' + escape(labels[link['from']] + ' → ' + labels[link['to']] + ' · ' + link['label']) + ' ' + refs(link['source']) + '</li>')

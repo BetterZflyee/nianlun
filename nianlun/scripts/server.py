@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import secrets
+import signal
 import subprocess
 import sys
 import threading
@@ -650,6 +651,20 @@ def stable_token(runtime):
     return value
 
 
+def persistent_port(runtime):
+    """Remember the listening port across restarts.
+
+    session.json is removed on shutdown (it holds a live page URL), so the port
+    needs its own file; otherwise every restart lands on a random port and breaks
+    a bookmarked address.
+    """
+    try:
+        value=int((runtime/'port').read_text(encoding='utf-8').strip())
+        if 1024<value<65536:return value
+    except (OSError,ValueError):pass
+    return 0
+
+
 def bind_server(requested, previous_url):
     """Prefer the previous port so a restart keeps working page URLs alive."""
     candidates=[]
@@ -662,11 +677,23 @@ def bind_server(requested, previous_url):
         candidates.append(0)
     last=None
     for port in candidates:
-        try:
-            return HTTPServer(('127.0.0.1',port),Handler)
-        except OSError as exc:
-            last=exc
-            if port==0: raise
+        # allow_reuse_address is off on purpose (a local port must not be shared), so a
+        # just-killed predecessor can hold the port in TIME_WAIT for a moment. Wait a
+        # short while instead of silently moving to a random port and breaking bookmarks.
+        # Rebinding the SAME port after a restart is a benign case: TIME_WAIT sockets
+        # from the previous process would otherwise force a random port and break the
+        # user's bookmark. Reuse is enabled only for that path, never for a fresh port,
+        # and the page still needs the bearer token plus a matching Host/Origin.
+        HTTPServer.allow_reuse_address=bool(port)
+        deadline=time.time()+(8 if port else 0)
+        while True:
+            try:
+                return HTTPServer(('127.0.0.1',port),Handler)
+            except OSError as exc:
+                last=exc
+                if port==0:raise
+                if time.time()>=deadline:break
+                time.sleep(.35)
     raise n.Error('工作台上次使用的端口仍被占用，请关闭占用进程后重试：'+str(last))
 
 
@@ -677,12 +704,25 @@ def main():
     parser.add_argument('--port',type=int,default=0)
     parser.add_argument('--no-open',action='store_true')
     args=parser.parse_args()
+    # SIGTERM must unwind through the finally block below, otherwise the listening
+    # socket survives the process long enough to force a different port next start.
+    try:
+        signal.signal(signal.SIGTERM,lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    except (ValueError,OSError):pass
     app=Application(args.home,args.config)
     with file_lock(app.runtime/'server.lock'):
         session=app.runtime/'session.json'
         previous=n.load(session) if session.exists() else {}
-        server=bind_server(args.port,previous.get('url',''))
+        remembered=previous.get('url','') if previous else ''
+        preferred=args.port
+        if not preferred:
+            try:
+                preferred=urlsplit(remembered).port or 0 if remembered else 0
+            except ValueError:preferred=0
+            if not preferred:preferred=persistent_port(app.runtime)
+        server=bind_server(preferred,'' if preferred else remembered)
         server.app=app;server.token=stable_token(app.runtime)
+        n.save(app.runtime/'port',str(server.server_port))
         url='http://127.0.0.1:'+str(server.server_port)+'/#'+server.token
         n.save(session,{'url':url,'pid':os.getpid(),'started_at':datetime.now().astimezone().isoformat()})
         if os.name!='nt':session.chmod(0o600)
@@ -691,7 +731,12 @@ def main():
         if not args.no_open:webbrowser.open(url)
         try:server.serve_forever(poll_interval=.5)
         except KeyboardInterrupt:pass
-        finally:server.server_close();session.unlink(missing_ok=True)
+        finally:
+            server.server_close()
+            # Keep the address for the next start; only clear the live flag.
+            try:
+                if session.exists():n.save(session,{**n.load(session),'running':False})
+            except (OSError,ValueError):pass
 
 
 if __name__=='__main__':main()

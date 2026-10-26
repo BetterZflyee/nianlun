@@ -535,6 +535,14 @@ def main():
     p = sub.add_parser('plan', help='核对 AI 提炼候选并生成写入计划，不写表')
     p.add_argument('--input', required=True)
     p.add_argument('--out', required=True)
+    sf = sub.add_parser('fact', help='把口头告知的场地进度写入表格（默认只演算，加 --yes 才写）')
+    sf.add_argument('--site', required=True, help='场地名称或编号，如 武汉吴家山 或 027W')
+    sf.add_argument('--status', required=True, help='目标场地状态，如 已验收')
+    sf.add_argument('--note', default='', help='补充说明，写入记录详情')
+    sf.add_argument('--source', default='用户口述', help='事实来源描述')
+    sf.add_argument('--evidence', default='', help='用户原话摘录')
+    sf.add_argument('--project', help='同名场地跨项目时用于消歧的项目名关键词')
+    sf.add_argument('--yes', action='store_true', help='确认写入；不加则只返回演算结果')
     a = sub.add_parser('apply', help='执行明确授权的计划并逐项回读')
     a.add_argument('--plan', required=True)
     a.add_argument('--receipt', required=True)
@@ -572,6 +580,12 @@ def main():
                     save(args.out, document)
                     result = {'plan': str(Path(args.out).resolve()), 'count': len(document['actions']), 'remote_mutations': 0,
                               'preview': [{k:v for k,v in a.items() if k not in ('cells', 'marker')} for a in document['actions']]}
+                elif args.command == 'fact':
+                    from sitefact import site_fact
+                    result = site_fact(config, client, state, args.site, args.status,
+                                       note=args.note, source=args.source,
+                                       evidence=args.evidence, project=args.project,
+                                       yes=args.yes)
                 elif args.command == 'report':
                     datetime.strptime(args.since, '%Y-%m-%d')
                     datetime.strptime(args.until, '%Y-%m-%d')

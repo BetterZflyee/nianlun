@@ -86,6 +86,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                     '当本轮较新原文明确证明某个既有问题已解决，使用 update_status 关闭那条记录为已解决，保留其历史描述；不要另建一条解决记录。'
                     '关闭必须唯一匹配同项目同事项，并逐字引用解决证据；仅安排、预计、讨论或含糊的已完成不可关闭。多个同名事项无法区分时保留 pending。'
                     'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'
+                    '引用原文里的对话或短语时使用中文引号「」，不要在 JSON 字符串内写 ASCII 双引号，否则会破坏结构。'
                     'source_id 必须逐字复制本轮证据 sources 里的 id 字段；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
                     '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False)+
                     '\n本轮完整证据：'+evidence+'\n独立记忆空间查询结果：'+json.dumps(memories,ensure_ascii=False))

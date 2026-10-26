@@ -415,6 +415,32 @@ def custom_reason(prompt,directory,preferred=None,schema=None,timeout=900):
     return structured_answer(text)
 
 
+def repair_json_quotes(text):
+    """修复 JSON 字符串内部的裸双引号：内容里引述原话时模型常直接写 ASCII 双引号，
+    会让整段 JSON 断在中间。判定规则——字符串内的 " 后若紧跟 , : } ] 或结束才是收尾，
+    否则视为内容引号并转义。"""
+    if not isinstance(text,str):return text
+    out=[];inside=False;escaped=False;index=0
+    while index<len(text):
+        char=text[index]
+        if escaped:out.append(char);escaped=False;index+=1;continue
+        if char=='\\':out.append(char);escaped=True;index+=1;continue
+        if char=='"':
+            if not inside:
+                inside=True;out.append(char)
+            else:
+                look=index+1
+                while look<len(text) and text[look] in ' \t\r\n':look+=1
+                following=text[look] if look<len(text) else ''
+                if following in (',',':','}',']','') :
+                    inside=False;out.append(char)
+                else:
+                    out.append('\\"')
+            index+=1;continue
+        out.append(char);index+=1
+    return ''.join(out)
+
+
 def json_from_text(raw):
     """从一段文本里取出 JSON 对象：容忍代码围栏、前后解释和多余空行。"""
     if not isinstance(raw,str):return None
@@ -425,7 +451,11 @@ def json_from_text(raw):
     try:
         value=json.loads(text)
         if isinstance(value,dict):return value
-    except ValueError:pass
+    except ValueError:
+        try:
+            value=json.loads(repair_json_quotes(text))
+            if isinstance(value,dict):return value
+        except ValueError:pass
     start,end=text.find('{'),text.rfind('}')
     if start>=0 and end>start:
         try:

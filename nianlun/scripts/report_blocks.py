@@ -33,6 +33,15 @@ def validate(config, evidence=None):
               'gantt': {'start', 'end', 'today', 'milestones', 'rows'},
               'bar': {'categories', 'series', 'unit', 'source'},
               'line': {'categories', 'series', 'unit', 'source'}}
+    # 写作模型常凭语义写出 flow、timeline、流程图等写法，语义等同关系图：归一化而不打断成稿。
+    if isinstance(kind,str):
+        compact=kind.replace(' ','').replace('_','').replace('-','').replace('/','').casefold()
+        aliases={'flow':'graph','flowlr':'graph','flowtb':'graph','timeline':'graph','process':'graph',
+                 '关系图':'graph','流程图':'graph','状态':'status','进度':'status','矩阵':'matrix',
+                 '柱状图':'bar','折线图':'line','趋势':'line','甘特图':'gantt','时间轴':'gantt'}
+        key=compact if compact in aliases else compact.split('｜')[0]
+        if key in aliases:
+            kind=aliases[key]; config=dict(config); config['type']=kind
     if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、gantt、bar、line')
     if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
@@ -42,9 +51,12 @@ def validate(config, evidence=None):
         if not refs: raise ValueError('图形须使用 [R1] 等给定依据编号')
         if evidence is not None and set(refs) - {x['key'] for x in evidence}:
             raise ValueError('图形包含不存在的依据编号')
-    def item(row, allowed):
+    def item(row, allowed, state_optional=False, require_source=True):
         if not isinstance(row, dict) or set(row) - allowed: raise ValueError('图形条目字段不合法')
-        text(row.get('label'), 26, 'label'); text(row.get('detail'), 100, 'detail'); source(row.get('source'))
+        text(row.get('label'), 26, 'label'); text(row.get('detail'), 100, 'detail')
+        if require_source: source(row.get('source'))
+        elif row.get('source'): source(row.get('source'))
+        if state_optional and not row.get('state'): row['state']='active'
         if row.get('state') not in STATES: raise ValueError('状态只能为 done、active、blocked、planned、unknown')
     if kind == 'status':
         rows = config.get('items')
@@ -59,7 +71,7 @@ def validate(config, evidence=None):
             text(name, 8, '阶段名')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('矩阵须为 1 至 12 个对象')
         for row in rows:
-            item(row, {'label', 'stage', 'state', 'detail', 'next', 'source'})
+            item(row, {'label', 'stage', 'state', 'detail', 'next', 'source'}, state_optional=True)
             if row.get('stage') not in stages: raise ValueError('矩阵行的阶段须在 stages 中')
             if row.get('detail') is not None: text(row['detail'], 60, 'detail')
             if row.get('next') is not None and row['next'] != '': text(row['next'], 60, 'next')
@@ -89,7 +101,7 @@ def validate(config, evidence=None):
         rows = config.get('rows')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('甘特图须为 1 至 12 个对象')
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {'label', 'state', 'segments', 'points', 'source'}:
+            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source'}:
                 raise ValueError('甘特行字段不合法')
             text(row.get('label'), 26, 'label'); source(row.get('source'))
             if row.get('state') not in STATES: raise ValueError('甘特行状态不合法')
@@ -115,7 +127,7 @@ def validate(config, evidence=None):
         if not isinstance(links, list) or not 1 <= len(links) <= 9: raise ValueError('关系图须为 1 至 9 条有依据的连线')
         ids = set(); layers = {}
         for row in rows:
-            item(row, {'id', 'label', 'detail', 'state', 'layer', 'source'})
+            item(row, {'id', 'label', 'detail', 'state', 'layer', 'source'}, require_source=False)
             if not isinstance(row.get('id'), str) or not re.fullmatch(r'[a-zA-Z][\w-]{0,20}', row['id']): raise ValueError('节点 id 不合法')
             if row['id'] in ids: raise ValueError('节点 id 重复')
             ids.add(row['id'])
@@ -123,6 +135,7 @@ def validate(config, evidence=None):
             if type(layer) is not int or layer not in (0, 1, 2): raise ValueError('layer 须为 0、1 或 2')
             layers[layer] = layers.get(layer, 0) + 1
         if max(layers.values()) > 3: raise ValueError('每列最多 3 个节点')
+        if not any(row.get('source') for row in rows) and not any(isinstance(link,dict) and link.get('source') for link in (links or [])): raise ValueError('关系图至少需要一个节点或连线标注依据编号')
         seen = set()
         by_id={n['id']:n for n in rows}
         for edge in links:
@@ -324,22 +337,31 @@ def _gantt_span(config):
     if config.get('today'):
         dates.append(datetime.date.fromisoformat(config['today']))
     if config.get('start') and config.get('end'):
-        return datetime.date.fromisoformat(config['start']), datetime.date.fromisoformat(config['end'])
+        return (datetime.date.fromisoformat(config['start']),
+                datetime.date.fromisoformat(config['end']), [])
     if not dates:
         today = datetime.date.today()
-        return today - datetime.timedelta(days=7), today + datetime.timedelta(days=21)
-    return min(dates) - datetime.timedelta(days=2), max(dates) + datetime.timedelta(days=3)
+        return today - datetime.timedelta(days=7), today + datetime.timedelta(days=14), list(config.get('milestones') or [])
+    first = min(dates) - datetime.timedelta(days=2)
+    core = max(dates) + datetime.timedelta(days=3)
+    # 远期里程碑（超出焦点窗）不撑长轴线，改在轴外右侧标注，避免整图大面积留白
+    near, far = [], []
+    for m in (config.get('milestones') or []):
+        (near if datetime.date.fromisoformat(m['date']) <= core else far).append(m)
+    return first, core, far
 
 
 def gantt_html(config, uid):
     """时间轴甘特（HTML 版）：日期刻度 + 行泳道 + 节点/区间 + 里程碑 + 今天线，可交互。"""
-    first, last = _gantt_span(config)
+    first, last, far_marks = _gantt_span(config)
     total = max(1, (last - first).days)
     def pct(d):
         return (d - first).days / total * 100.0
     today = datetime.date.fromisoformat(config['today']) if config.get('today') else None
     rows = config['rows']
-    marks = config.get('milestones') or []
+    near_set = {m['date'] + m['label'] for m in (config.get('milestones') or [])}
+    far_set = {m['date'] + m['label'] for m in far_marks}
+    marks = [m for m in (config.get('milestones') or []) if (m['date'] + m['label']) not in far_set]
 
     # 日期刻度：按跨度自动选密度，避免拥挤
     tick = 1
@@ -392,6 +414,8 @@ def gantt_html(config, uid):
                     '<span class="gt-cell">'
                     f'<span class="gt-dot" style="background:{tone_line}"></span>'
                     f'<span class="gt-name" title="{escape(row["label"])}">{escape(row["label"])}</span>'
+                    f'<em class="gt-stage" style="color:{tone_line};border-color:{tone_line}">'
+                    f'{escape(row.get("stage") or {"done":"已完成","active":"推进中","blocked":"受阻","planned":"未启动","unknown":"待核"}.get(state,""))}</em>'
                     f'{refs(row["source"])}'
                     '</span>')
         body.append('<span class="gt-track">')
@@ -453,13 +477,20 @@ def gantt_html(config, uid):
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'
                       f'<i></i><b>今天 {today.month}-{today.day}</b></span>')
 
+    far_html = ''
+    if far_marks:
+        chips = ''.join(f'<span class="gt-far"><b>{escape(m["label"])}</b><em>'
+                        f'{datetime.date.fromisoformat(m["date"]).month}-'
+                        f'{datetime.date.fromisoformat(m["date"]).day}</em></span>'
+                        for m in sorted(far_marks, key=lambda x: x['date']))
+        far_html = '<div class="gt-far-bar"><span class="gt-far-lbl">之后</span>' + chips + '</div>'
     today_var = f'--today-x:{pct(today):.4f}%' if today else '--today-x:100%'
     return (f'<div class="gt" style="{today_var}">'
             f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + ''.join(body) +
-            '</div></div>'
+            '</div></div>' + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')
 

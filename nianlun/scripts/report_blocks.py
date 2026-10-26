@@ -351,10 +351,17 @@ def _gantt_span(config):
         return today - datetime.timedelta(days=7), today + datetime.timedelta(days=14), list(config.get('milestones') or [])
     first = min(dates) - datetime.timedelta(days=2)
     core = max(dates) + datetime.timedelta(days=3)
-    # 远期里程碑（超出焦点窗）不撑长轴线，改在轴外右侧标注，避免整图大面积留白
+    # 里程碑分两类：紧邻数据窗口的纳入焦点窗（否则会被画到轴外、与左列重叠），
+    # 明显滞后的远期节点放在轴外右侧，避免为它把整条轴拉长
     near, far = [], []
     for m in (config.get('milestones') or []):
-        (near if datetime.date.fromisoformat(m['date']) <= core else far).append(m)
+        md = datetime.date.fromisoformat(m['date'])
+        if first - datetime.timedelta(days=10) <= md <= core + datetime.timedelta(days=10):
+            near.append(m)
+            first = min(first, md - datetime.timedelta(days=1))
+            core = max(core, md + datetime.timedelta(days=1))
+        else:
+            far.append(m)
     return first, core, far
 
 
@@ -472,9 +479,16 @@ def gantt_html(config, uid):
                     body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
                                 f'<i class="gt-pt-lbl-t">{lbl}</i><b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
-            # 数据缺口本身是结论：用虚线框显式标出"这里本应有信息但没有"
-            body.append('<span class="gt-gap"></span>'
-                        '<span class="gt-empty">本期无记录 · 需补进场与进度日期</span>')
+            # 有 note 时用 note 当行内说明（信息量远大于「无记录」）；
+            # 真的一条记录都没有，才用缺口框显式标注，让缺口可被追问
+            inline = (row.get('note') or '').strip()
+            if inline:
+                short = inline if len(inline) <= 26 else inline[:25] + '…'
+                body.append(f'<span class="gt-gap"></span>'
+                            f'<span class="gt-empty">{escape(short)}</span>')
+            else:
+                body.append('<span class="gt-gap"></span>'
+                            '<span class="gt-empty">本期无记录 · 需补进场与进度日期</span>')
         body.append('</span></summary>')
         note = escape(row.get('note') or '')
         if note or detail:
@@ -511,8 +525,8 @@ def gantt_html(config, uid):
         lanes_used = max(lanes_used, lane + 1)
         marks_html.append(f'<span class="gt-mark" style="left:{pos:.4f}%;--lane:{lane}" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
-                          f'<i></i><b>{escape(m["label"])}</b>'
-                          f'<em>{d.month}-{d.day}</em></span>')
+                          f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
+                          f'<em>{d.month}-{d.day}</em></span></span>')
     mark_height = 12 + lanes_used * 15
     today_html = ''
     if today:
@@ -524,7 +538,7 @@ def gantt_html(config, uid):
               '<span><i style="background:repeating-linear-gradient(45deg,#8A9199 0 1.5px,#fff 1.5px 6px)"></i>斜纹＝计划窗口</span>'
               '<span><i class="k-node" style="background:#2F6350"></i>圆点＝节点</span>'
               '<span><i class="k-stall" style="background:#E41E2C"></i>菱形＝停滞</span>'
-              '<span><i style="border:1px dashed #D5DADF"></i>虚线框＝无记录</span>'
+              '<span><i style="border:1px dashed #D5DADF"></i>虚线框＝无日期节点（说明取自记录）</span>'
               '</div>')
     far_html = ''
     if far_marks:

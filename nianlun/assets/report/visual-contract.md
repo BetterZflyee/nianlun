@@ -1,16 +1,35 @@
-## 图文回顾契约 v1.6
+## 图文回顾契约 v1.7
 
 先用 1–2 句说明本期判断；每个面板至少 1 张主图，全文 2–6 张。每张图前后只解释“为什么值得关注”，不重复图中文字。一个面板一张主图。禁止把整份资料或全部历史记录做成密集关系图。
 
 所有图均使用 ```visual 围栏，内容为 JSON；程序负责安全渲染、ECharts 交互与 Three.js 立体查看。禁止输出 HTML、脚本、CSS、ECharts option 或外链。图中每项必须引用输入实际存在的材料编号；下面编号仅为格式示例。
 
-### 进度矩阵（多对象/多场地首选，用于森林层）
+### 进度矩阵（多对象但**没有日期**时用；有日期优先用下面的时间轴甘特）
 
 ```visual
 {"type":"matrix","title":"四场地推进梯队","caption":"两个场地在试运行，验收与安装各一，进度梯度清晰。","stages":["筹备","安装","试运行","验收"],"items":[{"label":"武汉吴家山","stage":"验收","state":"done","detail":"验收议程待售前参与。","next":"排定验收时间。","source":"[S3][R13]"},{"label":"西安汉唐","stage":"试运行","state":"blocked","detail":"调试受映射表缺失阻塞。","next":"补齐映射表。","source":"[S2][R19]"}]}
 ```
 
 stages 2–6 个真实阶段名，按推进先后排列；items 1–12 行，**必须按阶段由后往前排序**（已完成/最接近完成的在前，筹备与未启动的在后，同阶段按重要性），程序会兜底按 stages 顺序重排。stage 必须是 stages 之一，state 用 done/active/blocked/planned/unknown。detail ≤60 字、next ≤60 字可省略。用于让读者一屏看清多对象分布梯度与卡点位置，不要用它替代后续分项论证。
+
+### 时间轴甘特（多对象且各自有日期节点时**首选**，用于森林层与节奏面板）
+
+多个对象各自有里程碑、验收日、试运行或安装窗口时，用 gantt：按日期定位、可按状态筛选、点击任意行展开明细。
+
+```visual
+{"type":"gantt","title":"四场地验收节奏","caption":"南昌与武汉同日落定验收，成都验证在即，汉唐记录停滞。","today":"2026-10-26","milestones":[{"date":"2026-10-15","label":"靠卡验收指标","source":"[M2]"},{"date":"2026-10-18","label":"二期028W试运行","source":"[M6]"}],"rows":[{"label":"南昌 · 791X","state":"done","stage":"已验收","segments":[],"points":[{"date":"2026-10-26","label":"验收完成","state":"done"}],"source":"[S6][R4]","note":"已完结，转入运维观察。"},{"label":"武汉 · 027W","state":"done","stage":"已验收","segments":[{"from":"2026-10-21","to":"2026-10-26","label":"验收推进","kind":"actual"}],"points":[{"date":"2026-10-26","label":"验收定型报告","state":"done"}],"source":"[S3][R68]","note":"定型报告已出具，待确认移交责任人。"}]}
+```
+
+字段说明：
+- `rows[].label` 对象名；`state` 取 done/active/blocked/planned/unknown，决定行首圆点颜色与 KPI 分桶
+- `rows[].stage` 当前所处阶段（中文，如 筹备/安装/试运行/已验收），作为行内徽标显示；缺省时按 state 推导
+- `rows[].segments[{from,to,label,state,kind}]` 时间区间；`kind` 只能是 `actual`（已发生，实心）或 `plan`（计划窗口，斜纹）
+- `rows[].points[{date,label,state}]` 单点节点（验收完成、现场验证、调试停滞等）；`state` 为 blocked 时画成菱形
+- `rows[].note` 图上推不出的判断、卡点或下一步，点击展开后显示；不写图内已有信息
+- `milestones[{date,label,source}]` 项目级里程碑，画在时间轴上方并自动分层避让
+- `today` 本期基准日，画为「今天」竖线与胶囊
+
+约束：没有可靠起止日期就不要编造 segments，只画 points；缺数据的对象把缺口写进 note，不要为填满而虚构区间。`start`/`end` 可省略，程序按数据自动取窗口。停留态（如调试停滞）是状态不是工期，不要画成区间。
 
 ### 状态对照（无数值时优先）
 

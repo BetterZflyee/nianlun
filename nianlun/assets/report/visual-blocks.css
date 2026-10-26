@@ -380,3 +380,26 @@
   .gt-filter{gap:5px;margin:-10px 0 14px 0}
   .gt-filter label{font-size:10.5px;padding:4px 9px}
 }
+
+/* 森林层的图会落在深色 hero 内：给图自身白色卡片底，否则深底深字不可读 */
+.nl-report .am-head .rv-visual{
+  background:#fff;border-radius:14px;padding:20px 22px;margin-top:20px;
+  box-shadow:0 1px 3px rgba(0,0,0,.18);color:#1D1D1F}
+.nl-report .am-head .rv-visual figcaption strong{color:#1D1D1F}
+.nl-report .am-head .rv-visual figcaption span{color:#5B6167}
+.nl-report .am-head .rv-gantt{--g-ink:#1D1D1F;--g-ink2:#5B6167;--g-ink3:#6E757C}
+.nl-report .am-head .rv-gantt .gt-hint{color:#8A9199}
+@media (max-width:760px){
+  .nl-report .am-head .rv-visual{padding:14px 12px;border-radius:10px;margin-top:14px}
+}
+
+/* 里程碑：名称与日期同一行，整块只占一个 lane 高度，不再压到刻度行 */
+.gt-mark{flex-direction:row;align-items:center;gap:5px}
+.gt-mark-t{display:inline-flex;align-items:baseline;gap:4px}
+.gt-mark em{font-size:10px;white-space:nowrap}
+.gt-mark i{margin-right:1px}
+@media (max-width:900px){
+  /* 窄屏只留日期时保持竖排，避免行内挤 */
+  .gt-mark{flex-direction:column;align-items:center}
+  .gt-mark-t{flex-direction:column;gap:0}
+}

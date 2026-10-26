@@ -1,6 +1,7 @@
 """Host adapters: reuse host authentication; keep business policy outside the model."""
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -162,7 +163,7 @@ PROVIDERS={
     'codex':{'name':'Codex','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':True,'timer':'native_verified'},
     'claude':{'name':'Claude Code','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':False,'timer':'host_managed'},
     'workbuddy':{'name':'WorkBuddy','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
-    'deepseek':{'name':'DeepSeek Harness','modes':['delegated'],'reasoning':False,'embedded_workflow':True,'timer':'host_managed'},
+    'deepseek':{'name':'DeepSeek Harness','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':True,'timer':'host_managed'},
     'generic':{'name':'其他 AI 宿主','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
 }
 
@@ -211,6 +212,12 @@ def find_claude(preferred=None):
 def status(preferred=None):
     choice=normalize(preferred);meta=describe(choice)
     if choice['provider']=='deepseek':
+        if choice['mode']=='cli':
+            binary=find_dsh(choice.get('binary'))
+            if not binary:return {**meta,'available':False,'logged_in':False,'message':'未找到 dsh 命令，请安装 DeepSeek Harness CLI 或改用宿主接续'}
+            key=dsh_api_key()
+            return {**meta,'available':True,'logged_in':bool(key),'binary':binary,
+                'message':'DeepSeek Harness headless 已就绪，推理由本机 dsh 执行' if key else '请在 dsh 中配置模型凭据（SF_LLM_API_KEY）'}
         import deepseek_report
         return {**meta,**deepseek_report.status(choice.get('binary'))}
     if choice['mode']=='delegated':
@@ -251,6 +258,132 @@ def claude_reason(prompt,directory,binary,schema,timeout):
     except (ValueError,AttributeError):raise n.Error('Claude Code 未返回有效的结构化结果')
 
 
+def find_dsh(preferred=None):
+    # 不解引用符号链接：npm 安装的 dsh 是 bin 目录下的链接，解引用后仍可执行但会丢失名称语义。
+    for value in [preferred,shutil.which('dsh'),str(Path.home()/'.nodejs/bin/dsh'),'/usr/local/bin/dsh']:
+        if value and Path(value).is_file():return os.path.abspath(value)
+    return None
+
+
+def dsh_api_key():
+    """DeepSeek Harness 的模型凭据由 dsh 自己的凭据库保管；这里只读取不写入。"""
+    if os.environ.get('SF_LLM_API_KEY'):return os.environ['SF_LLM_API_KEY']
+    path=Path.home()/'.dsh/.credentials.yaml'
+    if not path.is_file():return None
+    # 安装运行时只有标准库，不依赖 PyYAML：只解析 refs 段的目标键，支持续行与引号。
+    try:lines=path.read_text(encoding='utf-8').splitlines()
+    except OSError:return None
+    inside=False
+    for index,line in enumerate(lines):
+        if line.startswith('refs:'):inside=True;continue
+        if inside and line and not line.startswith(' '):break
+        if not inside:continue
+        stripped=line.strip()
+        if not stripped.startswith('SF_LLM_API_KEY:'):continue
+        raw=stripped.split(':',1)[1].strip()
+        cursor=index
+        while raw.endswith('\\') and cursor+1<len(lines):
+            cursor+=1;raw=raw[:-1]+lines[cursor].strip()
+        value=raw.strip().strip('"').strip("'")
+        return value or None
+    return None
+
+
+def session_store(config_path=None):
+    """宿主会话固定在个人状态目录，跨轮次复用，不随单次运行目录变化。"""
+    if config_path:
+        try:
+            config=n.load(config_path)
+            state=config.get('growth',{}).get('state_dir')
+            if state:return Path(state).expanduser()/'harness-sessions.json'
+        except Exception:pass
+    return Path.home()/'.local/state/nianlun/harness-sessions.json'
+
+
+def harness_session(config_path,provider,value=None):
+    path=session_store(config_path);data=n.load(path) if path.exists() else {}
+    if value is None:return data.get(provider)
+    if value=='':data.pop(provider,None)
+    else:data[provider]=value
+    path.parent.mkdir(parents=True,exist_ok=True);n.save(path,data);return data.get(provider)
+
+
+def deepseek_reason(prompt,directory,preferred=None,schema=None,timeout=1200,config_path=None):
+    """通过 dsh headless 完成一次推理；同一安装固定沿用同一会话，保留生长上下文。"""
+    directory=Path(directory).resolve();directory.mkdir(parents=True,exist_ok=True)
+    binary=find_dsh(preferred)
+    if not binary:raise n.Error('未找到 dsh 命令，请在接入设置中安装 DeepSeek Harness 或改用其他宿主')
+    env=runtime_env()
+    key=dsh_api_key()
+    if key:env['SF_LLM_API_KEY']=key
+    # 会话目录固定在此安装的状态目录，避免每次运行目录不同导致会话找不到。
+    cwd=directory
+    if config_path:
+        try:
+            state=n.load(config_path).get('growth',{}).get('state_dir')
+            if state:Path(state).mkdir(parents=True,exist_ok=True);cwd=Path(state).expanduser()
+        except Exception:pass
+    if schema:
+        prompt=(prompt.rstrip()+'\n\n只返回一个 JSON 对象，严格符合以下 JSON Schema，不要输出解释、前后缀或代码围栏：\n'
+            +json.dumps(schema,ensure_ascii=False))
+    events=directory/'events.jsonl';error=directory/'stderr.txt'
+    saved=harness_session(config_path,'deepseek')
+    for attempt in (0,1):
+        command=[binary,'headless','--json']
+        if saved:command+=['--session-id',saved]
+        command+=['-']
+        with events.open('w',encoding='utf-8') as out,error.open('w',encoding='utf-8') as err:
+            try:
+                result=subprocess.run(command,input=prompt,text=True,encoding='utf-8',stdout=out,stderr=err,cwd=str(cwd),timeout=timeout,env=env)
+            except subprocess.TimeoutExpired:raise n.Error('DeepSeek Harness 推理超时；未因本次推理执行业务写入')
+        text=error.read_text(encoding='utf-8') if error.exists() else ''
+        if result.returncode:
+            # 会话失效（被清理或换机器）时丢弃旧会话，用新会话重试一次。
+            if saved and ('session' in text.lower()) and attempt==0:
+                saved=harness_session(config_path,'deepseek','')
+                continue
+            raise n.Error('DeepSeek Harness 未完成本次推理，请检查 dsh 登录与模型配置；' + text.strip().splitlines()[-1][:180] if text.strip() else 'DeepSeek Harness 未完成本次推理')
+        session=None;answer=None
+        for line in events.read_text(encoding='utf-8').splitlines():
+            line=line.strip()
+            if not line:continue
+            try:event=json.loads(line)
+            except ValueError:continue
+            if event.get('type')=='session' and event.get('sessionId'):session=event['sessionId']
+            elif event.get('type')=='final' and isinstance(event.get('text'),str):answer=event['text']
+        if session and session!=saved:harness_session(config_path,'deepseek',session)
+        if not answer:raise n.Error('DeepSeek Harness 返回了空结果')
+        if schema:
+            raw=answer.strip()
+            if raw.startswith('```'):
+                raw=re.sub(r'^```[A-Za-z]*\n?|\n?```$','',raw).strip()
+            start,end=raw.find('{'),raw.rfind('}')
+            if start<0 or end<start:raise n.Error('DeepSeek Harness 输出未符合结构要求，未执行写入')
+            try:return json.loads(raw[start:end+1])
+            except ValueError:raise n.Error('DeepSeek Harness 输出未符合结构要求，未执行写入')
+        return answer
+    raise n.Error('DeepSeek Harness 会话重建失败，请检查 dsh 运行状态')
+
+
+def cached_answer(directory,prompt):
+    """同一运行目录的同一请求复用已完成推理：进程中断或恢复重跑时不再重复消耗模型。"""
+    path=Path(directory)/'answer-cache.json'
+    if not path.exists():return None
+    try:
+        item=n.load(path)
+        if item.get('prompt_hash')==n.digest(prompt):return item.get('answer')
+    except (OSError,ValueError):return None
+    return None
+
+
+def store_answer(directory,prompt,answer):
+    path=Path(directory)/'answer-cache.json'
+    try:
+        path.parent.mkdir(parents=True,exist_ok=True)
+        n.save(path,{'prompt_hash':n.digest(prompt),'answer':answer})
+    except OSError:pass
+
+
 def reason(prompt,directory,preferred=None,schema=None,timeout=900):
     import host_bridge
     choice=normalize(preferred)
@@ -265,9 +398,15 @@ def reason(prompt,directory,preferred=None,schema=None,timeout=900):
             prompt=saved['prompt']
         else:n.save(frozen,{'prompt':prompt,'schema':schema,'binding':choice.get('binding'),'provider':choice['provider']})
         return host_bridge.request(prompt,directory,choice,schema)
+    cached=cached_answer(directory,prompt)
+    if cached is not None:
+        host_bridge.validate(cached,schema)
+        return cached
     if choice['provider']=='codex':value=codex_reason(prompt,directory,choice.get('binary'),schema,timeout)
+    elif choice['provider']=='deepseek':value=deepseek_reason(prompt,directory,choice.get('binary'),schema,timeout,choice.get('config_path'))
     else:value=claude_reason(prompt,directory,choice.get('binary'),schema,timeout)
     host_bridge.validate(value,schema)
+    store_answer(directory,prompt,value)
     return value
 
 

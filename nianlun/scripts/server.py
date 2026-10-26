@@ -630,6 +630,46 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(400,{'error':str(exc)})
 
 
+def stable_token(runtime):
+    """Keep one long-lived local token so an already-open page survives a restart.
+
+    The token authorises this machine's own bound page only; it never leaves
+    127.0.0.1 and the file is 0600. Rotating it on every start would silently
+    break every open tab (the page falls back to its stored copy).
+    """
+    path=runtime/'token'
+    try:
+        value=path.read_text(encoding='utf-8').strip()
+        if len(value)>=32:return value
+    except OSError:pass
+    value=secrets.token_urlsafe(32)
+    n.save(path,value)
+    if os.name!='nt':
+        try:path.chmod(0o600)
+        except OSError:pass
+    return value
+
+
+def bind_server(requested, previous_url):
+    """Prefer the previous port so a restart keeps working page URLs alive."""
+    candidates=[]
+    if requested: candidates.append(requested)
+    else:
+        try:
+            port=urlsplit(previous_url).port
+            if port: candidates.append(port)
+        except ValueError:pass
+        candidates.append(0)
+    last=None
+    for port in candidates:
+        try:
+            return HTTPServer(('127.0.0.1',port),Handler)
+        except OSError as exc:
+            last=exc
+            if port==0: raise
+    raise n.Error('工作台上次使用的端口仍被占用，请关闭占用进程后重试：'+str(last))
+
+
 def main():
     parser=argparse.ArgumentParser(description='年轮本机工作台')
     parser.add_argument('--home',default=str(default_home()))
@@ -639,9 +679,11 @@ def main():
     args=parser.parse_args()
     app=Application(args.home,args.config)
     with file_lock(app.runtime/'server.lock'):
-        server=HTTPServer(('127.0.0.1',args.port),Handler);server.app=app;server.token=secrets.token_urlsafe(32)
-        url='http://127.0.0.1:'+str(server.server_port)+'/#'+server.token
         session=app.runtime/'session.json'
+        previous=n.load(session) if session.exists() else {}
+        server=bind_server(args.port,previous.get('url',''))
+        server.app=app;server.token=stable_token(app.runtime)
+        url='http://127.0.0.1:'+str(server.server_port)+'/#'+server.token
         n.save(session,{'url':url,'pid':os.getpid(),'started_at':datetime.now().astimezone().isoformat()})
         if os.name!='nt':session.chmod(0o600)
         print('年轮工作台已启动：http://127.0.0.1:'+str(server.server_port),flush=True)

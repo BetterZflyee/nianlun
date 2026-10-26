@@ -28,9 +28,10 @@ def validate(config, evidence=None):
     kind = config.get('type')
     common = {'type', 'title', 'caption'}
     fields = {'status': {'items'}, 'graph': {'nodes', 'links'},
+              'matrix': {'stages', 'items'},
               'bar': {'categories', 'series', 'unit', 'source'},
               'line': {'categories', 'series', 'unit', 'source'}}
-    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、bar、line')
+    if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、bar、line')
     if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
     def source(value):
@@ -49,6 +50,17 @@ def validate(config, evidence=None):
         for row in rows:
             item(row, {'label', 'detail', 'state', 'next', 'source'})
             if row.get('next') is not None and row.get('next')!='':text(row['next'], 100, 'next')
+    elif kind == 'matrix':
+        stages, rows = config.get('stages'), config.get('items')
+        if not isinstance(stages, list) or not 2 <= len(stages) <= 6: raise ValueError('矩阵须为 2 至 6 个阶段')
+        for name in stages:
+            text(name, 8, '阶段名')
+        if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('矩阵须为 1 至 12 个对象')
+        for row in rows:
+            item(row, {'label', 'stage', 'state', 'detail', 'next', 'source'})
+            if row.get('stage') not in stages: raise ValueError('矩阵行的阶段须在 stages 中')
+            if row.get('detail') is not None: text(row['detail'], 60, 'detail')
+            if row.get('next') is not None and row['next'] != '': text(row['next'], 60, 'next')
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')
         if not isinstance(rows, list) or not 2 <= len(rows) <= 9: raise ValueError('关系图须为 2 至 9 个节点')
@@ -178,7 +190,27 @@ def chart_svg(config):
 
 def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
-    if kind == 'status':
+    if kind == 'matrix':
+        stages = config['stages']
+        out.append('<div class="rv-matrix-wrap"><table class="rv-matrix"><thead><tr><th class="rv-mx-name">对象</th>')
+        out.extend('<th>' + escape(s) + '</th>' for s in stages)
+        out.append('<th class="rv-mx-col">当前判断</th></tr></thead><tbody>')
+        for row in config['items']:
+            label, color = STATES[row['state']]
+            here = stages.index(row['stage'])
+            cells = []
+            for i in range(len(stages)):
+                if i < here: cells.append('<td class="rv-mx-past"></td>')
+                elif i == here: cells.append(f'<td class="rv-mx-now" style="--state:{color}"><span>{label}</span></td>')
+                else: cells.append('<td class="rv-mx-future"></td>')
+            note = escape(row.get('detail', ''))
+            if row.get('next'): note += ('；' if note else '') + '<b>下一步</b>' + escape(row['next'])
+            out.append('<tr><th class="rv-mx-name">' + escape(row['label']) + '</th>' + ''.join(cells)
+                       + '<td class="rv-mx-col">' + note + ' ' + refs(row['source']) + '</td></tr>')
+        out.append('</tbody></table></div>')
+        items_legend = ''.join(f'<li><b>{escape(r["label"])}</b>：{escape(r.get("detail","") or "—")} {refs(r["source"])}</li>' for r in config['items'] if r.get('detail'))
+        if items_legend: out.append('<details class="rv-data"><summary>逐项依据</summary><ul>' + items_legend + '</ul></details>')
+    elif kind == 'status':
         out.append('<div class="rv-status-grid">')
         for i, row in enumerate(config['items'], 1):
             label, color = STATES[row['state']]
@@ -189,7 +221,9 @@ def figure(config, uid):
         # JSON is escaped inert text, not executable script or an arbitrary option object.
         out.append('<div class="rv-spec" hidden>' + escape(json.dumps(config, ensure_ascii=False)) + '</div>')
         out.append('<div class="rv-interactive" role="img" aria-label="' + escape(config['title']) + '" hidden></div>')
-        if kind == 'graph':
+        if kind == 'matrix':
+            pass
+        elif kind == 'graph':
             out.append('<figure class="am-flow rv-static-graph">' + graph_svg(config, uid) + '</figure>')
             out.append('<details class="rv-data"><summary>节点说明与依据</summary><ul>')
             for node in config['nodes']:

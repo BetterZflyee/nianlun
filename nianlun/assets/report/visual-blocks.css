@@ -53,3 +53,17 @@
  .nl-report:has(.rv-visual) .am-head{background:#f1f5e9;color:#21372d;}
  .nl-report:has(.rv-visual) .am-head h1,.nl-report:has(.rv-visual) .am-head .am-intro{color:#21372d;}
 }
+
+/* 场地/对象进度矩阵：森林层一屏看全分布 */
+.rv-matrix-wrap{overflow-x:auto;margin:0}
+.rv-matrix{border-collapse:separate;border-spacing:3px;width:100%;font:13px/1.5 system-ui,sans-serif}
+.rv-matrix th{font-weight:600;color:#41544a;background:#eef2e7;border-radius:6px;padding:7px 8px;text-align:center;font-size:12px}
+.rv-matrix th.rv-mx-name{text-align:left;min-width:110px;background:#e8eee0}
+.rv-matrix th.rv-mx-col,.rv-matrix td.rv-mx-col{text-align:left;min-width:190px;background:transparent;font-weight:400;color:#3c4d44;font-size:12px;padding:6px 8px}
+.rv-matrix td{padding:9px 6px;border-radius:6px;text-align:center}
+.rv-matrix td.rv-mx-past{background:#2f635022}
+.rv-matrix td.rv-mx-future{background:#9bb09d1a}
+.rv-matrix td.rv-mx-now{background:var(--state);color:#fff;font-weight:600;box-shadow:0 2px 8px #0000001f}
+.rv-matrix td.rv-mx-now span{white-space:nowrap}
+.rv-matrix tbody tr:hover th.rv-mx-name{background:#dfe8d6}
+@media print{.rv-matrix{font-size:10px}.rv-matrix td{padding:4px 3px}}

@@ -4,6 +4,14 @@
 
 所有图均使用 ```visual 围栏，内容为 JSON；程序负责安全渲染、ECharts 交互与 Three.js 立体查看。禁止输出 HTML、脚本、CSS、ECharts option 或外链。图中每项必须引用输入实际存在的材料编号；下面编号仅为格式示例。
 
+### 进度矩阵（多对象/多场地首选，用于森林层）
+
+```visual
+{"type":"matrix","title":"四场地推进梯队","caption":"两个场地在试运行，验收与安装各一，进度梯度清晰。","stages":["筹备","安装","试运行","验收"],"items":[{"label":"武汉吴家山","stage":"验收","state":"done","detail":"验收议程待售前参与。","next":"排定验收时间。","source":"[S3][R13]"},{"label":"西安汉唐","stage":"试运行","state":"blocked","detail":"调试受映射表缺失阻塞。","next":"补齐映射表。","source":"[S2][R19]"}]}
+```
+
+stages 2–6 个真实阶段名；items 1–12 行，每行一个对象。stage 必须是 stages 之一，state 用 done/active/blocked/planned/unknown。detail ≤60 字、next ≤60 字可省略。用于让读者一屏看清多对象分布梯度与卡点位置，不要用它替代后续分项论证。
+
 ### 状态对照（无数值时优先）
 
 ```visual

@@ -448,10 +448,22 @@ def gantt_html(config, uid):
             for seg in segs:
                 a = pct(datetime.date.fromisoformat(seg['from']))
                 b = pct(datetime.date.fromisoformat(seg['to']))
-                w = max(1.2, b - a)
+                raw_w = b - a
+                w = max(1.2, raw_w)   # 兜底最小可见宽度
                 _, sline, _ = GANTT_TONE.get(seg.get('state') or state, GANTT_TONE['unknown'])
                 label = escape(seg.get('label') or '')
                 txt = f'<em>{label}</em>' if label and w > 7 else ''
+                # 零长度或极短区间（from==to、只有 1 天）画成条会变成一个圆角小方块，
+                # 语义上就是一个「节点」，改用圆点表达
+                if raw_w < 1.2:   # 原始跨度不足 1.2%，本质是「一个节点」不是「一段区间」
+                    body.append(f'<span class="gt-pt" style="left:{a:.4f}%;background:{sline}" '
+                                f'title="{label} {seg["from"]}"></span>')
+                    if label:
+                        body.append(f'<span class="gt-pt-lbl" style="left:{a:.4f}%;color:{sline}">'
+                                    f'<i class="gt-pt-lbl-t">{label}</i>'
+                                    f'<b>{datetime.date.fromisoformat(seg["from"]).month}-'
+                                    f'{datetime.date.fromisoformat(seg["from"]).day}</b></span>')
+                    continue
                 kind = seg.get('kind') or 'actual'
                 if kind == 'plan':
                     body.append(f'<span class="gt-bar gt-bar--plan" style="left:{a:.4f}%;width:{w:.4f}%;'

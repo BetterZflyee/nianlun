@@ -503,7 +503,8 @@ def gantt_html(config, uid):
         lanes_used = max(lanes_used, lane + 1)
         marks_html.append(f'<span class="gt-mark" style="left:{pos:.4f}%;--lane:{lane}" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
-                          f'<i></i><b>{escape(m["label"])}</b></span>')
+                          f'<i></i><b>{escape(m["label"])}</b>'
+                          f'<em>{d.month}-{d.day}</em></span>')
     mark_height = 12 + lanes_used * 15
     today_html = ''
     if today:

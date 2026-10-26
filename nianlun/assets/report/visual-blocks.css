@@ -150,7 +150,7 @@
 /* ---------- 基础 ---------- */
 .rv-gantt{
   --name-col:236px; --g-row:48px; --g-bar:26px; --g-radius:3px;
-  --g-week:#E9EBED; --g-today:#1F2937;
+  --g-week:#DFE4E7; --g-today:#1F2937;
   --g-ink:#1D1D1F; --g-ink2:#5B6167; --g-ink3:#767D84;
   --s-done:#2F6350; --s-live:#3D7A61; --s-idle:#8A9199; --s-risk:#E41E2C;
   margin:14px 0; color:var(--g-ink);
@@ -177,6 +177,7 @@
   display:flex;flex-direction:column;align-items:center;gap:0}
 .gt-mark i{display:block;width:1px;height:10px;background:currentColor;opacity:.55}
 .gt-mark b{font-weight:500;font-size:11px}
+.gt-mark em{font-style:normal;font-size:10px;opacity:.8}
 .gt-today{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;
   align-items:center;gap:2px;font-size:11px;color:var(--g-today);white-space:nowrap;z-index:3}
 .gt-today i{display:block;width:2px;height:14px;background:var(--g-today)}
@@ -196,7 +197,7 @@
 
 /* 行 */
 .gt-body{position:relative}
-.gt-item{border-bottom:1px solid #F6F7F8}
+.gt-item{border-bottom:1px solid #EFF2F4}
 .gt-item:last-child{border-bottom:none}
 .gt-row{display:grid;grid-template-columns:var(--name-col) minmax(0,1fr);align-items:center;
   min-height:var(--g-row);cursor:pointer;list-style:none}
@@ -306,3 +307,7 @@
   .gt-far-bar{padding-left:var(--name-col)}
   .gt-legend{gap:10px;font-size:10.5px}
 }
+
+/* 数字等宽下沉到文档级：日期/百分比在所有图表里都不抖动 */
+.rv-gantt,.rv-lanes,.rv-status-grid,.rv-static-graph{font-variant-numeric:tabular-nums;
+  font-feature-settings:"tnum" 1}

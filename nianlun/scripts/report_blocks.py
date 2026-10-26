@@ -194,38 +194,41 @@ def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
     if kind == 'matrix':
         stages = config['stages']
-        # RAG 语义：受阻=红、待核/不明=琥珀、正常推进=绿、未启动=灰
-        RAG = {'blocked': ('红', '#bc4941'), 'unknown': ('琥珀', '#c58a2e'),
-               'done': ('绿', '#2f6350'), 'active': ('绿', '#2f6350'), 'planned': ('灰', '#9bb09d')}
+        # 当前段的填色与 RAG 灯同源：绿=正常（深绿已完成／中绿推进中）、琥珀=待核、红=受阻、灰=未启动
+        RAG = {'blocked': ('受阻', '#bc4941'), 'unknown': ('待核', '#c58a2e'),
+               'done': ('已完成', '#2f6350'), 'active': ('推进中', '#4a8a6a'), 'planned': ('未启动', '#a8b8ad')}
         done_count = sum(1 for r in config['items'] if r['state'] == 'done')
         total = len(config['items'])
-        out.append(f'<div class="rv-matrix-wrap"><table class="rv-matrix"><caption class="rv-mx-cap">'
-                   f'{done_count}/{total} 已完成 · 按推进节奏由上至下排列</caption>'
-                   f'<thead><tr><th class="rv-mx-name">对象</th>')
-        out.extend('<th>' + escape(s) + '</th>' for s in stages)
-        out.append('<th class="rv-mx-rag">状态</th><th class="rv-mx-col">当前判断</th></tr></thead><tbody>')
+        out.append(f'<div class="rv-lanes"><p class="rv-lanes-cap">{done_count}/{total} 个对象已完成</p>')
+        out.append('<div class="rv-lanes-scale"><span class="rv-lane-spacer"></span><span class="rv-lane-track-scale">')
+        for stage in stages:
+            out.append('<i>' + escape(stage) + '</i>')
+        out.append('</span><span class="rv-lane-note-spacer"></span></div>')
         for row in config['items']:
             label, color = STATES[row['state']]
             rag_name, rag_color = RAG.get(row['state'], ('—', '#9bb09d'))
             here = stages.index(row['stage'])
-            cells = []
+            segs = []
             for i in range(len(stages)):
-                if i < here: cells.append('<td class="rv-mx-past"></td>')
-                elif i == here: cells.append(f'<td class="rv-mx-now" style="--state:{color}"><span>{label}</span></td>')
-                else: cells.append('<td class="rv-mx-future"></td>')
+                if i < here: segs.append('<span class="rv-seg rv-seg-past"></span>')
+                elif i == here: segs.append(f'<span class="rv-seg rv-seg-now" style="--state:{rag_color}"></span>')
+                else: segs.append('<span class="rv-seg rv-seg-future"></span>')
             note = escape(row.get('detail', ''))
             if row.get('next'): note += ('；' if note else '') + '<b>下一步</b>' + escape(row['next'])
-            out.append('<tr><th class="rv-mx-name">' + escape(row['label']) + '</th>' + ''.join(cells)
-                       + f'<td class="rv-mx-rag"><span class="rv-rag" style="--rag:{rag_color}" title="{rag_name}"></span></td>'
-                       + '<td class="rv-mx-col">' + note + ' ' + refs(row['source']) + '</td></tr>')
-        out.append('</tbody></table>')
-        out.append('<p class="rv-mx-legend"><span class="rv-rag" style="--rag:#2f6350"></span>绿 正常推进 '
-                   '<span class="rv-rag" style="--rag:#c58a2e"></span>琥珀 待核 '
-                   '<span class="rv-rag" style="--rag:#bc4941"></span>红 受阻 '
-                   '<span class="rv-rag" style="--rag:#9bb09d"></span>灰 未启动 '
-                   '<i>实心格为已走过的阶段</i></p></div>')
-        items_legend = ''.join(f'<li><b>{escape(r["label"])}</b>：{escape(r.get("detail","") or "—")} {refs(r["source"])}</li>' for r in config['items'] if r.get('detail'))
-        if items_legend: out.append('<details class="rv-data"><summary>逐项依据</summary><ul>' + items_legend + '</ul></details>')
+            out.append('<div class="rv-lane">'
+                       f'<span class="rv-lane-name" title="{escape(row.get("stage", ""))}">'
+                       f'<span class="rv-rag" style="--rag:{rag_color}" title="{rag_name}"></span>'
+                       f'{escape(row["label"])}</span>'
+                       '<span class="rv-lane-track">' + ''.join(segs) + '</span>'
+                       '<span class="rv-lane-note">' + note + ' ' + refs(row['source']) + '</span>'
+                       '</div>')
+        out.append('<p class="rv-lanes-legend"><span class="rv-seg-mini rv-seg-past"></span>浅绿 已走过 '
+                   '<span class="rv-seg-mini" style="background:#2f6350"></span>深绿 已完成 '
+                   '<span class="rv-seg-mini" style="background:#4a8a6a"></span>中绿 推进中 '
+                   '<span class="rv-seg-mini" style="background:#c58a2e"></span>琥珀 待核 '
+                   '<span class="rv-seg-mini" style="background:#bc4941"></span>红 受阻 '
+                   '<span class="rv-seg-mini" style="background:#a8b8ad"></span>灰 未启动 '
+                   '<span class="rv-seg-mini rv-seg-future"></span>斜纹 未到达</p></div>')
     elif kind == 'status':
         out.append('<div class="rv-status-grid">')
         for i, row in enumerate(config['items'], 1):
@@ -284,10 +287,36 @@ def restore(html, blocks):
     return html
 
 
+def widen_wide_panels(html):
+    """矩阵等宽表必须横跨全部网格列，否则在分栏布局中被压成一团看不清。"""
+    if 'rv-matrix' not in html:return html
+    out=[];pos=0
+    for match in re.finditer(r'<section\b[^>]*class="[^"]*\bam-panel\b[^"]*"[^>]*>', html):
+        chunk=html[match.start():match.start()+40000]
+        end=chunk.find('</section>')
+        if end<0 or 'rv-matrix' not in chunk[:end]:continue
+        out.append(html[pos:match.start()])
+        tag=match.group(0)
+        # 保留原 class，追加内联栅格跨列 + 全宽标记
+        if 'grid-column' not in tag:
+            tag=tag[:-1]+' style="grid-column:1/-1;max-width:none" data-wide-panel="1">'
+        out.append(tag);pos=match.end()
+    if not out:return html
+    out.append(html[pos:])
+    return ''.join(out)
+
+
 def enhance(html):
-    if 'data-recap-visual=' not in html or 'id="rv-visual-style"' in html:return html
+    if 'data-recap-visual=' not in html:return html
     css=(ASSETS/'visual-blocks.css').read_text(encoding='utf-8')
-    html=html.replace('</head>','<style id="rv-visual-style">'+css+'</style></head>',1)
+    # 所选汇报技能可能自带同 id 的旧版样式；核心必须用本安装的版本覆盖，
+    # 否则新图形（矩阵条带等）会因为旧样式而完全失去排版。
+    style='<style id="rv-visual-style">'+css+'</style>'
+    if 'id="rv-visual-style"' in html:
+        html=re.sub(r'<style id="rv-visual-style">.*?</style>', lambda m: style, html, count=1, flags=re.S)
+    else:
+        html=html.replace('</head>',style+'</head>',1)
+    html=widen_wide_panels(html)
     if not re.search(r'data-recap-visual="(?:graph|bar|line)"',html):return html
     script=(ASSETS/'charts.bundle.js').read_text(encoding='utf-8')+'\n'+(ASSETS/'visual-blocks.js').read_text(encoding='utf-8')
     meta=re.search(r'<meta\b[^>]*http-equiv=["\']Content-Security-Policy["\'][^>]*>',html,re.I)

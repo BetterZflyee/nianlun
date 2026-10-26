@@ -331,5 +331,52 @@
   .gt-marks{padding-bottom:6px}
 }
 /* 里程碑日期与日期刻度之间留出空隙，避免两行数字贴在一起 */
-.gt-marks{padding-bottom:14px}
+.gt-marks{padding-bottom:20px}
 .gt-head--marks{border-bottom:none}
+
+/* ============ v46 视觉精致化（Apple Keynote 取向：大留白、克制质感） ============ */
+/* KPI 区自成一段，与图之间用留白而非线条分隔 */
+.gt-kpi{margin:0 0 26px 2px;padding-bottom:0}
+.gt-kpi-i{gap:8px}
+.gt-kpi-i b{letter-spacing:-.035em}
+.gt-kpi-i em{letter-spacing:.02em}
+
+/* 曲线条：极轻的内高光 + 外阴影，避免纯色块的塑料感 */
+.gt-bar--actual{box-shadow:inset 0 1px 0 rgba(255,255,255,.20), 0 1px 2px rgba(31,41,55,.07)}
+.gt-bar{border-radius:4px}
+/* 节点带柔和投影，从底纹里"浮"起来一点 */
+.gt-pt{box-shadow:0 0 0 2.5px #fff, 0 1px 3px rgba(31,41,55,.16)}
+.gt-stall{box-shadow:0 0 0 2.5px #fff, 0 1px 3px rgba(31,41,55,.16)}
+
+/* 图例：与图之间用留白分隔，符号列右对齐更整齐 */
+.gt-legend{margin:22px 0 0;gap:18px;font-size:11.5px;color:#5B6167}
+.gt-legend i{box-shadow:inset 0 0 0 1px rgba(31,41,55,.06)}
+.gt-hint{margin:14px 0 0;font-size:11.5px;color:#8A9199}
+
+/* 名称列：场地名与阶段徽标之间多给 2px 呼吸 */
+.gt-cell{gap:8px}
+.gt-stage{padding:2px 5px;border-radius:4px;font-weight:500}
+
+/* 里程碑标签：字重放轻，避免顶部抢过 KPI */
+.gt-mark b{font-weight:400;font-size:10.5px}
+.gt-mark em{font-size:9.5px;color:#8A6A1F}
+
+/* 今天标记：胶囊化 */
+.gt-today g,.gt-today{letter-spacing:.01em}
+.gt-today b{background:#1F2937;color:#fff;font-size:10px;font-weight:500;
+  padding:2px 7px;border-radius:20px;letter-spacing:.02em}
+.gt-today i{height:12px;margin-bottom:3px}
+
+/* ============ 状态筛选（纯 CSS，radio hack） ============ */
+.gt-filter{display:flex;flex-wrap:wrap;gap:6px;margin:-14px 0 18px 2px}
+.gt>input[type=radio]{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+.gt-filter label{font-size:11.5px;line-height:1;padding:5px 11px;border-radius:20px;
+  border:1px solid #E4E8EA;color:#5B6167;cursor:pointer;background:#fff;
+  transition:background .15s,border-color .15s,color .15s;user-select:none}
+.gt-filter label:hover{border-color:#C6D2CC;color:#2F6350}
+.gt-filter input:checked+label{background:#2F6350;border-color:#2F6350;color:#fff;font-weight:500}
+.gt-filter input:focus-visible+label{outline:2px solid #3D7A61;outline-offset:2px}
+@media (max-width:760px){
+  .gt-filter{gap:5px;margin:-10px 0 14px 0}
+  .gt-filter label{font-size:10.5px;padding:4px 9px}
+}

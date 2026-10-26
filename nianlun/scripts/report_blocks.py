@@ -372,8 +372,9 @@ def gantt_html(config, uid):
 
     # 日期刻度：按跨度自动选密度，避免拥挤
     tick = 1
+    # 每格至少要有 ~34px 才放得下「10/6」这类标签；按 390 视口（轨道约 340px）反推
     for step in (1, 2, 3, 7, 14):
-        if total / step <= 16:
+        if total / step <= 12:
             tick = step
             break
     else:
@@ -423,7 +424,7 @@ def gantt_html(config, uid):
             detail.append(f'<li><b>{seg["from"][5:]}→{seg["to"][5:]}</b> {escape(seg.get("label") or "推进")}</li>')
         for pt in sorted(pts, key=lambda x: x['date']):
             detail.append(f'<li><b>{pt["date"][5:]}</b> {escape(pt.get("label") or "")}</li>')
-        body.append('<details class="gt-item">')
+        body.append(f'<details class="gt-item" data-state="{state}">')
         body.append('<summary class="gt-row">'
                     '<span class="gt-cell">'
                     f'<span class="gt-dot" style="background:{tone_line}"></span>'
@@ -462,7 +463,12 @@ def gantt_html(config, uid):
                 body.append(f'<span class="{cls}" style="left:{x:.4f}%;background:{pline}" '
                             f'title="{lbl} {d.isoformat()}"></span>')
                 if lbl:
-                    side = 'gt-pt-lbl--left' if x > 76 else ''
+                    # 该点若是某段条的右端点，条在它左侧，标签必须向右才不会压条
+                    on_bar_right = any(
+                        abs(pct(datetime.date.fromisoformat(sg['to'])) - x) < 0.6
+                        for sg in segs
+                    )
+                    side = '' if (on_bar_right or x <= 76) else 'gt-pt-lbl--left'
                     body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
                                 f'<i class="gt-pt-lbl-t">{lbl}</i><b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
@@ -546,9 +552,22 @@ def gantt_html(config, uid):
         shown = f'{n}<span>/{len(rows)}</span>' if st == 'done' else str(n)
         chips.append(f'<div class="gt-kpi-i gt-kpi--{tone}"><b>{shown}</b><em>{label}</em></div>')
     kpi = '<div class="gt-kpi">' + ''.join(chips) + '</div>'
+    # 状态筛选：radio + label 纯 CSS，无 JS、CSP 安全
+    flist = [('all', f'全部 {len(rows)}')] + [(st, f'{label} {counts[st]}')
+                                              for st, label, _ in LABELS if counts[st]]
+    # input 必须是 .gt-scroll 的「前兄弟」~ 选择器才生效，所以放在 .gt 直属子级，
+    # label 留在 .gt-filter 里用 for 关联
+    finputs = ''.join(
+        f'<input type="radio" name="gtf-{uid}" id="gtf-{uid}-{k}"{" checked" if k == "all" else ""}>'
+        for k, lbl in flist)
+    flabels = ''.join(f'<label for="gtf-{uid}-{k}">{lbl}</label>' for k, lbl in flist)
+    frules = ''.join(
+        f'#gtf-{uid}-{k}:checked~.gt-scroll .gt-item:not([data-state="{k}"]){{display:none}}'
+        for k, _ in flist if k != 'all')
+    filter_html = f'{finputs}<div class="gt-filter">{flabels}</div><style>{frules}</style>'
     today_var = (f'--today-x:{pct(today):.4f}%') if today else '--today-x:100%'
     today_var += f';--days:{total}'
-    return (f'<div class="gt" style="{today_var}">' + kpi +
+    return (f'<div class="gt" style="{today_var}">' + kpi + filter_html +
             '<div class="gt-scroll">'
             f'<div class="gt-head gt-head--marks" style="--mark-h:{mark_height}px">'
             '<div class="gt-corner"></div>'

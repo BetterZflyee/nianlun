@@ -75,6 +75,9 @@ def prompt(project,since,until,evidence,method):
         '不许画成从项目启动日拉到现在的一条长区间；只有该对象在多个不同日期都有记录，才画 segments，'
         '且 from/to 必须落在它自己的记录日期范围之内。'
         'label 写这段时间内实际在做的事（如「设备安装」「联调」「验收推进」），不要用整段概括词。'
+        '画 segments 时**必须同时给 marks 数组**，列出该区间内真正有记录的日期（可只列首末两天）；'
+        '程序会在条上打出这些刻度，让读者看出一段长条中间是否有空档——'
+        '如果一段区间只有一个日期有记录，那不该画区间而应画 points。'
         '**milestones 要铺出项目从启动到今天的关键节点**，让读者即使某些对象缺日期也能看懂历程：'
         '包括项目启动/首个动作、各对象首次进场、指标上线、试点或验收完成等已发生事件，'
         '以及材料里明确写出的未来计划节点；已发生的用 state=done，计划中的用 state=planned，'
@@ -130,6 +133,15 @@ def issues(markdown,evidence):
     fences=re.findall(r'^```([^\n]*)$',markdown,re.M)
     if len(fences)%2 or any(fences[i].split(' ',1)[0] not in ('visual','flow','timeline','kv','callout') or fences[i+1].strip() for i in range(0,len(fences)-1,2)):
         errors.append('图形围栏只能用 visual、flow、timeline、kv、callout，并须完整闭合')
+    # 甘特的分段必须带 marks（该区间内真正有记录的日期），否则读者无法判断长条中间是否空档
+    for block, cfg in blocks:
+        if cfg.get('type') != 'gantt':
+            continue
+        for row in cfg.get('rows') or []:
+            for seg in row.get('segments') or []:
+                if not seg.get('marks'):
+                    errors.append(f'甘特「{row.get("label","")}」的区间缺 marks：'
+                                  '请列出该区间内真正有记录的日期，缺记录就不要画区间')
     for opening in fences[::2]:
         if opening.startswith('visual') and opening.strip()!='visual':errors.append('visual 须单独作为围栏名称')
         if opening.startswith('flow') and not re.fullmatch(r'flow (?:LR|TD|TB)',opening.strip()):

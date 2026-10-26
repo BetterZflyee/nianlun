@@ -441,3 +441,15 @@
 /* 贴近右/左边界的里程碑改变对齐方向，避免被裁 */
 .gt-mark--edge-r{transform:translateX(-100%)}
 .gt-mark--edge-l{transform:translateX(0)}
+
+/* 条上的「真实记录点」：白色细刻度，标出该区间内确有记录的日期，
+   让读者看出一段长条中间是否有空档 */
+/* 记录点：比条上下各高出 3px，让它在色条上"跳出来"，否则 3px 白线在深绿上几乎看不见 */
+.gt-tick{position:absolute;
+  top:calc((var(--g-row) - var(--g-bar)) / 2 - 3px);
+  height:calc(var(--g-bar) + 6px);width:3px;background:#fff;
+  box-shadow:0 0 0 1px rgba(31,41,55,.22);border-radius:1.5px;
+  transform:translateX(-1.5px);z-index:6;pointer-events:none}
+@media (max-width:760px){
+  .gt-tick{width:1.5px}
+}

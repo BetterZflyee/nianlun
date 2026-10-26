@@ -109,13 +109,15 @@ def validate(config, evidence=None):
             segs = row.get('segments') or []
             if not isinstance(segs, list) or len(segs) > 6: raise ValueError('每行分段须为 0 至 6 段')
             for seg in segs:
-                if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state', 'kind'}:
+                if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state', 'kind', 'marks'}:
                     raise ValueError('分段字段不合法')
                 a, b = day(seg.get('from'), '分段起点'), day(seg.get('to'), '分段终点')
                 if b < a: raise ValueError('分段终点早于起点')
                 text(seg.get('label'), 12, '分段说明')
                 if seg.get('state') and seg['state'] not in STATES: raise ValueError('分段状态不合法')
                 if seg.get('kind') not in (None, 'actual', 'plan'): raise ValueError('分段类型只能为 actual 或 plan')
+                for mk in (seg.get('marks') or []):
+                    day(mk, 'marks')
             pts = row.get('points') or []
             if not isinstance(pts, list) or len(pts) > 6: raise ValueError('每行节点须为 0 至 6 个')
             for pt in pts:
@@ -493,6 +495,14 @@ def gantt_html(config, uid):
                 else:
                     body.append(f'<span class="gt-bar gt-bar--actual" style="left:{a:.4f}%;width:{w:.4f}%;'
                                 f'background:{sline}">{txt}</span>')
+                # 标出该区间内「确实留下记录」的日期：实心长条容易让人以为逐日都在推进，
+                # 打上刻度后能一眼看出空档（如武汉 5 天跨度只有 3 天有记录）
+                seg_marks = seg.get('marks') or [seg['from'], seg['to']]
+                for mk in seg_marks:
+                    mx = pct(datetime.date.fromisoformat(mk))
+                    if a - 0.2 <= mx <= b + 0.2:
+                        body.append(f'<span class="gt-tick" style="left:{mx:.4f}%" '
+                                    f'title="记录 {mk}"></span>')
         if pts:
             for pt in pts:
                 x = pct(datetime.date.fromisoformat(pt['date']))
@@ -576,6 +586,7 @@ def gantt_html(config, uid):
               '<span><i style="background:repeating-linear-gradient(45deg,#8A9199 0 1.5px,#fff 1.5px 6px)"></i>斜纹＝计划窗口</span>'
               '<span><i class="k-node" style="background:#2F6350"></i>圆点＝节点</span>'
               '<span><i class="k-stall" style="background:#E41E2C"></i>菱形＝停滞</span>'
+              '<span><i style="background:#3D7A61;position:relative"><b style="position:absolute;left:6px;top:0;width:2px;height:100%;background:#fff"></b></i>条上白线＝当天有记录</span>'
               '<span><i style="border:1px dashed #D5DADF"></i>虚线框＝无日期节点（说明取自记录）</span>'
               '</div>')
     # 窄屏里程碑标签只留日期（避免叠字），名称改在图下方列表里给出

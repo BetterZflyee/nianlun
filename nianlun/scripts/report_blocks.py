@@ -552,6 +552,13 @@ def gantt_html(config, uid):
               '<span><i class="k-stall" style="background:#E41E2C"></i>菱形＝停滞</span>'
               '<span><i style="border:1px dashed #D5DADF"></i>虚线框＝无日期节点（说明取自记录）</span>'
               '</div>')
+    # 窄屏里程碑标签只留日期（避免叠字），名称改在图下方列表里给出
+    ms_list = ''
+    if (config.get('milestones') or []):
+        items = ''.join(
+            f'<span><b>{m["date"][5:].replace("-","-")}</b>{escape(m["label"])}</span>'
+            for m in sorted(config['milestones'], key=lambda x: x['date']))
+        ms_list = f'<div class="gt-mslist"><em>里程碑</em>{items}</div>'
     far_html = ''
     if far_marks:
         chips = ''.join(f'<span class="gt-far"><b>{escape(m["label"])}</b><em>'
@@ -600,7 +607,7 @@ def gantt_html(config, uid):
             f'<div class="gt-marks">{"".join(marks_html)}{today_html}</div></div>'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + ''.join(body) +
-            '</div>' + legend + far_html +
+            '</div>' + ms_list + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')
 

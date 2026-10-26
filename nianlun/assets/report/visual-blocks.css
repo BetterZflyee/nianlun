@@ -285,7 +285,7 @@
 
 /* ---------- 移动 ≤760px ---------- */
 @media (max-width:760px){
-  .rv-gantt{--name-col:112px;--g-row:44px;--g-bar:18px}
+  .rv-gantt{--name-col:126px;--g-row:46px;--g-bar:18px}
   .gt-kpi{gap:18px}
   .gt-kpi-i b{font-size:22px}
   .gt-kpi-i b span{font-size:12px}
@@ -402,4 +402,17 @@
   /* 窄屏只留日期时保持竖排，避免行内挤 */
   .gt-mark{flex-direction:column;align-items:center}
   .gt-mark-t{flex-direction:column;gap:0}
+}
+
+/* 里程碑清单：只在窄屏出现（宽屏图上已带名称），补回被隐藏的里程碑语义 */
+.gt-mslist{display:none;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin:14px 0 0 2px;
+  font-size:11px;color:#7A5C18}
+.gt-mslist em{font-style:normal;color:#8A9199;margin-right:2px}
+.gt-mslist span{display:inline-flex;gap:5px;align-items:baseline}
+.gt-mslist b{font-weight:600;font-variant-numeric:tabular-nums}
+@media (max-width:900px){
+  .gt-mslist{display:flex}
+  /* 手机端阶段徽标不再隐藏，缩到 9.5px 保留语义 */
+  .gt-stage{display:inline-block;font-size:9.5px;padding:1px 4px;border-radius:3px;flex:0 0 auto}
+  .gt-cell{gap:6px}
 }

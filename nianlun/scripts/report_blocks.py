@@ -364,7 +364,9 @@ def _gantt_span(config):
         (near if md <= today else far).append(m)
     # 轴向右留 2 天余量给「今天」，向左留 1 天让最早节点不贴边
     first = first - datetime.timedelta(days=1)
-    core = max(today, max(dates)) + datetime.timedelta(days=4)   # 右侧留白放得下末端标签
+    # 终点贴着最后一个事件，右侧最多留 1 天；末端标签靠「向左展开」解决，
+    # 不能靠拉长时间轴——否则今天线停在 88%，右边一条空带看起来像图画歪了
+    core = max(today, max(dates)) + datetime.timedelta(days=1)
     return first, core, far
 
 
@@ -514,13 +516,13 @@ def gantt_html(config, uid):
             # 有 note 时用 note 当行内说明（信息量远大于「无记录」）；
             # 真的一条记录都没有，才用缺口框显式标注，让缺口可被追问
             inline = (row.get('note') or '').strip()
+            # 没有时间节点时，用「贴着文字宽度」的虚线框说明现状。
+            # 早先是全宽虚线框，横跨整条时间轴，看着像三条空白带而不是内容。
             if inline:
-                short = inline if len(inline) <= 26 else inline[:25] + '…'
-                body.append(f'<span class="gt-gap"></span>'
-                            f'<span class="gt-empty">{escape(short)}</span>')
+                short = inline if len(inline) <= 30 else inline[:29] + '…'
             else:
-                body.append('<span class="gt-gap"></span>'
-                            '<span class="gt-empty">本期无记录 · 需补进场与进度日期</span>')
+                short = '本期无记录 · 需补进场与进度日期'
+            body.append(f'<span class="gt-nodate">{escape(short)}</span>')
         body.append('</span></summary>')
         note = escape(row.get('note') or '')
         if note or detail:
@@ -557,12 +559,13 @@ def gantt_html(config, uid):
             lane += 1
         placed.append((lane, pos - half, pos + half))
         lanes_used = max(lanes_used, lane + 1)
-        marks_html.append(f'<span class="gt-mark" style="left:{pos:.4f}%;--lane:{lane}" '
+        edge = ' gt-mark--edge-r' if pos > 86 else (' gt-mark--edge-l' if pos < 6 else '')
+        marks_html.append(f'<span class="gt-mark{edge}" style="left:{pos:.4f}%;--lane:{lane}" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
                           f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
                           f'<em>{d.month}-{d.day}</em></span></span>')
     # 顶部 22px 留给「今天」胶囊（它是绝对定位在 marks 顶部的），里程碑从这条带之下开始
-    mark_height = 22 + 14 + lanes_used * 16
+    mark_height = 36 + 14 + lanes_used * 16
     today_html = ''
     if today:
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'

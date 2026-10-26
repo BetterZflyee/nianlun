@@ -171,7 +171,7 @@
 
 /* 里程碑区 */
 .gt-marks{position:relative;height:var(--mark-h,40px);padding-bottom:10px}
-.gt-mark{position:absolute;top:calc(22px + var(--lane,0) * 16px);transform:translateX(-50%);
+.gt-mark{position:absolute;top:calc(36px + var(--lane,0) * 16px);transform:translateX(-50%);
   text-align:center;white-space:nowrap;font-size:11px;color:#7A5C18;
   display:flex;flex-direction:column;align-items:center;gap:0;z-index:2}
 .gt-mark b{background:rgba(255,255,255,.92);padding:0 3px;border-radius:2px}
@@ -422,5 +422,22 @@
 @media (min-width:761px) and (max-width:1000px){
   .gt-mark b{font-size:9.5px;padding:0 2px}
   .gt-mark em{font-size:9px}
-  .gt-mark{top:calc(22px + var(--lane,0) * 15px)}
+  .gt-mark{top:calc(36px + var(--lane,0) * 15px)}
 }
+
+/* 无日期节点行：虚线框贴着文字宽度，不再横跨整条时间轴 */
+.gt-nodate{position:absolute;left:0;top:calc((var(--g-row) - 24px) / 2);
+  display:inline-block;max-width:calc(100% - 8px);padding:3px 10px;
+  border:1px dashed #D5DADF;border-radius:4px;background:#FCFCFD;
+  font-size:12px;line-height:1.4;color:#5B6167;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:2}
+@media (max-width:760px){
+  .gt-nodate{font-size:10.5px;padding:2px 7px;max-width:calc(100% - 4px)}
+}
+
+/* 里程碑层压在时间线之上（今天线在 body 内，DOM 顺序在后会盖住 marks） */
+.gt-head--marks{position:relative;z-index:5;background:#fff}
+.gt-mark b{background:#fff}
+/* 贴近右/左边界的里程碑改变对齐方向，避免被裁 */
+.gt-mark--edge-r{transform:translateX(-100%)}
+.gt-mark--edge-l{transform:translateX(0)}

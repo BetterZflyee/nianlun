@@ -687,7 +687,7 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
-def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None,progress=lambda message:None):
+def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None,progress=lambda message:None,writeback=True):
     from render_report import render
     from planning import evidence
     gw=Gateway(config);self_identity(gw);state=n.fetch(config,gw.table());p=n.select_projects(state,[project])[0]
@@ -736,6 +736,13 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         item=uploaded_node(d)
         if not item:raise n.Error('上传返回未包含可核验的节点与链接，保留回执待对账')
         receipt.update(node_id=item.get('nodeId') or item['fileId'],url=item.get('url') or item['docUrl']);receipt.pop('in_flight',None);n.save(receipt_file,receipt)
+    if not writeback:
+        # 自动生长只产出可审阅的草稿：上传留档但不改写主表对外链接，
+        # 呈报给领导的「输出结果」由负责人确认后再发布。
+        receipt.update(status='draft',pending_approval=True,project_id=p['id'],report_id=key)
+        n.save(receipt_file,receipt)
+        progress('报告草稿已生成并上传，主表链接未改动，待确认后发布')
+        return receipt
     progress('正在核验报告链接并写回项目主表')
     current=n.fetch(config,gw.table())
     if not current['complete']:raise n.Error('报告已上传，但主表回读不完整；重试将核验原链接，不会重复上传。')

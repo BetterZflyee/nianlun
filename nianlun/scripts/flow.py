@@ -137,7 +137,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
         if switches.get('continuous_reports') and switches.get('reports') and active_project_ids and 'reports' not in post:
             progress('正在根据最新进度和里程碑自动生成阶段汇报')
             end=datetime.fromisoformat(bundle['until']).date()
-            post['reports']=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports')
+            post['reports']=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
             n.save(post_path,post)
         progress('正在归档项目记忆、推送本人摘要并更新工作台')
         finished=g.finish(config,folder,decision_file)
@@ -149,7 +149,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             'coverage':bundle['coverage'],'run_directory':str(folder),'verified':True}
 
 
-def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None,cancelled=lambda:False,before_publish=lambda:None):
+def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None,cancelled=lambda:False,before_publish=lambda:None,writeback=True):
     """Freeze table and memory evidence together; resume the same host request safely."""
     import report_style, report_brief
     progress('正在读取项目事实与里程碑')
@@ -208,8 +208,8 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
             from deepseek_report import Cancelled
             raise Cancelled('已停止生成，尚未上传或写回报告。')
         progress('正在生成汇报并上传，随后回读项目链接')
-        result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]),progress=progress)
-        progress('报告已发布，项目主表链接已回读确认')
+        result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]),progress=progress,writeback=writeback)
+        progress('报告已发布，项目主表链接已回读确认' if writeback else '报告草稿已就绪，主表链接保持不变，待确认后发布')
         results.append({**result,'project_title':project['title'],'project_id':pid,'summary':summary.read_text(encoding='utf-8'),'since':since,'until':until,
             'memory_pages':[{k:p.get(k) for k in ('title','slug','full_page')} for p in history.get('pages',[])],
             'method':method.get('name','年轮阶段汇报')})

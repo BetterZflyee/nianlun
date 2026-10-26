@@ -324,14 +324,15 @@
   .gt-pt-lbl--left{margin-left:9px;transform:none}
 }
 
-/* 901px 以下 track 变窄，里程碑名称必然互相压叠：只留日期，名称走 title 与展开 */
-@media (max-width:900px){
+/* 只在真手机宽度才丢里程碑名称。900 这个断点太高：钉钉内嵌/分屏/缩放很容易
+   落在 761-900，那是能放下名称的桌面宽度，砍掉名称等于信息阉割 */
+@media (max-width:760px){
   .gt-mark b{display:none}
   .gt-mark em{display:block;font-size:10px}
   .gt-marks{padding-bottom:6px}
 }
 /* 里程碑日期与日期刻度之间留出空隙，避免两行数字贴在一起 */
-.gt-marks{padding-bottom:20px}
+.gt-marks{padding-bottom:26px}
 .gt-head--marks{border-bottom:none}
 
 /* ============ v46 视觉精致化（Apple Keynote 取向：大留白、克制质感） ============ */
@@ -398,8 +399,8 @@
 .gt-mark-t{display:inline-flex;align-items:baseline;gap:4px}
 .gt-mark em{font-size:10px;white-space:nowrap}
 .gt-mark i{margin-right:1px}
-@media (max-width:900px){
-  /* 窄屏只留日期时保持竖排，避免行内挤 */
+@media (max-width:760px){
+  /* 真手机才竖排（名称与日期各占一行），760-1000 的平板带仍用一行布局 */
   .gt-mark{flex-direction:column;align-items:center}
   .gt-mark-t{flex-direction:column;gap:0}
 }
@@ -410,9 +411,16 @@
 .gt-mslist em{font-style:normal;color:#8A9199;margin-right:2px}
 .gt-mslist span{display:inline-flex;gap:5px;align-items:baseline}
 .gt-mslist b{font-weight:600;font-variant-numeric:tabular-nums}
-@media (max-width:900px){
+@media (max-width:760px){
   .gt-mslist{display:flex}
   /* 手机端阶段徽标不再隐藏，缩到 9.5px 保留语义 */
   .gt-stage{display:inline-block;font-size:9.5px;padding:1px 4px;border-radius:3px;flex:0 0 auto}
   .gt-cell{gap:6px}
+}
+
+/* 平板带（761-1000px）：track 约 500-760px，名称保留但缩到 9.5px 并允许 3 层错位 */
+@media (min-width:761px) and (max-width:1000px){
+  .gt-mark b{font-size:9.5px;padding:0 2px}
+  .gt-mark em{font-size:9px}
+  .gt-mark{top:calc(var(--lane,0) * 14px + 2px)}
 }

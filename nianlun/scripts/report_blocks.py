@@ -525,7 +525,9 @@ def gantt_html(config, uid):
         pos = pct(d)
         # 标签半宽（百分比）。宽屏（≥901px）track≈900px，1% ≈ 9px，中文 11px ≈ 1.2%/字，
         # 经验系数 0.62 恰好；窄屏由 CSS 隐藏里程碑名称（只留日期），故此处无需放大。
-        half = max(2.6, len(m['label']) * 0.62)
+        # 0.62 是按 1440px（track≈900px）的标定值；取 1.0 作折中，
+        # 让 761-1000 的平板带（track≈500-760px）也不叠字，代价是宽屏偶尔多分一层
+        half = max(3.2, len(m['label']) * 1.0)
         lane = 0
         while True:
             clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)
@@ -539,7 +541,7 @@ def gantt_html(config, uid):
                           f'title="{escape(m["label"])} {d.isoformat()}">'
                           f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
                           f'<em>{d.month}-{d.day}</em></span></span>')
-    mark_height = 12 + lanes_used * 15
+    mark_height = 14 + lanes_used * 16   # 每层 16px，与平板带的 14px 步长留出余量
     today_html = ''
     if today:
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'

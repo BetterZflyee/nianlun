@@ -447,8 +447,8 @@
 /* 记录点：比条上下各高出 3px，让它在色条上"跳出来"，否则 3px 白线在深绿上几乎看不见 */
 .gt-tick{position:absolute;
   top:calc((var(--g-row) - var(--g-bar)) / 2 - 3px);
-  height:calc(var(--g-bar) + 6px);width:3px;background:#fff;
-  box-shadow:0 0 0 1px rgba(31,41,55,.22);border-radius:1.5px;
+  height:calc(var(--g-bar) + 6px);width:3px;background:#1F2937;
+  box-shadow:0 0 0 1.5px rgba(255,255,255,.95);border-radius:1.5px;
   transform:translateX(-1.5px);z-index:6;pointer-events:none}
 @media (max-width:760px){
   .gt-tick{width:1.5px}

@@ -250,3 +250,9 @@
 
 .gt-hint-sw{display:none}
 @media (max-width:760px){.gt-hint-sw{display:inline}}
+
+/* 今天之后的区间铺极淡底纹，强化"计划区"与"已发生区"的区分 */
+.gt-days,.gt-track{background-image:linear-gradient(to right,
+  transparent 0, transparent var(--today-x,100%),
+  #fafbfc var(--today-x,100%), #fafbfc 100%)}
+.gt-day--weekend{background-color:transparent}

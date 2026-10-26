@@ -453,7 +453,8 @@ def gantt_html(config, uid):
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'
                       f'<i></i><b>今天 {today.month}-{today.day}</b></span>')
 
-    return ('<div class="gt">'
+    today_var = f'--today-x:{pct(today):.4f}%' if today else '--today-x:100%'
+    return (f'<div class="gt" style="{today_var}">'
             f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'

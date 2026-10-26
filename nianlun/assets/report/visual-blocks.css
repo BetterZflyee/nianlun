@@ -191,10 +191,11 @@
 .gt-hint{margin:12px 0 0;font-size:10.5px;color:#a9b0b5}
 @media (max-width:760px){
   /* 移动端：名称列固定不随横向滚动，时间轴可左右滑动 */
-  .gt-head,.gt-row{grid-template-columns:134px minmax(0,1fr)}
-  .gt-marks{margin-left:134px;height:calc(var(--mark-h,40px) + 2px)}
+  .gt-head,.gt-row{grid-template-columns:118px minmax(0,1fr)}
+  .gt-marks{margin-left:118px;height:calc(var(--mark-h,40px) + 2px)}
   .gt-detail{padding-left:0}
-  .gt-days,.gt-track{min-width:520px}
+  /* 手机端压缩全览：宁可刻度略密，也不能让首屏看不见数据 */
+  .gt-days,.gt-track{min-width:0}
   .gt-cell{font-size:10.5px}
   .gt-name{white-space:normal;line-height:1.3;font-size:10.5px;overflow:visible;text-overflow:clip}
   /* 手机端来源编号让位给场地名，点开行后仍可看到明细 */
@@ -208,7 +209,7 @@
   .rv-gantt figcaption span{font-size:12px}
   .gt-day{font-size:9px}
   .gt-mark{font-size:8.5px}
-  .gt-mark b{display:none}   /* 手机端里程碑只保留日期，避免标签互相压叠 */
+  .gt-mark b{font-size:9.5px}   /* 手机端保留里程碑名称，日期交给刻度 */
   .gt-mark em{font-size:8.5px}
   .gt-pt-lbl{font-size:9px}
   .gt-hint{font-size:10px}
@@ -417,3 +418,27 @@
   height:20px;border:1px dashed #D5DADF;border-radius:3px;background:#FCFCFD}
 .gt-empty{z-index:3;padding-left:10px;color:#6E757C;font-size:12px;
   background:linear-gradient(90deg,#FCFCFD 60%,#FCFCFD00)}
+
+@media (max-width:760px){
+  /* 手机端全览模式 */
+  .gt-day{font-size:9.5px;padding:0}
+  .gt-bar{height:14px;top:calc((var(--g-row,48px) - 14px)/2 + 6px)}
+  .gt-bar em{font-size:9.5px;padding:0 4px}
+  .gt-pt{width:8px;height:8px;top:calc((var(--g-row,48px) - 8px)/2 + 6px)}
+  .gt-pt-lbl{font-size:9.5px;top:0;margin-left:8px}
+  .gt-pt-lbl--left{transform:translateX(calc(-100% - 8px))}
+  .gt-stall{width:9px;height:9px;top:calc((var(--g-row,48px) - 9px)/2 + 6px)}
+  .gt-gap{height:14px}
+  .gt-name{font-size:10.5px}
+  .gt-stage{display:none}      /* 手机端徽标让位给名称 */
+  .gt-kpi{gap:22px}
+  .gt-kpi-i b{font-size:26px}
+  .gt-kpi-i b span{font-size:13px}
+  .gt-kpi-i em{font-size:10.5px}
+  /* 手机端横向空间不足：里程碑只标日期，名称靠 title 悬停/展开查看，避免三个标签叠字 */
+  .gt-mark b{display:none}
+  .gt-mark em{display:block;font-size:9px;opacity:1}
+  .gt-today b{font-size:9.5px}
+  .gt-empty{font-size:10px;padding-left:6px}
+  .gt-hint-sw{display:inline}
+}

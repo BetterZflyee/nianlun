@@ -194,41 +194,40 @@ def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
     if kind == 'matrix':
         stages = config['stages']
-        # 当前段的填色与 RAG 灯同源：绿=正常（深绿已完成／中绿推进中）、琥珀=待核、红=受阻、灰=未启动
+        # 当前段填色与 RAG 灯同源：绿=正常（深绿已完成／中绿推进中）、琥珀=待核、红=受阻、灰=未启动
         RAG = {'blocked': ('受阻', '#bc4941'), 'unknown': ('待核', '#c58a2e'),
                'done': ('已完成', '#2f6350'), 'active': ('推进中', '#4a8a6a'), 'planned': ('未启动', '#a8b8ad')}
         done_count = sum(1 for r in config['items'] if r['state'] == 'done')
         total = len(config['items'])
         out.append(f'<div class="rv-lanes"><p class="rv-lanes-cap">{done_count}/{total} 个对象已完成</p>')
-        out.append('<div class="rv-lanes-scale"><span class="rv-lane-spacer"></span><span class="rv-lane-track-scale">')
-        for stage in stages:
-            out.append('<i>' + escape(stage) + '</i>')
-        out.append('</span><span class="rv-lane-note-spacer"></span></div>')
         for row in config['items']:
-            label, color = STATES[row['state']]
-            rag_name, rag_color = RAG.get(row['state'], ('—', '#9bb09d'))
+            rag_name, rag_color = RAG.get(row['state'], ('—', '#a8b8ad'))
             here = stages.index(row['stage'])
             segs = []
-            for i in range(len(stages)):
-                if i < here: segs.append('<span class="rv-seg rv-seg-past"></span>')
-                elif i == here: segs.append(f'<span class="rv-seg rv-seg-now" style="--state:{rag_color}"></span>')
-                else: segs.append('<span class="rv-seg rv-seg-future"></span>')
-            note = escape(row.get('detail', ''))
-            if row.get('next'): note += ('；' if note else '') + '<b>下一步</b>' + escape(row['next'])
+            for i, stage in enumerate(stages):
+                if i < here:
+                    segs.append(f'<span class="rv-seg rv-seg-past"><b>{escape(stage)}</b></span>')
+                elif i == here:
+                    segs.append(f'<span class="rv-seg rv-seg-now" style="--state:{rag_color}">'
+                                f'<b>{escape(stage)}</b></span>')
+                else:
+                    segs.append(f'<span class="rv-seg rv-seg-future"><b>{escape(stage)}</b></span>')
+            desc = escape(row.get('detail', ''))
+            next_step = ('<em>下一步：' + escape(row['next']) + '</em>') if row.get('next') else ''
             out.append('<div class="rv-lane">'
-                       f'<span class="rv-lane-name" title="{escape(row.get("stage", ""))}">'
-                       f'<span class="rv-rag" style="--rag:{rag_color}" title="{rag_name}"></span>'
-                       f'{escape(row["label"])}</span>'
+                       '<span class="rv-lane-name">'
+                       f'<span class="rv-rag" style="--rag:{rag_color}"></span>{escape(row["label"])}</span>'
                        '<span class="rv-lane-track">' + ''.join(segs) + '</span>'
-                       '<span class="rv-lane-note">' + note + ' ' + refs(row['source']) + '</span>'
+                       f'<span class="rv-lane-state" style="--rag:{rag_color}">{rag_name}</span>'
+                       f'<span class="rv-lane-desc">{desc}{next_step} {refs(row["source"])}</span>'
                        '</div>')
-        out.append('<p class="rv-lanes-legend"><span class="rv-seg-mini rv-seg-past"></span>浅绿 已走过 '
-                   '<span class="rv-seg-mini" style="background:#2f6350"></span>深绿 已完成 '
-                   '<span class="rv-seg-mini" style="background:#4a8a6a"></span>中绿 推进中 '
-                   '<span class="rv-seg-mini" style="background:#c58a2e"></span>琥珀 待核 '
-                   '<span class="rv-seg-mini" style="background:#bc4941"></span>红 受阻 '
-                   '<span class="rv-seg-mini" style="background:#a8b8ad"></span>灰 未启动 '
-                   '<span class="rv-seg-mini rv-seg-future"></span>斜纹 未到达</p></div>')
+        out.append('<p class="rv-lanes-legend"><span class="rv-seg-mini rv-seg-past"></span>浅绿底=已走过 '
+                   '<span class="rv-seg-mini" style="background:#2f6350"></span>深绿=已完成 '
+                   '<span class="rv-seg-mini" style="background:#4a8a6a"></span>中绿=推进中 '
+                   '<span class="rv-seg-mini" style="background:#c58a2e"></span>琥珀=待核 '
+                   '<span class="rv-seg-mini" style="background:#bc4941"></span>红=受阻 '
+                   '<span class="rv-seg-mini" style="background:#a8b8ad"></span>灰=未启动 '
+                   '<span class="rv-seg-mini rv-seg-future"></span>斜纹=未到达</p></div>')
     elif kind == 'status':
         out.append('<div class="rv-status-grid">')
         for i, row in enumerate(config['items'], 1):

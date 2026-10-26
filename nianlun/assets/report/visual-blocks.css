@@ -54,32 +54,37 @@
  .nl-report:has(.rv-visual) .am-head h1,.nl-report:has(.rv-visual) .am-head .am-intro{color:#21372d;}
 }
 
-/* 对象推进条带（swimlane）：一眼看出谁走到哪一段 */
+
+/* 对象推进条带（swimlane）：段内写阶段名，行下写具体文字，进度与内容一体 */
 .rv-lanes{margin:6px 0 0}
-.rv-lanes-cap{font-size:12px;color:#56685d;margin:0 0 10px 2px}
-.rv-lanes-scale{display:grid;grid-template-columns:190px 1fr 340px;gap:14px;margin-bottom:6px}
-.rv-lane-track-scale{display:flex}
-.rv-lane-track-scale i{flex:1;font-style:normal;font-size:11px;color:#7d8f83;text-align:center;border-bottom:1px solid #dce3d7;padding-bottom:3px}
-.rv-lane{display:grid;grid-template-columns:190px 1fr 340px;gap:14px;align-items:center;padding:9px 0;border-bottom:1px solid #eef2e7}
+.rv-lanes-cap{font-size:12px;color:#56685d;margin:0 0 12px 2px}
+.rv-lane{display:grid;grid-template-columns:200px 1fr 76px;gap:4px 14px;align-items:center;
+  padding:13px 0;border-bottom:1px solid #eef2e7}
 .rv-lane:last-of-type{border-bottom:none}
-.rv-lane-name{font-size:13px;font-weight:600;color:#21372d;display:flex;align-items:center;gap:7px;line-height:1.35}
-.rv-lane-track{display:flex;gap:3px;height:26px;align-items:stretch}
-.rv-seg{flex:1;border-radius:4px;min-width:0}
-.rv-seg-past{background:#cfe0cc}
+.rv-lane-name{font-size:13.5px;font-weight:600;color:#21372d;display:flex;align-items:center;gap:7px;line-height:1.35}
+.rv-lane-track{display:flex;gap:3px;height:30px;align-items:stretch}
+.rv-seg{flex:1;border-radius:4px;min-width:0;display:flex;align-items:center;justify-content:center;
+  font-size:11px;line-height:1;overflow:hidden;white-space:nowrap}
+.rv-seg b{font-weight:500}
+.rv-seg-past{background:#dcebda}
+.rv-seg-past b{color:#537a5f}
 .rv-seg-now{background:var(--state);box-shadow:0 0 0 2px #ffffff,0 2px 8px #00000024}
-.rv-seg-future{background:repeating-linear-gradient(135deg,#9bb09d33 0 3px,transparent 3px 7px);border:1px solid #9bb09d2e}
-.rv-lane-note{font-size:12px;color:#3c4d44;line-height:1.5}
-.rv-lane-note b{color:#2f6350;font-weight:600}
-.rv-lanes-legend{font-size:11px;color:#56685d;margin:12px 0 0 2px;display:flex;flex-wrap:wrap;align-items:center;gap:5px}
-.rv-lanes-legend i{margin-left:10px;font-style:normal;opacity:.75}
+.rv-seg-now b{color:#ffffff;font-weight:600}
+.rv-seg-future{background:repeating-linear-gradient(135deg,#9bb09d22 0 3px,transparent 3px 7px);border:1px solid #9bb09d33}
+.rv-seg-future b{color:#8f9d93}
+.rv-lane-state{font-size:11.5px;font-weight:600;text-align:center;padding:3px 0;border-radius:20px;
+  background:color-mix(in srgb,var(--rag) 14%,transparent);color:var(--rag)}
+.rv-lane-desc{grid-column:1/-1;font-size:12.5px;color:#3c4d44;line-height:1.6;padding-left:207px}
+.rv-lane-desc em{font-style:normal;color:#2f6350;margin-left:6px}
+.rv-lanes-legend{font-size:11px;color:#56685d;margin:14px 0 0 2px;display:flex;flex-wrap:wrap;align-items:center;gap:5px}
+.rv-seg-mini{display:inline-block;width:16px;height:11px;border-radius:3px;margin-right:2px;vertical-align:middle}
 .rv-rag{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--rag);flex:0 0 auto}
 @media (max-width:900px){
-  .rv-lanes-scale,.rv-lane{grid-template-columns:130px 1fr}
-  .rv-lane-note,.rv-lane-note-spacer{display:none}
+  .rv-lane{grid-template-columns:120px 1fr 64px}
+  .rv-lane-desc{padding-left:0}
+  .rv-seg b{font-size:10px}
 }
 @media print{
-  .rv-lane{padding:5px 0}
-  .rv-lane-track{height:18px}
+  .rv-lane{break-inside:avoid;padding:8px 0}
+  .rv-lane-track{height:24px}
 }
-
-.rv-seg-mini{display:inline-block;width:14px;height:10px;border-radius:3px;margin-right:2px;vertical-align:middle}

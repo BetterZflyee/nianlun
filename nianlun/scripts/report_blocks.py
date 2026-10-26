@@ -547,9 +547,9 @@ def gantt_html(config, uid):
         pos = pct(d)
         # 标签半宽（百分比）。宽屏（≥901px）track≈900px，1% ≈ 9px，中文 11px ≈ 1.2%/字，
         # 经验系数 0.62 恰好；窄屏由 CSS 隐藏里程碑名称（只留日期），故此处无需放大。
-        # 0.62 是按 1440px（track≈900px）的标定值；取 1.0 作折中，
-        # 让 761-1000 的平板带（track≈500-760px）也不叠字，代价是宽屏偶尔多分一层
-        half = max(3.2, len(m['label']) * 1.0)
+        # 标签实际宽度 = 名称 + 日期（约 5 字符），只算名称会低估近一半，
+        # 导致「二期028W试运行 10-18」和「南昌/武汉验收完结 10-26」判为不重叠而叠在一起
+        half = max(3.2, (len(m['label']) + 5) * 1.0)
         lane = 0
         while True:
             clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)

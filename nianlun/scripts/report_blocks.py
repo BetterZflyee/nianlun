@@ -221,13 +221,7 @@ def figure(config, uid):
                        f'<span class="rv-lane-state" style="--rag:{rag_color}">{rag_name}</span>'
                        f'<span class="rv-lane-desc">{desc}{next_step} {refs(row["source"])}</span>'
                        '</div>')
-        out.append('<p class="rv-lanes-legend"><span class="rv-seg-mini rv-seg-past"></span>浅绿底=已走过 '
-                   '<span class="rv-seg-mini" style="background:#2f6350"></span>深绿=已完成 '
-                   '<span class="rv-seg-mini" style="background:#4a8a6a"></span>中绿=推进中 '
-                   '<span class="rv-seg-mini" style="background:#c58a2e"></span>琥珀=待核 '
-                   '<span class="rv-seg-mini" style="background:#bc4941"></span>红=受阻 '
-                   '<span class="rv-seg-mini" style="background:#a8b8ad"></span>灰=未启动 '
-                   '<span class="rv-seg-mini rv-seg-future"></span>斜纹=未到达</p></div>')
+        out.append('</div>')
     elif kind == 'status':
         out.append('<div class="rv-status-grid">')
         for i, row in enumerate(config['items'], 1):

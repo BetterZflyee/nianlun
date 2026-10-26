@@ -411,3 +411,9 @@
 .gt-mark i{height:10px}
 /* 条内文字在窄条时自动隐藏，避免压字 */
 .gt-bar em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* 数据缺口显式化：虚线框 + 明确提出补数要求 */
+.gt-gap{position:absolute;left:0;right:0;top:calc((var(--g-row,48px) - 20px) / 2 + 6px);
+  height:20px;border:1px dashed #D5DADF;border-radius:3px;background:#FCFCFD}
+.gt-empty{z-index:3;padding-left:10px;color:#6E757C;font-size:12px;
+  background:linear-gradient(90deg,#FCFCFD 60%,#FCFCFD00)}

@@ -459,7 +459,9 @@ def gantt_html(config, uid):
                     body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
                                 f'{lbl}<b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
-            body.append('<span class="gt-empty">本期无记录</span>')
+            # 数据缺口本身是结论：用虚线框显式标出"这里本应有信息但没有"
+            body.append('<span class="gt-gap"></span>'
+                        '<span class="gt-empty">本期无记录 · 需补进场与进度日期</span>')
         body.append('</span></summary>')
         if detail:
             body.append('<div class="gt-detail"><ul>' + ''.join(detail)

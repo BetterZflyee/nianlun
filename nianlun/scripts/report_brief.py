@@ -238,7 +238,9 @@ TIP_STYLE=('<style id="nianlun-tip-style">a[href^="#source-"][data-tip]{position
 
 def citation_tooltips(html,evidence):
     """引用锚点悬停显示来源名称与日期；纯 CSS 实现，打印与离线安全。"""
-    if 'nianlun-tip-style' in html:return html
+    if 'nianlun-tip-style' in html:
+        # 同 id 旧样式先摘掉，确保本版本的悬停样式生效
+        html=re.sub(r'<style id="nianlun-tip-style">.*?</style>','',html,count=1,flags=re.S)
     tips={}
     for item in evidence:
         key=str(item.get('key',''))

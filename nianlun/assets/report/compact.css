@@ -123,3 +123,28 @@ html.nl-recap-root[data-theme][data-mode="dark"] {
   .nl-report .am-panel { margin-bottom: 12px; break-inside: avoid; }
   .nl-report .am-diagram svg { max-width: 100%; }
 }
+
+/* 全局防横向溢出：任何视口都不出现左右滚动 */
+html,body{max-width:100%;overflow-x:hidden}
+.nl-report{max-width:100%;min-width:0}
+.nl-report .am-grid,.nl-report .am-panel,.nl-report .am-panel-body,.nl-report .am-md{min-width:0;max-width:100%}
+.nl-report img,.nl-report svg,.nl-report table,.nl-report pre{max-width:100%}
+.nl-report h1{font-size:clamp(22px,4.2vw,34px);line-height:1.28;overflow-wrap:anywhere}
+.nl-report h2{font-size:clamp(17px,2.6vw,22px);overflow-wrap:anywhere}
+.nl-report p,.nl-report li{overflow-wrap:anywhere}
+@media (max-width:1024px){
+  .nl-report{grid-template-columns:1fr!important}
+}
+@media (max-width:760px){
+  .nl-report{padding-left:14px;padding-right:14px}
+  /* 必须压过 .nl-report .am-grid:has(.rv-visual) 的两列规则（特异性 3 个类），故同形写全 */
+  .nl-report .am-grid:has(.rv-visual),
+  .nl-report .am-grid,
+  .am-grid{grid-template-columns:minmax(0,1fr)!important;--cols:1!important;display:block!important}
+  .nl-report .am-panel{grid-column:1/-1!important;margin-bottom:12px}
+  .am-ruler{display:none!important}
+}
+/* 中屏到窄屏过渡：图形面板独占整行，避免两列里被压扁 */
+@media (max-width:1024px){
+  .nl-report .am-grid:has(.rv-visual){grid-template-columns:minmax(0,1fr)!important}
+}

@@ -104,8 +104,16 @@ def apply(html):
     """
     page = _Layout(html)
     page.feed(html)
-    if page.main is None or page.head_end is None or page.has_style:
+    if page.main is None or page.head_end is None:
         return html
+    # 所选 Skill 可能自带同 id 的旧版样式：先摘掉，再用本安装的版本重新注入，
+    # 否则旧样式会持续生效（窄屏不折叠、图形塌陷都由它引起）。位置需重算。
+    if page.has_style:
+        html = re.sub(r'<style id="' + STYLE_ID + r'"[^>]*>.*?</style>\s*', '', html, count=1, flags=re.S)
+        page = _Layout(html)
+        page.feed(html)
+        if page.main is None or page.head_end is None:
+            return html
     page.add_class(page.root, 'nl-recap-root')
     page.add_class(page.body, 'nl-recap-page')
     page.add_class(page.main, 'nl-report')

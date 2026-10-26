@@ -58,7 +58,7 @@
 /* 对象推进条带（swimlane）：段内写阶段名，行下写具体文字，进度与内容一体 */
 .rv-lanes{margin:6px 0 0}
 .rv-lanes-cap{font-size:12px;color:#56685d;margin:0 0 12px 2px}
-.rv-lane{display:grid;grid-template-columns:200px 1fr 76px;gap:4px 14px;align-items:center;
+.rv-lane{display:grid;grid-template-columns:200px minmax(0,1fr) 76px;gap:4px 14px;align-items:center;
   padding:13px 0;border-bottom:1px solid #eef2e7}
 .rv-lane:last-of-type{border-bottom:none}
 .rv-lane-name{font-size:13.5px;font-weight:600;color:#21372d;display:flex;align-items:center;gap:7px;line-height:1.35}
@@ -77,12 +77,56 @@
 .rv-lane-desc{grid-column:1/-1;font-size:12.5px;color:#3c4d44;line-height:1.6;padding-left:207px}
 .rv-lane-desc em{font-style:normal;color:#2f6350;margin-left:6px}
 .rv-rag{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--rag);flex:0 0 auto}
-@media (max-width:900px){
-  .rv-lane{grid-template-columns:120px 1fr 64px}
-  .rv-lane-desc{padding-left:0}
-  .rv-seg b{font-size:10px}
+
+/* ---- 响应式：从宽屏到手机逐档降级，任何宽度都不横向溢出 ---- */
+.rv-visual,.rv-lanes,.rv-lane{max-width:100%;min-width:0}
+.rv-visual svg{max-width:100%;height:auto;display:block}
+.rv-lane-name{word-break:break-word}
+
+/* 中屏：收窄名称列与状态列，段内字号略小 */
+@media (max-width:1100px){
+  .rv-lane{grid-template-columns:170px minmax(0,1fr) 70px}
+  .rv-lane-desc{padding-left:184px;font-size:12px}
+  .rv-seg{font-size:10.5px}
 }
+
+/* 窄屏（平板竖/分屏）：条带独占一行，名称与状态同行，描述另起一行 */
+@media (max-width:860px){
+  .rv-lane{
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"name state" "track track" "desc desc";
+    gap:7px 10px;padding:12px 0;
+  }
+  .rv-lane-name{grid-area:name;font-size:13.5px}
+  .rv-lane-state{grid-area:state}
+  .rv-lane-track{grid-area:track}
+  .rv-lane-desc{grid-area:desc;padding-left:0;font-size:12.5px}
+  .rv-seg{font-size:11px}
+}
+
+/* 手机：段内文字再缩，条带变矮，间距收紧 */
+@media (max-width:520px){
+  .rv-lane-track{height:26px;gap:2px}
+  .rv-seg{border-radius:3px;font-size:9.5px}
+  .rv-lane-name{font-size:13px;gap:6px}
+  .rv-lane-desc{font-size:12px;line-height:1.65}
+  .rv-lanes-cap{font-size:11.5px}
+}
+
+/* 打印：不拆行、条带变矮 */
 @media print{
   .rv-lane{break-inside:avoid;padding:8px 0}
-  .rv-lane-track{height:24px}
+  .rv-lane-track{height:22px}
+  .rv-lane-desc{padding-left:207px}
+}
+
+/* 窄屏：含图形的网格一律单列，图形铺满可用宽度 */
+@media (max-width:1024px){
+  .nl-report .am-grid:has(.rv-visual){grid-template-columns:minmax(0,1fr)!important}
+}
+
+/* 图形不得固定最小宽度：530px 会在手机与分屏里撑破整页（已实测） */
+.rv-visual svg,.rv-static-graph svg,.am-diagram svg{min-width:0!important;max-width:100%!important;height:auto}
+@media (max-width:760px){
+  .rv-visual svg,.rv-static-graph svg{width:100%;height:auto}
 }

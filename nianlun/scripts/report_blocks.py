@@ -206,11 +206,11 @@ def graph_svg(config, uid):
     pos, width, height = positions(config); out = []
     marker = uid + '-arrow'
     # 直接给出显示尺寸：SVG 作为替换元素在 flex/百分比下宽度解析不稳定，写死像素最可靠
-    show_w = 660
+    show_w = 480
     show_h = max(1, round(height * show_w / width))
     out.append(f'<svg viewBox="0 0 {width} {height}" width="{show_w}" height="{show_h}" '
                f'role="img" aria-label="{escape(config["title"])}" '
-               f'style="max-width:100%;height:auto;display:block;margin:0 auto"><defs><marker id="{marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f947e"/></marker></defs>')
+               f'style="width:{show_w}px;max-width:100%;height:auto;display:block;margin:0 auto"><defs><marker id="{marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f947e"/></marker></defs>')
     for link in config['links']:
         x, y = pos[link['from']]; xx, yy = pos[link['to']]
         direction = 1 if xx > x else -1
@@ -404,14 +404,14 @@ def gantt_html(config, uid):
         idx += 1
     head.append('</div>')
 
-    # 每 7 天一条周分隔线（比日线更安静，符合 data-ink 原则）
-    weeklines = []
-    for i in range(1, total + 1):
+    # 周线放进每行 track，百分比即轨道百分比，不再换算名称列宽度
+    week_dates = []
+    for i in range(0, total + 1):
         d = first + datetime.timedelta(days=i)
-        if d.weekday() == 0:
-            weeklines.append('<span class="gt-weekline" style="left:calc(236px + (100% - 236px) * '
-                             f'{pct(d)/100:.4f})"></span>')
-    body = ['<div class="gt-body">'] + weeklines
+        if d <= last and d.weekday() == 0:
+            week_dates.append(pct(d))
+    week_spans = ''.join(f'<span class="gt-week" style="left:{p:.4f}%"></span>' for p in week_dates)
+    body = ['<div class="gt-body">']
     for i, row in enumerate(rows):
         state = row['state']
         tone_bg, tone_line, _ = GANTT_TONE.get(state, GANTT_TONE['unknown'])
@@ -431,7 +431,11 @@ def gantt_html(config, uid):
                     f'<em class="gt-stage" style="color:{tone_line};border-color:{tone_line}">'
                     f'{escape(row.get("stage") or {"done":"已完成","active":"推进中","blocked":"受阻","planned":"未启动","unknown":"待核"}.get(state,""))}</em>'
                     '</span>')
-        body.append('<span class="gt-track">')
+        if today:
+            body.append(f'<span class="gt-track gt-track--today" style="--today-pct:{pct(today):.4f}%">')
+        else:
+            body.append('<span class="gt-track">')
+        body.append(week_spans)
         if segs:
             for seg in segs:
                 a = pct(datetime.date.fromisoformat(seg['from']))
@@ -453,7 +457,9 @@ def gantt_html(config, uid):
                 _, pline, _ = GANTT_TONE.get(pt.get('state') or state, GANTT_TONE['unknown'])
                 d = datetime.date.fromisoformat(pt['date'])
                 lbl = escape(pt.get('label') or '')
-                body.append(f'<span class="gt-pt" style="left:{x:.4f}%;background:{pline}" '
+                # 停滞用菱形：形状+颜色双编码，色盲也能分辨
+                cls = 'gt-stall' if (pt.get('state') or state) == 'blocked' else 'gt-pt'
+                body.append(f'<span class="{cls}" style="left:{x:.4f}%;background:{pline}" '
                             f'title="{lbl} {d.isoformat()}"></span>')
                 if lbl:
                     side = 'gt-pt-lbl--left' if x > 76 else ''
@@ -504,6 +510,13 @@ def gantt_html(config, uid):
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'
                       f'<i></i><b>今天 {today.month}-{today.day}</b></span>')
 
+    legend = ('<div class="gt-legend">'
+              '<span><i style="background:#3D7A61"></i>实心＝已发生区间</span>'
+              '<span><i style="background:repeating-linear-gradient(45deg,#8A9199 0 1.5px,#fff 1.5px 6px)"></i>斜纹＝计划窗口</span>'
+              '<span><i class="k-node" style="background:#2F6350"></i>圆点＝节点</span>'
+              '<span><i class="k-stall" style="background:#E41E2C"></i>菱形＝停滞</span>'
+              '<span><i style="border:1px dashed #D5DADF"></i>虚线框＝无记录</span>'
+              '</div>')
     far_html = ''
     if far_marks:
         chips = ''.join(f'<span class="gt-far"><b>{escape(m["label"])}</b><em>'
@@ -511,27 +524,33 @@ def gantt_html(config, uid):
                         f'{datetime.date.fromisoformat(m["date"]).day}</em></span>'
                         for m in sorted(far_marks, key=lambda x: x['date']))
         far_html = '<div class="gt-far-bar"><span class="gt-far-lbl">此窗之后 →</span>' + chips + '</div>'
-    # KPI 头：领导第一眼要看到结论，而不是自己去数绿点
-    done_n = sum(1 for r in rows if r['state'] == 'done')
-    block_n = sum(1 for r in rows if r['state'] == 'blocked')
-    quiet_n = sum(1 for r in rows if not (r.get('segments') or r.get('points')))
-    live_n = sum(1 for r in rows if r['state'] == 'active')
-    kpi = ('<div class="gt-kpi">'
-           f'<div class="gt-kpi-i gt-kpi--done"><b>{done_n}<span>/{len(rows)}</span></b><em>已验收</em></div>'
-           f'<div class="gt-kpi-i gt-kpi--live"><b>{live_n}</b><em>在推进</em></div>'
-           + (f'<div class="gt-kpi-i gt-kpi--risk"><b>{block_n}</b><em>停滞</em></div>' if block_n else '')
-           + (f'<div class="gt-kpi-i gt-kpi--quiet"><b>{quiet_n}</b><em>暂无记录</em></div>' if quiet_n else '')
-           + '</div>')
-    today_r = pct(today) / 100.0
-    today_var = (f'--today-x:{pct(today):.4f}%;--today-ratio:{today_r:.4f};'
-                 f'--today-track-x:calc(236px + (100% - 236px) * {today_r:.4f})') if today else '--today-x:100%;--today-ratio:1'
+    # KPI：严格按 state 五桶划分，并断言加起来等于总行数
+    # （评审：原实现 done+live+blocked+quiet=6≠7，第 7 个 planned 无桶，属于自相矛盾的错）
+    LABELS = [('done', '已验收', 'done'), ('active', '在推进', 'live'),
+              ('blocked', '停滞', 'risk'), ('planned', '筹备', 'idle'),
+              ('unknown', '待核', 'unknown')]
+    counts = {st: sum(1 for r in rows if r['state'] == st) for st, _, _ in LABELS}
+    bad = [r['state'] for r in rows if r['state'] not in counts]
+    if bad:
+        raise ValueError(f'甘特存在未归类状态 {set(bad)}，KPI 会算不平')
+    if sum(counts.values()) != len(rows):
+        raise ValueError('KPI 分桶之和与行数不符，拒绝渲染自相矛盾的图')
+    chips = []
+    for st, label, tone in LABELS:
+        n = counts[st]
+        if n == 0:
+            continue
+        shown = f'{n}<span>/{len(rows)}</span>' if st == 'done' else str(n)
+        chips.append(f'<div class="gt-kpi-i gt-kpi--{tone}"><b>{shown}</b><em>{label}</em></div>')
+    kpi = '<div class="gt-kpi">' + ''.join(chips) + '</div>'
+    today_var = (f'--today-x:{pct(today):.4f}%') if today else '--today-x:100%'
     today_var += f';--days:{total}'
     return (f'<div class="gt" style="{today_var}">' + kpi +
             f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + ''.join(body) +
-            '</div></div>' + far_html +
+            '</div></div>' + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')
 

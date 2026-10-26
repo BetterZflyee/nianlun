@@ -227,14 +227,15 @@
   border:1px solid var(--bar)}
 .gt-bar--plan em{color:var(--g-ink);background:#fff;padding:0 4px;border-radius:2px}
 .gt-pt{position:absolute;top:calc((var(--g-row) - 11px) / 2);width:11px;height:11px;
-  border-radius:50%;transform:translateX(-50%);box-shadow:0 0 0 2px #fff;z-index:3}
+  border-radius:50%;transform:translateX(-50%);box-shadow:0 0 0 2px #fff;z-index:5}
 .gt-stall{position:absolute;top:calc((var(--g-row) - 11px) / 2);width:11px;height:11px;
-  transform:translateX(-50%) rotate(45deg);border-radius:2px;z-index:3;
+  transform:translateX(-50%) rotate(45deg);border-radius:2px;z-index:5;
   box-shadow:0 0 0 2px #fff}
 .gt-pt-lbl{position:absolute;top:calc((var(--g-row) - 15px) / 2);margin-left:14px;
-  font-size:12px;white-space:nowrap;font-weight:500;z-index:4;
+  font-size:12px;white-space:nowrap;font-weight:500;z-index:3;
   background:rgba(255,255,255,.94);padding:1px 4px;border-radius:3px;line-height:1.2}
 .gt-pt-lbl b{margin-left:4px;font-weight:700}
+.gt-pt-lbl-t{font-style:normal}
 .gt-pt-lbl--left{margin-left:0;transform:translateX(calc(-100% - 10px))}
 
 /* 数据缺口 */
@@ -282,7 +283,7 @@
 
 /* ---------- 移动 ≤760px ---------- */
 @media (max-width:760px){
-  .rv-gantt{--name-col:112px;--g-row:44px;--g-bar:14px}
+  .rv-gantt{--name-col:112px;--g-row:44px;--g-bar:18px}
   .gt-kpi{gap:18px}
   .gt-kpi-i b{font-size:22px}
   .gt-kpi-i b span{font-size:12px}
@@ -293,7 +294,7 @@
   .gt-day{font-size:9.5px}
   .gt-days,.gt-track{min-width:0}
   .gt-bar em{font-size:9.5px;padding:0 4px}
-  .gt-pt,.gt-stall{width:8px;height:8px;top:calc((var(--g-row) - 8px) / 2)}
+  .gt-pt,.gt-stall{width:10px;height:10px;top:calc((var(--g-row) - 10px) / 2)}
   .gt-pt-lbl{font-size:9.5px;top:calc((var(--g-row) - 13px) / 2);margin-left:10px;padding:0 3px}
   .gt-pt-lbl--left{transform:translateX(calc(-100% - 8px))}
   .gt-mark b{display:none}
@@ -311,3 +312,12 @@
 /* 数字等宽下沉到文档级：日期/百分比在所有图表里都不抖动 */
 .rv-gantt,.rv-lanes,.rv-status-grid,.rv-static-graph{font-variant-numeric:tabular-nums;
   font-feature-settings:"tnum" 1}
+
+/* 手机端节点标签只保留日期，描述文字收进展开，避免向左展开时被视口裁掉 */
+@media (max-width:760px){
+  /* 手机端：标签一律向右，避免向左展开被视口左边界裁掉 */
+  .gt-pt-lbl-t{display:none}
+  .gt-pt-lbl b{margin-left:0}
+  .gt-pt-lbl{margin-left:9px;padding:0 4px;transform:none}
+  .gt-pt-lbl--left{margin-left:9px;transform:none}
+}

@@ -464,7 +464,7 @@ def gantt_html(config, uid):
                 if lbl:
                     side = 'gt-pt-lbl--left' if x > 76 else ''
                     body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
-                                f'{lbl}<b>{d.month}-{d.day}</b></span>')
+                                f'<i class="gt-pt-lbl-t">{lbl}</i><b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
             # 数据缺口本身是结论：用虚线框显式标出"这里本应有信息但没有"
             body.append('<span class="gt-gap"></span>'

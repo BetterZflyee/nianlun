@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -164,7 +165,7 @@ PROVIDERS={
     'claude':{'name':'Claude Code','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':False,'timer':'host_managed'},
     'workbuddy':{'name':'WorkBuddy','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
     'deepseek':{'name':'DeepSeek Harness','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':True,'timer':'host_managed'},
-    'generic':{'name':'其他 AI 宿主','modes':['delegated'],'reasoning':False,'embedded_workflow':False,'timer':'host_managed'},
+    'generic':{'name':'其他 AI 宿主','modes':['cli','delegated'],'reasoning':True,'embedded_workflow':False,'timer':'host_managed'},
 }
 
 
@@ -220,6 +221,13 @@ def status(preferred=None):
                 'message':'DeepSeek Harness headless 已就绪，推理由本机 dsh 执行' if key else '请在 dsh 中配置模型凭据（SF_LLM_API_KEY）'}
         import deepseek_report
         return {**meta,**deepseek_report.status(choice.get('binary'))}
+    if choice['provider']=='generic' and choice['mode']=='cli':
+        command=custom_command({'command':choice.get('command'),'config_path':choice.get('config_path')})
+        if not command:return {**meta,'available':False,'logged_in':False,'message':'请配置通用 Agent 命令（harness_command），约定 stdin 传入提示词、stdout 返回答案'}
+        executable=shutil.which(command[0]) or command[0]
+        available=Path(executable).exists()
+        return {**meta,'available':available,'logged_in':available,'binary':executable,
+            'message':('通用 Agent 命令已就绪：'+' '.join(command)) if available else ('未找到命令：'+command[0])}
     if choice['mode']=='delegated':
         return {**meta,'available':True,'logged_in':None,'message':meta['name']+'：通过宿主接续；宿主登录和定时能力需在该应用验证'}
     if choice['provider']=='codex':return {**meta,**codex_status(choice.get('binary'))}
@@ -365,6 +373,96 @@ def deepseek_reason(prompt,directory,preferred=None,schema=None,timeout=1200,con
     raise n.Error('DeepSeek Harness 会话重建失败，请检查 dsh 运行状态')
 
 
+def custom_command(preferred=None):
+    """通用 Agent 命令：可来自接入配置的 command 数组，或 config 里的 harness_command。
+    约定 stdin 传入提示词、stdout 返回答案，年轮不假设任何厂商私有参数。"""
+    if isinstance(preferred,dict):
+        command=preferred.get('command')
+        if command:return [str(x) for x in command] if isinstance(command,list) else shlex.split(str(command))
+        config_path=preferred.get('config_path')
+        if config_path:
+            try:
+                command=n.load(config_path).get('growth',{}).get('harness_command')
+                if command:return [str(x) for x in command] if isinstance(command,list) else shlex.split(str(command))
+            except (OSError,ValueError):pass
+    return None
+
+
+def custom_reason(prompt,directory,preferred=None,schema=None,timeout=900):
+    """按 stdin→stdout 约定调用任意外部 Agent CLI。"""
+    directory=Path(directory).resolve();directory.mkdir(parents=True,exist_ok=True)
+    command=custom_command(preferred)
+    if not command:raise n.Error('未配置通用 Agent 命令，请在接入设置或配置中填写 harness_command')
+    executable=shutil.which(command[0]) or command[0]
+    if not Path(executable).exists():raise n.Error('未找到通用 Agent 命令：'+command[0])
+    if schema:
+        prompt=(prompt.rstrip()+'\n\n只返回一个 JSON 对象，严格符合以下 JSON Schema，不要输出解释或代码围栏：\n'
+            +json.dumps(schema,ensure_ascii=False))
+    out=directory/'answer.txt';err=directory/'stderr.txt'
+    # 外部 Agent 若依赖本机已存的模型凭据，沿用同一份，不新增任何密钥来源。
+    env=runtime_env()
+    key=dsh_api_key()
+    if key:env.setdefault('SF_LLM_API_KEY',key)
+    with out.open('w',encoding='utf-8') as o,err.open('w',encoding='utf-8') as e:
+        try:result=subprocess.run([executable]+command[1:],input=prompt,text=True,encoding='utf-8',stdout=o,stderr=e,timeout=timeout,env=env)
+        except subprocess.TimeoutExpired:raise n.Error('通用 Agent 推理超时；未因本次推理执行业务写入')
+    text=out.read_text(encoding='utf-8').strip()
+    if result.returncode and not text:
+        detail=err.read_text(encoding='utf-8').strip().splitlines()
+        raise n.Error('通用 Agent 未完成推理；'+(detail[-1][:180] if detail else '请检查该命令的登录与参数'))
+    if not text:raise n.Error('通用 Agent 返回了空结果')
+    if not schema:return text
+    return structured_answer(text)
+
+
+def json_from_text(raw):
+    """从一段文本里取出 JSON 对象：容忍代码围栏、前后解释和多余空行。"""
+    if not isinstance(raw,str):return None
+    text=raw.strip()
+    if text.startswith('```'):
+        text=re.sub(r'^```[A-Za-z]*\s*','',text)
+        text=re.sub(r'\s*```$','',text).strip()
+    try:
+        value=json.loads(text)
+        if isinstance(value,dict):return value
+    except ValueError:pass
+    start,end=text.find('{'),text.rfind('}')
+    if start>=0 and end>start:
+        try:
+            value=json.loads(text[start:end+1])
+            if isinstance(value,dict):return value
+        except ValueError:pass
+    return None
+
+
+def structured_answer(text):
+    """从任意 Agent 输出中取结构化结果：整体 JSON、JSON 行事件流、或文本中夹带的 JSON。
+    兼容只打印最终答案、以及打印带 type=final 事件流两类工具。"""
+    raw=text.strip()
+    # 只含 type 的事件对象不是答案，先按事件流解析，避免把事件外壳当结果。
+    direct=json_from_text(raw)
+    if direct is not None and 'type' not in direct:return direct
+    objects=[]
+    for line in raw.splitlines():
+        line=line.strip()
+        if not line or not line.startswith('{'):continue
+        try:
+            item=json.loads(line)
+        except ValueError:continue
+        if not isinstance(item,dict):continue
+        if item.get('type')=='final':
+            inner=json_from_text(item.get('text'))
+            if inner is not None:return inner
+        objects.append(item)
+    for item in reversed(objects):
+        for key in ('text','content','message','result','answer'):
+            inner=json_from_text(item.get(key))
+            if inner is not None:return inner
+        if len(item)>1 and 'type' not in item:return item
+    if direct is not None:return direct
+    raise n.Error('通用 Agent 输出未符合结构要求，未执行写入')
+
+
 def cached_answer(directory,prompt):
     """同一运行目录的同一请求复用已完成推理：进程中断或恢复重跑时不再重复消耗模型。"""
     path=Path(directory)/'answer-cache.json'
@@ -404,6 +502,7 @@ def reason(prompt,directory,preferred=None,schema=None,timeout=900):
         return cached
     if choice['provider']=='codex':value=codex_reason(prompt,directory,choice.get('binary'),schema,timeout)
     elif choice['provider']=='deepseek':value=deepseek_reason(prompt,directory,choice.get('binary'),schema,timeout,choice.get('config_path'))
+    elif choice['provider']=='generic':value=custom_reason(prompt,directory,choice,schema,timeout)
     else:value=claude_reason(prompt,directory,choice.get('binary'),schema,timeout)
     host_bridge.validate(value,schema)
     store_answer(directory,prompt,value)

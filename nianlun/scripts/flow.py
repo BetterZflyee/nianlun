@@ -19,6 +19,9 @@ DECISION_SCHEMA={'type':'object','properties':{
     'required':['run_id','summary','pending','deferred_source_ids','actions_json'],'additionalProperties':False}
 
 
+DECISION_RETRIES = 3
+
+
 def prompt_evidence(bundle):
     result={k:v for k,v in bundle.items() if k not in ('tables','todos')}
     result['tables']={role:[{k:v for k,v in row.items() if k!='raw_cells'} for row in bundle['tables'][role]] for role in n.ROLES}
@@ -83,11 +86,31 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                     '当本轮较新原文明确证明某个既有问题已解决，使用 update_status 关闭那条记录为已解决，保留其历史描述；不要另建一条解决记录。'
                     '关闭必须唯一匹配同项目同事项，并逐字引用解决证据；仅安排、预计、讨论或含糊的已完成不可关闭。多个同名事项无法区分时保留 pending。'
                     'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'
+                    'source_id 必须逐字复制本轮证据 sources 里的 id 字段；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
                     '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False)+
                     '\n本轮完整证据：'+evidence+'\n独立记忆空间查询结果：'+json.dumps(memories,ensure_ascii=False))
-                answer=harness.reason(prompt,folder/'harness-decision',binary,DECISION_SCHEMA)
-                try:decision={k:v for k,v in answer.items() if k!='actions_json'};decision['actions']=json.loads(answer['actions_json'])
-                except (KeyError,ValueError,TypeError):raise n.Error('动作计划未能解析，未执行业务写入')
+                # 校验失败时把具体原因反馈给模型再写一稿：盲重试同样的输入只会重复同样的错误。
+                # 每次重试使用独立目录，避免复用上一次被拒绝的答案。
+                decision=None;plan=None;current_prompt=prompt
+                for attempt in range(DECISION_RETRIES):
+                    if attempt:
+                        progress('上一稿证据引用未通过核验，正在按校验意见修正（第 %d 次）' % attempt)
+                    answer=harness.reason(current_prompt,folder/('harness-decision' if not attempt else 'harness-decision-fix%d'%attempt),binary,DECISION_SCHEMA)
+                    try:
+                        decision={k:v for k,v in answer.items() if k!='actions_json'};decision['actions']=json.loads(answer['actions_json'])
+                    except (KeyError,ValueError,TypeError):
+                        current_prompt=prompt+'\n\n上一稿的 actions_json 不是可解析的 JSON 数组。请只返回符合给定 JSON Schema 的完整 JSON。'
+                        continue
+                    try:
+                        plan=g.validate(config,bundle,decision);break
+                    except n.Error as exc:
+                        if attempt==DECISION_RETRIES-1:raise
+                        current_prompt=(prompt+'\n\n上一稿被核验拒绝，原因：'+str(exc)[:500]+
+                            '\n请只针对这个原因修正：重新核对每个动作的 source_id 确实存在于本轮证据 sources 中，'
+                            'quote 必须从该来源 text 里连续逐字复制；无法逐字确认的事项移入 pending 数组，不要编造引用。'
+                            '其余已正确的动作保持不变，返回完整决策 JSON。')
+                        decision=None
+                if decision is None or plan is None:raise n.Error('动作计划未能通过核验，未执行业务写入')
             plan=g.validate(config,bundle,decision)
             for action in plan['actions']:
                 switch={'create_todo':'todos','complete_todo':'completion'}.get(action['op'],'table_writes')

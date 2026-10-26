@@ -16,6 +16,9 @@ from file_lock import file_lock
 WEEKDAYS=('MO','TU','WE','TH','FR','SA','SU')
 
 
+MAX_ATTEMPTS = 3
+
+
 def due_slots(schedule, now, activated_at):
     """At most one catch-up per role in the last day; never replay before activation."""
     if schedule.get('enabled',True) is False:return []
@@ -86,6 +89,11 @@ def tick(config_path, binary=None, now=None, owner='codex'):
                 item.update(status='waiting_harness',handoff=exc.request)
             except Exception as exc:
                 item.update(status='failed',error=str(exc)[:2000])
+                # 连续失败到上限后放弃该轮：清理未完成指针，避免每小时重复同一失败。
+                # 运行目录与证据保留，供人工对账或修正后手工恢复。
+                if item['attempts']>=MAX_ATTEMPTS:
+                    item.update(status='abandoned',abandoned_at=datetime.now(timezone.utc).isoformat())
+                    (state/'active.json').unlink(missing_ok=True)
             signature=n.digest({'status':item['status'],'error':item.get('error'),'handoff':item.get('handoff',{}).get('id')})
             item['notification_key']=signature
             item['notify']=(signature!=previous.get('notification_key') if item['status'] in ('failed','waiting_harness') else

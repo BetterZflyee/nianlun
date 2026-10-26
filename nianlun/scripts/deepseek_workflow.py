@@ -58,7 +58,7 @@ def execute(app,jid,data):
         if cancelled():raise deepseek_report.Cancelled('工作流已停止；已保存的材料和结果仍保留。')
     with file_lock(folder/'workflow.lock'):
         choice=harness.selection(app.config,app.settings.get('codex_bin'))
-        if choice['provider']!='deepseek':raise n.Error('原工作流使用 DeepSeek，请恢复原宿主选择后重试。')
+        if choice['provider']!='deepseek' or choice['mode'] not in ('cli','delegated'):raise n.Error('原工作流使用 DeepSeek，请恢复原宿主选择后重试。')
         config=n.load(app.config);binding=n.digest(config)
         question=text(data.get('question'),'工作要求',20000,True)
         job.update(workflow_engine='deepseek',human_request=question)
@@ -110,8 +110,12 @@ def execute(app,jid,data):
             n.save(frozen,saved)
         check()
         try:
-            answer=deepseek_report.generate(saved['prompt'],folder/'analysis',choice.get('binary'),
-                progress=progress,cancelled=cancelled,task_kind='workflow')['answer']
+            # cli 模式共用直连推理链（凭据注入/会话沿用/结果缓存），避免另一套实现缺凭据。
+            if choice['mode']=='cli':
+                answer=harness.reason(saved['prompt'],folder/'analysis',choice,None,1200)
+            else:
+                answer=deepseek_report.generate(saved['prompt'],folder/'analysis',choice.get('binary'),
+                    progress=progress,cancelled=cancelled,task_kind='workflow')['answer']
         except deepseek_report.Cancelled:raise deepseek_report.Cancelled('工作流已停止；已保存的材料和结果仍保留。')
         except n.Error as exc:raise n.Error(str(exc).replace('报告','工作流').replace('上传或写回','保存最终结果')) from exc
         if len(answer)>240000:raise n.Error('工作流结果过长，尚未保存最终文件，请重试。')

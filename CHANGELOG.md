@@ -1,5 +1,25 @@
 # 更新记录
 
+## 自动生长：宿主无关的自动派发（2026-10-26）
+
+- **任何 AI Agent 都能被年轮自动调用**：`harness.py` 新增通用适配器（`generic` + `cli`），按 stdin 传提示词、stdout 返回答案的约定调用任意外部 Agent CLI，命令来自 `growth.harness_command`。结构化结果解析兼容整体 JSON、代码围栏 JSON、JSON 行事件流（含 `type=final`）、带前后解释的混合输出共 7 种形态。
+- **DeepSeek Harness 支持 cli 直连**：新增 `deepseek_reason()`，通过 `dsh headless --json` 推理，无需人工接续。会话 ID 持久化到 `state/harness-sessions.json` 跨轮次沿用，失效自动重建一次。已实测 DeepSeek 与 Claude Code 两条链均可返回结构化结果。
+- **报告与工作流统一推理链**：`report_reason()` 与 `deepseek_workflow` 在 cli 模式复用 `reason()`，共用凭据注入、会话沿用与缓存。修复前走独立实现未注入凭据，`dsh` 调用 0.9 秒即 error，阶段汇报永远生成不出来。
+- **推理结果缓存**：同一运行目录同一请求复用已完成推理（`answer-cache.json`，按提示词哈希），恢复重跑不再重复消耗模型。
+- **年轮自己的系统定时器**：安装 `com.zhufei.nianlun.tick` launchd（每小时整点 `host.py tick`），核心按业务时间自行判断。不再依赖任何 AI 宿主的计划任务。
+
+## 自动生长：故障自愈
+
+- **失败达上限自动放弃**：连续失败 3 次后标记 abandoned 并清理 `active.json`，运行目录与证据保留。修复前失败不清指针，每小时重复同一失败、`attempts` 累加到 10 后彻底卡死后续操作。
+- **决策校验带反馈重试**：校验拒绝时把具体原因反馈给模型再写一稿（最多 3 稿，各自独立目录避免缓存命中）。修复前是盲重试——同样输入必然同样失败。同时要求 `source_id`/`quote` 逐字复制，无法确认则入 `pending`。
+
+## 阶段汇报：图形校验与渲染宽容化
+
+- **图形类型归一化**：`flow`、`flow LR`、`timeline`、`流程图`、`甘特图`、`时间轴` 等语义写法自动映射到真实类型。
+- **matrix 的 `state` 可省略**（缺省 active）；**graph 节点引用可省略**，但整图仍须至少一处标注依据。
+- **Lead 段总览图可渲染**：`brief_html` 原把 Lead 段整段当纯文字会吞掉紧跟其后的总览图占位符，现单独提到全宽位置。
+- **graph 节点渲染容错**：缺 `source`/`detail` 不再 KeyError。
+
 ## Unreleased — 汇报页面三项改造（feat/report-formal-visual）
 
 - 成稿契约升级 brief-v4-formal：正式书面汇报语体（陈述句、数字/对象/结果开头、禁口语与设问、计划/待核/已核验严格区分），口吻条款优先于所选报告方法的风格示例。

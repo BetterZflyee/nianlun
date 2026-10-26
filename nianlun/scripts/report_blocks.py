@@ -72,8 +72,12 @@ def validate(config, evidence=None):
                 return datetime.date.fromisoformat(value)
             except ValueError as exc:
                 raise ValueError(f'{label} 须为 YYYY-MM-DD 日期') from exc
-        first, last = day(config.get('start'), 'start'), day(config.get('end'), 'end')
-        if last <= first: raise ValueError('gantt 的 end 须晚于 start')
+        # start/end 可省略：省略时由数据自动推出聚焦的时间窗
+        if bool(config.get('start')) != bool(config.get('end')):
+            raise ValueError('gantt 的 start 与 end 需同时给出或同时省略')
+        if config.get('start'):
+            first, last = day(config['start'], 'start'), day(config['end'], 'end')
+            if last <= first: raise ValueError('gantt 的 end 须晚于 start')
         if config.get('today'): day(config['today'], 'today')
         marks = config.get('milestones') or []
         if not isinstance(marks, list) or len(marks) > 8: raise ValueError('里程碑须为 0 至 8 个')
@@ -298,6 +302,167 @@ def chart_svg(config):
     return ''.join(out)+'</svg>'
 
 
+GANTT_TONE = {
+    'done':    ('#e8f0ea', '#2f6350', '#ffffff'),
+    'active':  ('#e3eeea', '#3d7a61', '#ffffff'),
+    'blocked': ('#fbe9e6', '#c0492f', '#ffffff'),
+    'planned': ('#f0f1f3', '#7c848c', '#ffffff'),
+    'unknown': ('#f6f7f8', '#98a1a6', '#ffffff'),
+}
+
+
+def _gantt_span(config):
+    """时间轴范围：优先用给定 start/end，未给则按数据自动留白。"""
+    dates = []
+    for row in config['rows']:
+        for seg in (row.get('segments') or []):
+            dates += [datetime.date.fromisoformat(seg['from']), datetime.date.fromisoformat(seg['to'])]
+        for pt in (row.get('points') or []):
+            dates.append(datetime.date.fromisoformat(pt['date']))
+    for m in (config.get('milestones') or []):
+        dates.append(datetime.date.fromisoformat(m['date']))
+    if config.get('today'):
+        dates.append(datetime.date.fromisoformat(config['today']))
+    if config.get('start') and config.get('end'):
+        return datetime.date.fromisoformat(config['start']), datetime.date.fromisoformat(config['end'])
+    if not dates:
+        today = datetime.date.today()
+        return today - datetime.timedelta(days=7), today + datetime.timedelta(days=21)
+    return min(dates) - datetime.timedelta(days=2), max(dates) + datetime.timedelta(days=3)
+
+
+def gantt_html(config, uid):
+    """时间轴甘特（HTML 版）：日期刻度 + 行泳道 + 节点/区间 + 里程碑 + 今天线，可交互。"""
+    first, last = _gantt_span(config)
+    total = max(1, (last - first).days)
+    def pct(d):
+        return (d - first).days / total * 100.0
+    today = datetime.date.fromisoformat(config['today']) if config.get('today') else None
+    rows = config['rows']
+    marks = config.get('milestones') or []
+
+    # 日期刻度：按跨度自动选密度，避免拥挤
+    tick = 1
+    for step in (1, 2, 3, 7, 14):
+        if total / step <= 16:
+            tick = step
+            break
+    else:
+        tick = max(1, total // 14)
+
+    head = ['<div class="gt-days">']
+    cursor, idx = first, 0
+    while cursor <= last:
+        cls = 'gt-day'
+        if cursor.weekday() >= 5:
+            cls += ' gt-day--weekend'
+        if today and cursor == today:
+            cls += ' gt-day--today'
+        # 月初与首日一定标月份，其余按刻度标日，便于跨月阅读
+        if cursor.day == 1 or idx == 0:
+            lbl = f'{cursor.month}/{cursor.day}'
+        elif idx % tick == 0:
+            lbl = str(cursor.day)
+        else:
+            lbl = ''
+        if lbl:
+            pos = pct(cursor)
+            edge = ' gt-day--edge-l' if pos < 4 else (' gt-day--edge-r' if pos > 96 else '')
+            head.append(f'<span class="{cls}{edge}" style="left:{pos:.4f}%">{lbl}</span>')
+        else:
+            head.append(f'<span class="{cls}" style="left:{pct(cursor):.4f}%"></span>')
+        cursor += datetime.timedelta(days=1)
+        idx += 1
+    head.append('</div>')
+
+    body = ['<div class="gt-body">']
+    for i, row in enumerate(rows):
+        state = row['state']
+        tone_bg, tone_line, _ = GANTT_TONE.get(state, GANTT_TONE['unknown'])
+        segs = row.get('segments') or []
+        pts = row.get('points') or []
+        # 详情面板：把节点与段落合并成时间线，点击行展开
+        detail = []
+        for seg in sorted(segs, key=lambda x: x['from']):
+            detail.append(f'<li><b>{seg["from"][5:]}→{seg["to"][5:]}</b> {escape(seg.get("label") or "推进")}</li>')
+        for pt in sorted(pts, key=lambda x: x['date']):
+            detail.append(f'<li><b>{pt["date"][5:]}</b> {escape(pt.get("label") or "")}</li>')
+        body.append('<details class="gt-item">')
+        body.append('<summary class="gt-row">'
+                    '<span class="gt-cell">'
+                    f'<span class="gt-dot" style="background:{tone_line}"></span>'
+                    f'<span class="gt-name" title="{escape(row["label"])}">{escape(row["label"])}</span>'
+                    f'{refs(row["source"])}'
+                    '</span>')
+        body.append('<span class="gt-track">')
+        if segs:
+            for seg in segs:
+                a = pct(datetime.date.fromisoformat(seg['from']))
+                b = pct(datetime.date.fromisoformat(seg['to']))
+                w = max(1.2, b - a)
+                _, sline, _ = GANTT_TONE.get(seg.get('state') or state, GANTT_TONE['unknown'])
+                label = escape(seg.get('label') or '')
+                txt = f'<em>{label}</em>' if label and w > 7 else ''
+                body.append(f'<span class="gt-bar" style="left:{a:.4f}%;width:{w:.4f}%;'
+                            f'background:{sline}">{txt}</span>')
+        if pts:
+            for pt in pts:
+                x = pct(datetime.date.fromisoformat(pt['date']))
+                _, pline, _ = GANTT_TONE.get(pt.get('state') or state, GANTT_TONE['unknown'])
+                d = datetime.date.fromisoformat(pt['date'])
+                lbl = escape(pt.get('label') or '')
+                body.append(f'<span class="gt-pt" style="left:{x:.4f}%;background:{pline}" '
+                            f'title="{lbl} {d.isoformat()}"></span>')
+                if lbl:
+                    side = 'gt-pt-lbl--left' if x > 76 else ''
+                    body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
+                                f'{lbl}<b>{d.month}-{d.day}</b></span>')
+        if not segs and not pts:
+            body.append('<span class="gt-empty">本期无记录</span>')
+        body.append('</span></summary>')
+        if detail:
+            body.append(f'<div class="gt-detail"><ul>{"".join(detail)}</ul></div>')
+        else:
+            body.append('<div class="gt-detail"><ul><li>本期没有可展开的节点记录</li></ul></div>')
+        body.append('</details>')
+    body.append('</div>')
+
+    # 里程碑标签按需分层：估算标签宽度，贪心放进第一个不重叠的层级
+    placed = []   # (lane, left_pct, right_pct)
+    marks_html = []
+    lanes_used = 1
+    for m in sorted(marks, key=lambda x: x['date']):
+        d = datetime.date.fromisoformat(m['date'])
+        pos = pct(d)
+        half = max(2.6, len(m['label']) * 0.62)   # 标签半宽（百分比，经验值）
+        lane = 0
+        while True:
+            clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)
+                        for l, lp, rp in placed)
+            if not clash:
+                break
+            lane += 1
+        placed.append((lane, pos - half, pos + half))
+        lanes_used = max(lanes_used, lane + 1)
+        marks_html.append(f'<span class="gt-mark" style="left:{pos:.4f}%;--lane:{lane}" '
+                          f'title="{escape(m["label"])} {d.isoformat()}">'
+                          f'<i></i><b>{escape(m["label"])}</b><em>{d.month}-{d.day}</em></span>')
+    mark_height = 12 + lanes_used * 15
+    today_html = ''
+    if today:
+        today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'
+                      f'<i></i><b>今天 {today.month}-{today.day}</b></span>')
+
+    return ('<div class="gt">'
+            f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
+            '<div class="gt-scroll">'
+            '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
+            + ''.join(body) +
+            '</div></div>'
+            '<p class="gt-hint">点击任意一行展开该场地的节点明细'
+            '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')
+
+
 def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
     if kind == 'matrix':
@@ -344,7 +509,7 @@ def figure(config, uid):
         if kind == 'matrix':
             pass
         elif kind == 'gantt':
-            out.append('<figure class="am-flow rv-static-gantt">' + gantt_svg(config) + '</figure>')
+            out.append(gantt_html(config, uid))
         elif kind == 'graph':
             out.append('<figure class="am-flow rv-static-graph">' + graph_svg(config, uid) + '</figure>')
             out.append('<details class="rv-data"><summary>节点说明与依据</summary><ul>')

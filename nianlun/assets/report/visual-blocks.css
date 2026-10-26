@@ -130,3 +130,123 @@
 @media (max-width:760px){
   .rv-visual svg,.rv-static-graph svg{width:100%;height:auto}
 }
+
+/* ============ 时间轴甘特 ============ */
+.rv-gantt{--gt-line:#eceff1;--gt-ink:#1d1d1f;--gt-muted:#8a8f94;--gt-soft:#fafbfc;
+  margin:14px 0;color:var(--gt-ink)}
+.rv-gantt figcaption{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.rv-gantt figcaption strong{font-size:17px;font-weight:600;letter-spacing:-.2px}
+.rv-gantt figcaption span{font-size:13px;color:#5f666b;line-height:1.65}
+.gt{position:relative}
+.gt-marks{position:relative;height:var(--mark-h,40px);margin-left:214px;margin-right:2px;
+  padding-bottom:6px;margin-bottom:2px}
+.gt-mark{position:absolute;top:calc(var(--lane,0) * 15px + 2px);transform:translateX(-50%);text-align:center;
+  white-space:nowrap;font-size:9px;color:#a8802a;display:flex;flex-direction:column;align-items:center;gap:0}
+.gt-mark i{display:block;width:1px;height:12px;background:currentColor;opacity:.55}
+.gt-mark b{font-weight:500;font-size:9px}
+.gt-mark em{font-style:normal;opacity:.7;font-size:8.5px;font-variant-numeric:tabular-nums}
+
+.gt-today{position:absolute;top:0;transform:translateX(-50%);display:flex;flex-direction:column;
+  align-items:center;gap:2px;font-size:10px;color:#E41E2C;white-space:nowrap;z-index:3}
+.gt-today i{display:block;width:2px;height:16px;background:#E41E2C}
+.gt-today b{font-weight:600}
+.gt-scroll{overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch}
+.gt-head{display:grid;grid-template-columns:214px minmax(0,1fr);align-items:stretch;
+  border-bottom:1px solid var(--gt-line)}
+.gt-corner{font-size:10.5px;color:var(--gt-muted);display:flex;align-items:flex-end;padding-bottom:7px}
+.gt-days{position:relative;height:30px;min-width:520px}
+.gt-day{position:absolute;bottom:0;height:30px;line-height:30px;font-size:9.5px;color:var(--gt-muted);
+  text-align:center;border-left:1px solid var(--gt-line);white-space:nowrap;
+  transform:translateX(-50%);padding:0 2px}
+.gt-day--weekend{background:var(--gt-soft)}
+.gt-day--today{background:#fdf0ef;color:#E41E2C;font-weight:600}
+.gt-body{position:relative}
+.gt-item{border-bottom:1px solid var(--gt-line)}
+.gt-item:last-child{border-bottom:none}
+.gt-row{display:grid;grid-template-columns:214px minmax(0,1fr);align-items:stretch;min-height:42px;
+  cursor:pointer;list-style:none;transition:background .12s ease}
+.gt-row::-webkit-details-marker{display:none}
+.gt-row::marker{content:''}
+.gt-item:hover>.gt-row{background:#f7f9fa}
+.gt-item[open]>.gt-row{background:#f4f7f5}
+.gt-cell{display:flex;align-items:center;gap:7px;padding-right:10px;font-size:12.5px;min-width:0}
+.gt-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.gt-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;letter-spacing:-.1px}
+.gt-track{position:relative;min-height:42px;min-width:520px}
+.gt-bar{position:absolute;top:12px;height:18px;border-radius:9px;display:flex;align-items:center;
+  padding:0 9px;box-shadow:0 1px 2px #00000014}
+.gt-bar em{font-style:normal;font-size:9.5px;color:#fff;font-weight:500;white-space:nowrap;
+  letter-spacing:.2px}
+.gt-pt{position:absolute;top:16px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);
+  box-shadow:0 0 0 2px #fff;z-index:2}
+.gt-pt-lbl{position:absolute;top:0;margin-left:9px;font-size:10px;white-space:nowrap;font-weight:500}
+.gt-pt-lbl b{margin-left:4px;font-weight:700}
+.gt-pt-lbl--left{margin-left:0;transform:translateX(calc(-100% - 9px))}
+.gt-empty{position:absolute;left:0;top:0;height:42px;display:flex;align-items:center;
+  font-size:10.5px;color:#b3babf}
+.gt-detail{padding:2px 0 12px 214px;background:#fafbfc;border-top:1px dashed var(--gt-line)}
+.gt-detail ul{margin:0;padding:8px 12px 0 0;list-style:none;display:flex;flex-wrap:wrap;gap:5px 18px}
+.gt-detail li{font-size:11.5px;color:#4b5157;line-height:1.6}
+.gt-detail li b{color:#1d1d1f;font-weight:600;margin-right:5px;font-variant-numeric:tabular-nums}
+.gt-hint{margin:12px 0 0;font-size:10.5px;color:#a9b0b5}
+@media (max-width:760px){
+  /* 移动端：名称列固定不随横向滚动，时间轴可左右滑动 */
+  .gt-head,.gt-row{grid-template-columns:134px minmax(0,1fr)}
+  .gt-marks{margin-left:134px;height:calc(var(--mark-h,40px) + 2px)}
+  .gt-detail{padding-left:0}
+  .gt-days,.gt-track{min-width:520px}
+  .gt-cell{font-size:10.5px}
+  .gt-name{white-space:normal;line-height:1.3;font-size:10.5px;overflow:visible;text-overflow:clip}
+  /* 手机端来源编号让位给场地名，点开行后仍可看到明细 */
+  .gt-cell a{display:none!important}
+  .gt-cell{position:sticky;left:0;z-index:6;background:#fff;padding-right:6px;gap:5px}
+  .gt-corner{position:sticky;left:0;z-index:6;background:#fff}
+  .gt-item:hover>.gt-row .gt-cell{background:#f7f9fa}
+  .gt-item[open]>.gt-row .gt-cell{background:#f4f7f5}
+  .gt-item:has(.gt-empty) .gt-cell{background:#fff}
+  .rv-gantt figcaption strong{font-size:15px}
+  .rv-gantt figcaption span{font-size:12px}
+  .gt-day{font-size:9px}
+  .gt-mark{font-size:8.5px}
+  .gt-mark b{display:none}   /* 手机端里程碑只保留日期，避免标签互相压叠 */
+  .gt-mark em{font-size:8.5px}
+  .gt-pt-lbl{font-size:9px}
+  .gt-hint{font-size:10px}
+}
+@media print{
+  .gt-scroll{overflow:visible}
+  .gt-item{break-inside:avoid}
+  .gt-hint{display:none}
+}
+
+/* 日期标签贴边对齐，避免被裁 */
+.gt-day--edge-l{transform:none;text-align:left}
+.gt-day--edge-r{transform:translateX(-100%);text-align:right}
+.gt-marks{pointer-events:none}
+.gt-mark{pointer-events:auto;cursor:default}
+
+/* 甘特面板内不需要 am 引擎的图表工具栏按钮，去掉以免干扰 */
+.am-panel:has(.rv-gantt) .rv-explore,
+.rv-gantt ~ .rv-explore,
+.rv-gantt .rv-explore{display:none!important}
+/* 条与节点质感 */
+.gt-bar{background-image:linear-gradient(180deg,#ffffff1a,#0000000f)!important;
+  transition:filter .14s ease,transform .14s ease}
+.gt-item:hover .gt-bar{filter:brightness(1.05)}
+.gt-item:hover .gt-name{font-weight:600}
+.gt-pt{transition:transform .14s ease,box-shadow .14s ease}
+.gt-item:hover .gt-pt{transform:translateX(-50%) scale(1.18)}
+.gt-item:hover .gt-pt-lbl{opacity:1}
+.gt-pt-lbl{opacity:.92;transition:opacity .14s ease}
+/* 行分隔更轻，视觉更干净 */
+.gt-item{border-bottom:1px solid #f3f5f6}
+.gt-head{border-bottom:1px solid #e6eaec}
+
+/* 无记录行：整行降低权重，避免与有数据的行抢注意力 */
+.gt-item:has(.gt-empty) .gt-name{color:#a8b0b5}
+.gt-item:has(.gt-empty) .gt-dot{opacity:.5}
+/* 里程碑竖线延伸进图区，强化"时间栅栏"感 */
+.gt-mark i{height:14px}
+
+.gt-hint-sw{display:none}
+@media (max-width:760px){.gt-hint-sw{display:inline}}

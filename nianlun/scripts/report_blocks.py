@@ -61,6 +61,8 @@ def validate(config, evidence=None):
             if row.get('stage') not in stages: raise ValueError('矩阵行的阶段须在 stages 中')
             if row.get('detail') is not None: text(row['detail'], 60, 'detail')
             if row.get('next') is not None and row['next'] != '': text(row['next'], 60, 'next')
+        # 统一按推进节奏排序：已完成/最接近完成的在前，筹备与未启动的在后；同阶段内保持原顺序。
+        config['items'] = sorted(rows, key=lambda r: stages.index(r['stage']), reverse=True)
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')
         if not isinstance(rows, list) or not 2 <= len(rows) <= 9: raise ValueError('关系图须为 2 至 9 个节点')
@@ -192,11 +194,19 @@ def figure(config, uid):
     kind = config['type']; out = [f'<figure class="rv-visual rv-{kind}" data-recap-visual="{kind}"><figcaption><strong>{escape(config["title"])}</strong><span>{escape(config["caption"])}</span></figcaption>']
     if kind == 'matrix':
         stages = config['stages']
-        out.append('<div class="rv-matrix-wrap"><table class="rv-matrix"><thead><tr><th class="rv-mx-name">对象</th>')
+        # RAG 语义：受阻=红、待核/不明=琥珀、正常推进=绿、未启动=灰
+        RAG = {'blocked': ('红', '#bc4941'), 'unknown': ('琥珀', '#c58a2e'),
+               'done': ('绿', '#2f6350'), 'active': ('绿', '#2f6350'), 'planned': ('灰', '#9bb09d')}
+        done_count = sum(1 for r in config['items'] if r['state'] == 'done')
+        total = len(config['items'])
+        out.append(f'<div class="rv-matrix-wrap"><table class="rv-matrix"><caption class="rv-mx-cap">'
+                   f'{done_count}/{total} 已完成 · 按推进节奏由上至下排列</caption>'
+                   f'<thead><tr><th class="rv-mx-name">对象</th>')
         out.extend('<th>' + escape(s) + '</th>' for s in stages)
-        out.append('<th class="rv-mx-col">当前判断</th></tr></thead><tbody>')
+        out.append('<th class="rv-mx-rag">状态</th><th class="rv-mx-col">当前判断</th></tr></thead><tbody>')
         for row in config['items']:
             label, color = STATES[row['state']]
+            rag_name, rag_color = RAG.get(row['state'], ('—', '#9bb09d'))
             here = stages.index(row['stage'])
             cells = []
             for i in range(len(stages)):
@@ -206,8 +216,14 @@ def figure(config, uid):
             note = escape(row.get('detail', ''))
             if row.get('next'): note += ('；' if note else '') + '<b>下一步</b>' + escape(row['next'])
             out.append('<tr><th class="rv-mx-name">' + escape(row['label']) + '</th>' + ''.join(cells)
+                       + f'<td class="rv-mx-rag"><span class="rv-rag" style="--rag:{rag_color}" title="{rag_name}"></span></td>'
                        + '<td class="rv-mx-col">' + note + ' ' + refs(row['source']) + '</td></tr>')
-        out.append('</tbody></table></div>')
+        out.append('</tbody></table>')
+        out.append('<p class="rv-mx-legend"><span class="rv-rag" style="--rag:#2f6350"></span>绿 正常推进 '
+                   '<span class="rv-rag" style="--rag:#c58a2e"></span>琥珀 待核 '
+                   '<span class="rv-rag" style="--rag:#bc4941"></span>红 受阻 '
+                   '<span class="rv-rag" style="--rag:#9bb09d"></span>灰 未启动 '
+                   '<i>实心格为已走过的阶段</i></p></div>')
         items_legend = ''.join(f'<li><b>{escape(r["label"])}</b>：{escape(r.get("detail","") or "—")} {refs(r["source"])}</li>' for r in config['items'] if r.get('detail'))
         if items_legend: out.append('<details class="rv-data"><summary>逐项依据</summary><ul>' + items_legend + '</ul></details>')
     elif kind == 'status':

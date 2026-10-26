@@ -10,7 +10,7 @@
 {"type":"matrix","title":"四场地推进梯队","caption":"两个场地在试运行，验收与安装各一，进度梯度清晰。","stages":["筹备","安装","试运行","验收"],"items":[{"label":"武汉吴家山","stage":"验收","state":"done","detail":"验收议程待售前参与。","next":"排定验收时间。","source":"[S3][R13]"},{"label":"西安汉唐","stage":"试运行","state":"blocked","detail":"调试受映射表缺失阻塞。","next":"补齐映射表。","source":"[S2][R19]"}]}
 ```
 
-stages 2–6 个真实阶段名；items 1–12 行，每行一个对象。stage 必须是 stages 之一，state 用 done/active/blocked/planned/unknown。detail ≤60 字、next ≤60 字可省略。用于让读者一屏看清多对象分布梯度与卡点位置，不要用它替代后续分项论证。
+stages 2–6 个真实阶段名，按推进先后排列；items 1–12 行，**必须按阶段由后往前排序**（已完成/最接近完成的在前，筹备与未启动的在后，同阶段按重要性），程序会兜底按 stages 顺序重排。stage 必须是 stages 之一，state 用 done/active/blocked/planned/unknown。detail ≤60 字、next ≤60 字可省略。用于让读者一屏看清多对象分布梯度与卡点位置，不要用它替代后续分项论证。
 
 ### 状态对照（无数值时优先）
 

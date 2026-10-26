@@ -61,9 +61,16 @@
 .rv-matrix th.rv-mx-name{text-align:left;min-width:110px;background:#e8eee0}
 .rv-matrix th.rv-mx-col,.rv-matrix td.rv-mx-col{text-align:left;min-width:190px;background:transparent;font-weight:400;color:#3c4d44;font-size:12px;padding:6px 8px}
 .rv-matrix td{padding:9px 6px;border-radius:6px;text-align:center}
-.rv-matrix td.rv-mx-past{background:#2f635022}
-.rv-matrix td.rv-mx-future{background:#9bb09d1a}
+.rv-matrix td.rv-mx-past{background:#2f63503d;box-shadow:inset -1px 0 0 #f6f8f0}
+.rv-matrix td.rv-mx-future{background:repeating-linear-gradient(135deg,#9bb09d20 0 4px,transparent 4px 8px)}
 .rv-matrix td.rv-mx-now{background:var(--state);color:#fff;font-weight:600;box-shadow:0 2px 8px #0000001f}
 .rv-matrix td.rv-mx-now span{white-space:nowrap}
 .rv-matrix tbody tr:hover th.rv-mx-name{background:#dfe8d6}
 @media print{.rv-matrix{font-size:10px}.rv-matrix td{padding:4px 3px}}
+
+.rv-matrix caption.rv-mx-cap{caption-side:top;text-align:left;font-size:12px;color:#56685d;padding:0 0 8px 2px}
+.rv-matrix th.rv-mx-rag{min-width:40px;background:#e8eee0}
+.rv-matrix td.rv-mx-rag{text-align:center;background:transparent}
+.rv-rag{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--rag);vertical-align:middle}
+.rv-mx-legend{font-size:11px;color:#56685d;margin:8px 0 0 2px;display:flex;flex-wrap:wrap;align-items:center;gap:4px}
+.rv-mx-legend i{margin-left:10px;font-style:normal;opacity:.75}

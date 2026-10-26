@@ -93,7 +93,7 @@ def parse(markdown, evidence=None):
         except (ValueError, TypeError, KeyError) as exc: raise ValueError('可视化格式：' + str(exc)) from exc
         token = 'NLVISUAL' + hashlib.sha256(match[0].encode()).hexdigest()[:20].upper() + str(len(blocks))
         blocks.append((token, config))
-        if len(blocks) > 3: raise ValueError('精简汇报最多 3 张图')
+        if len(blocks) > 6: raise ValueError('精简汇报最多 6 张图')
         return '\n\n' + token + '\n\n'
     return FENCE.sub(replace, markdown), blocks
 

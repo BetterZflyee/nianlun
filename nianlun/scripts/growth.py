@@ -694,6 +694,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
             import report_style
             progress('正在按所选汇报样式生成可视化报告')
             html=report_style.render(report_method,md,folder,p['title']+' · 阶段回顾',appendix_html=source_details,subtitle=since+' — '+until)
+        html=report_brief.citation_tooltips(html,source_index)
         n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
         progress('正在上传报告到已绑定的文件夹')
         receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)

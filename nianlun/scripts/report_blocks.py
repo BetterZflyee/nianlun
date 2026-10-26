@@ -332,8 +332,7 @@ def _gantt_span(config):
             dates += [datetime.date.fromisoformat(seg['from']), datetime.date.fromisoformat(seg['to'])]
         for pt in (row.get('points') or []):
             dates.append(datetime.date.fromisoformat(pt['date']))
-    for m in (config.get('milestones') or []):
-        dates.append(datetime.date.fromisoformat(m['date']))
+    # 里程碑不参与焦点窗计算：否则远期节点会把整条轴拉长，画面大半留白
     if config.get('today'):
         dates.append(datetime.date.fromisoformat(config['today']))
     if config.get('start') and config.get('end'):
@@ -416,7 +415,6 @@ def gantt_html(config, uid):
                     f'<span class="gt-name" title="{escape(row["label"])}">{escape(row["label"])}</span>'
                     f'<em class="gt-stage" style="color:{tone_line};border-color:{tone_line}">'
                     f'{escape(row.get("stage") or {"done":"已完成","active":"推进中","blocked":"受阻","planned":"未启动","unknown":"待核"}.get(state,""))}</em>'
-                    f'{refs(row["source"])}'
                     '</span>')
         body.append('<span class="gt-track">')
         if segs:
@@ -445,7 +443,8 @@ def gantt_html(config, uid):
             body.append('<span class="gt-empty">本期无记录</span>')
         body.append('</span></summary>')
         if detail:
-            body.append(f'<div class="gt-detail"><ul>{"".join(detail)}</ul></div>')
+            body.append('<div class="gt-detail"><ul>' + ''.join(detail)
+                        + f'<li class="gt-detail-src">依据 {refs(row["source"])}</li></ul></div>')
         else:
             body.append('<div class="gt-detail"><ul><li>本期没有可展开的节点记录</li></ul></div>')
         body.append('</details>')
@@ -483,7 +482,7 @@ def gantt_html(config, uid):
                         f'{datetime.date.fromisoformat(m["date"]).month}-'
                         f'{datetime.date.fromisoformat(m["date"]).day}</em></span>'
                         for m in sorted(far_marks, key=lambda x: x['date']))
-        far_html = '<div class="gt-far-bar"><span class="gt-far-lbl">之后</span>' + chips + '</div>'
+        far_html = '<div class="gt-far-bar"><span class="gt-far-lbl">此窗之后 →</span>' + chips + '</div>'
     today_var = f'--today-x:{pct(today):.4f}%' if today else '--today-x:100%'
     return (f'<div class="gt" style="{today_var}">'
             f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'

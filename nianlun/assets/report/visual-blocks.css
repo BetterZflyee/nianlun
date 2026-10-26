@@ -138,7 +138,7 @@
 .rv-gantt figcaption strong{font-size:17px;font-weight:600;letter-spacing:-.2px}
 .rv-gantt figcaption span{font-size:13px;color:#5f666b;line-height:1.65}
 .gt{position:relative}
-.gt-marks{position:relative;height:var(--mark-h,40px);margin-left:214px;margin-right:2px;
+.gt-marks{position:relative;height:var(--mark-h,40px);margin-left:236px;margin-right:2px;
   padding-bottom:6px;margin-bottom:2px}
 .gt-mark{position:absolute;top:calc(var(--lane,0) * 15px + 2px);transform:translateX(-50%);text-align:center;
   white-space:nowrap;font-size:9px;color:#a8802a;display:flex;flex-direction:column;align-items:center;gap:0}
@@ -151,7 +151,7 @@
 .gt-today i{display:block;width:2px;height:16px;background:#E41E2C}
 .gt-today b{font-weight:600}
 .gt-scroll{overflow-x:auto;overflow-y:visible;-webkit-overflow-scrolling:touch}
-.gt-head{display:grid;grid-template-columns:214px minmax(0,1fr);align-items:stretch;
+.gt-head{display:grid;grid-template-columns:236px minmax(0,1fr);align-items:stretch;
   border-bottom:1px solid var(--gt-line)}
 .gt-corner{font-size:10.5px;color:var(--gt-muted);display:flex;align-items:flex-end;padding-bottom:7px}
 .gt-days{position:relative;height:30px;min-width:520px}
@@ -163,7 +163,7 @@
 .gt-body{position:relative}
 .gt-item{border-bottom:1px solid var(--gt-line)}
 .gt-item:last-child{border-bottom:none}
-.gt-row{display:grid;grid-template-columns:214px minmax(0,1fr);align-items:stretch;min-height:42px;
+.gt-row{display:grid;grid-template-columns:236px minmax(0,1fr);align-items:stretch;min-height:44px;
   cursor:pointer;list-style:none;transition:background .12s ease}
 .gt-row::-webkit-details-marker{display:none}
 .gt-row::marker{content:''}
@@ -172,19 +172,19 @@
 .gt-cell{display:flex;align-items:center;gap:7px;padding-right:10px;font-size:12.5px;min-width:0}
 .gt-dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
 .gt-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;letter-spacing:-.1px}
-.gt-track{position:relative;min-height:42px;min-width:520px}
-.gt-bar{position:absolute;top:12px;height:18px;border-radius:9px;display:flex;align-items:center;
+.gt-track{position:relative;min-height:44px;min-width:520px}
+.gt-bar{position:absolute;top:13px;height:18px;z-index:2;border-radius:9px;display:flex;align-items:center;
   padding:0 9px;box-shadow:0 1px 2px #00000014}
 .gt-bar em{font-style:normal;font-size:9.5px;color:#fff;font-weight:500;white-space:nowrap;
   letter-spacing:.2px}
-.gt-pt{position:absolute;top:16px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);
+.gt-pt{position:absolute;top:17px;width:10px;height:10px;border-radius:50%;transform:translateX(-50%);
   box-shadow:0 0 0 2px #fff;z-index:2}
-.gt-pt-lbl{position:absolute;top:0;margin-left:9px;font-size:10px;white-space:nowrap;font-weight:500}
+.gt-pt-lbl{position:absolute;top:14px;margin-left:14px;z-index:3;font-size:10px;white-space:nowrap;font-weight:500;line-height:1.1}
 .gt-pt-lbl b{margin-left:4px;font-weight:700}
-.gt-pt-lbl--left{margin-left:0;transform:translateX(calc(-100% - 9px))}
-.gt-empty{position:absolute;left:0;top:0;height:42px;display:flex;align-items:center;
+.gt-pt-lbl--left{margin-left:0;transform:translateX(calc(-100% - 14px))}
+.gt-empty{position:absolute;left:0;top:0;height:44px;display:flex;align-items:center;
   font-size:10.5px;color:#b3babf}
-.gt-detail{padding:2px 0 12px 214px;background:#fafbfc;border-top:1px dashed var(--gt-line)}
+.gt-detail{padding:2px 0 12px 236px;background:#fafbfc;border-top:1px dashed var(--gt-line)}
 .gt-detail ul{margin:0;padding:8px 12px 0 0;list-style:none;display:flex;flex-wrap:wrap;gap:5px 18px}
 .gt-detail li{font-size:11.5px;color:#4b5157;line-height:1.6}
 .gt-detail li b{color:#1d1d1f;font-weight:600;margin-right:5px;font-variant-numeric:tabular-nums}
@@ -256,3 +256,22 @@
   transparent 0, transparent var(--today-x,100%),
   #fafbfc var(--today-x,100%), #fafbfc 100%)}
 .gt-day--weekend{background-color:transparent}
+
+/* 行内阶段徽标：一眼看出该对象处在哪一档 */
+.gt-stage{font-style:normal;font-size:9.5px;line-height:1;padding:2px 5px;border-radius:4px;
+  border:1px solid currentColor;opacity:.85;white-space:nowrap;flex:0 0 auto}
+/* 轴外远期里程碑：不拉长时间轴，在底部单独一行呈现 */
+.gt-far-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 0;
+  padding-left:236px;justify-content:flex-end;padding-right:4px}
+.gt-far-lbl{font-size:10px;color:#a8802a;letter-spacing:.5px;flex:0 0 auto}
+.gt-far{display:inline-flex;align-items:baseline;gap:5px;padding:3px 9px;border-radius:20px;
+  background:#fdf8ee;border:1px solid #efdfc2;font-size:10.5px;color:#8a6a1f}
+.gt-far b{font-weight:500}
+.gt-far em{font-style:normal;font-size:9.5px;opacity:.75;font-variant-numeric:tabular-nums}
+@media (max-width:760px){
+  .gt-stage{font-size:9px;padding:1px 4px}
+  .gt-far-bar{padding-left:134px}
+}
+
+.gt-detail-src{margin-left:auto;opacity:.75;font-size:10.5px}
+.gt-detail ul{justify-content:flex-start}

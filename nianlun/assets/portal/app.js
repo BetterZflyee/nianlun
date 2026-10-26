@@ -2152,14 +2152,23 @@ function renderSetup(root) {
                     },
                     progress,
                   );
-                  scheduleState.textContent = result.value.scheduler_active
-                    ? "设置已保存，原生调度已验证。"
-                    : scheduleEnabled.checked
-                      ? "设置已保存；请完成下方首次定时接入。"
-                      : "设置已保存，自动生长已暂停。";
+                  const warnings = result.value.warnings || [];
+                  const saved =
+                    result.value.scheduler_active
+                      ? "设置已保存，原生调度已验证。"
+                      : scheduleEnabled.checked
+                        ? "设置已保存；请完成下方首次定时接入。"
+                        : "设置已保存，自动生长已暂停。";
                   boot = await api("/api/bootstrap");
                   refreshSetupInsight();
-                  scheduleState.textContent = boot.scheduler.message;
+                  // 未启用的来源要明确告知，但不能覆盖掉"已保存"本身。
+                  if (warnings.length) {
+                    scheduleState.textContent =
+                      saved + " 以下来源未启用（其余设置已生效）：" + warnings.join("；");
+                    toast("已保存，但有 " + warnings.length + " 个来源未启用");
+                  } else {
+                    scheduleState.textContent = saved + (boot.scheduler?.message ? " " + boot.scheduler.message : "");
+                  }
                 }),
               ),
             "primary",

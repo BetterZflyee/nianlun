@@ -332,9 +332,14 @@ class Setup:
         notification=preferences.get('notification_mode',settings.get('notification_mode','every_run'))
         if type(lookback)!=int or not 24<=lookback<=168:raise n.Error('听记补采范围应为 24 至 168 小时')
         if notification not in ('every_run','changes'):raise n.Error('请选择摘要推送方式')
+        warnings=[]
         if sources.get('lark_minutes'):
             from source_state import lark_command
-            lark_command(settings)  # Detect the local executable; enabling never silently installs or switches identity.
+            try:
+                lark_command(settings)  # Detect the local executable; enabling never silently installs or switches identity.
+            except (n.Error,OSError) as exc:
+                warnings.append('飞书妙记未启用：'+str(exc))
+                sources['lark_minutes']=False
         state=Path(settings.get('state_dir',self.config_path.parent/'runtime'));state.mkdir(parents=True,exist_ok=True)
         gw=self.gateway(config['profile']);identity=self_identity(gw)
         groups=preferences.get('groups',settings.get('groups',[]))
@@ -347,11 +352,17 @@ class Setup:
             else:
                 from project_actions import verified_group
                 checked.append(verified_group(config,gw,{'search_id':item.get('search_id'),'group_id':item.get('id')}))
-        if sources.get('groups') and not checked:raise n.Error('请先搜索并选择要采集的群')
+        if sources.get('groups') and not checked:
+            warnings.append('「我选择的群聊」未启用：请先在下方搜索并选择要采集的群，再勾选并保存')
+            sources['groups']=False
         mailbox=preferences.get('mailbox',settings.get('mailbox',''))
         if sources.get('mail'):
             from intake import check_mailbox
-            check_mailbox(gw,mailbox)
+            try:
+                check_mailbox(gw,mailbox)
+            except n.Error as exc:
+                warnings.append('「我选择的邮箱」未启用：'+str(exc))
+                sources['mail']=False
         folder=preferences.get('report_folder') or settings.get('report_folder')
         if folder and '://' in folder:folder=parse_base(folder)[0]
         if switches['reports'] and not folder: raise n.Error('请先选择或创建阶段汇报文件夹')
@@ -387,7 +398,7 @@ class Setup:
             n.save(scheduler,{'active':False,'status':'awaiting_codex','harness':'Codex / GPT','timezone':schedule['timezone']})
         n.build_home(n.fetch(config,gw.table()),settings['home_output'],config)
         return {'configured':True,'home':settings['home_output'],'schedule_request':str(self.directory/'schedule-request.json'),
-                'scheduler_active':n.load(scheduler).get('active',False)}
+                'scheduler_active':n.load(scheduler).get('active',False),'warnings':warnings}
 
     def schedule_request(self, config):
         marker='nianlun:'+n.digest(str(self.config_path))[:16]

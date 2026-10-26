@@ -548,14 +548,8 @@ def gantt_html(config, uid):
         # 0.62 是按 1440px（track≈900px）的标定值；取 1.0 作折中，
         # 让 761-1000 的平板带（track≈500-760px）也不叠字，代价是宽屏偶尔多分一层
         half = max(3.2, len(m['label']) * 1.0)
-        today_pos = pct(today) if today else None
         lane = 0
         while True:
-            # 「今天」胶囊固定占 lane 0 的对应位置，里程碑与之重叠时错到下一层
-            if (today_pos is not None and lane == 0
-                    and abs(pos - today_pos) < max(half, 6.0)):
-                lane += 1
-                continue
             clash = any(l == lane and not (pos + half < lp - 0.6 or pos - half > rp + 0.6)
                         for l, lp, rp in placed)
             if not clash:
@@ -567,7 +561,8 @@ def gantt_html(config, uid):
                           f'title="{escape(m["label"])} {d.isoformat()}">'
                           f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
                           f'<em>{d.month}-{d.day}</em></span></span>')
-    mark_height = 14 + lanes_used * 16   # 每层 16px，与平板带的 14px 步长留出余量
+    # 顶部 22px 留给「今天」胶囊（它是绝对定位在 marks 顶部的），里程碑从这条带之下开始
+    mark_height = 22 + 14 + lanes_used * 16
     today_html = ''
     if today:
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'

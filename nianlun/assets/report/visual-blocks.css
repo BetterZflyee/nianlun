@@ -171,7 +171,7 @@
 
 /* 里程碑区 */
 .gt-marks{position:relative;height:var(--mark-h,40px);padding-bottom:10px}
-.gt-mark{position:absolute;top:calc(var(--lane,0) * 15px + 2px);transform:translateX(-50%);
+.gt-mark{position:absolute;top:calc(22px + var(--lane,0) * 16px);transform:translateX(-50%);
   text-align:center;white-space:nowrap;font-size:11px;color:#7A5C18;
   display:flex;flex-direction:column;align-items:center;gap:0;z-index:2}
 .gt-mark b{background:rgba(255,255,255,.92);padding:0 3px;border-radius:2px}
@@ -422,5 +422,5 @@
 @media (min-width:761px) and (max-width:1000px){
   .gt-mark b{font-size:9.5px;padding:0 2px}
   .gt-mark em{font-size:9px}
-  .gt-mark{top:calc(var(--lane,0) * 14px + 2px)}
+  .gt-mark{top:calc(22px + var(--lane,0) * 15px)}
 }

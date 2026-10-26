@@ -512,6 +512,9 @@ def reason(prompt,directory,preferred=None,schema=None,timeout=900):
 def report_reason(prompt,directory,preferred=None,schema=None,timeout=900,progress=lambda message:None,cancelled=lambda:False):
     """Direct DeepSeek reports do not change the selected host's other workflows."""
     choice=normalize(preferred)
+    # cli 模式与生长共用同一条直连推理链（凭据注入、会话沿用、结果缓存），
+    # 避免报告走另一套实现导致凭据缺失或行为不一致。
+    if choice['mode']=='cli':return reason(prompt,directory,preferred,schema,timeout)
     if choice['provider']!='deepseek':return reason(prompt,directory,preferred,schema,timeout)
     import deepseek_report
     import host_bridge

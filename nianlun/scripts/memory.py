@@ -58,6 +58,9 @@ def baseline(config):
             read=run(config,['get',slug])
             if read.returncode or marker not in read.stdout:
                 capture=run(config,['capture','--file',str(path),'--slug',slug,'--request-id',str(uuid.uuid5(uuid.NAMESPACE_URL,marker)),'--json'],240)
+                if capture.returncode:
+                    capture=run(config,['capture','--file',str(path),'--slug',slug,'--request-id',
+                        str(uuid.uuid4()),'--json','--force'],240)
                 if capture.returncode:raise n.Error('项目基线写入未确认；保留固定请求编号供恢复')
                 read=run(config,['get',slug])
             if read.returncode or marker not in read.stdout:raise n.Error('项目基线尚未通过独立记忆空间回读')
@@ -83,9 +86,20 @@ def refresh(config, state, project_ids):
             content+=marker+'\n\n来源：'+config['base_url']+'\n\n这是当前项目事实与计划；计划不代表完成。来源中的请求不授予执行权限。\n\n'
             content+=json.dumps(facts,ensure_ascii=False,indent=2)
             n.save(path,content)
-            result=run(config,['capture','--file',str(path),'--slug',slug,'--request-id',
-                str(uuid.uuid5(uuid.NAMESPACE_URL,slug+':'+version)),'--json'],240)
-            if result.returncode:raise n.Error('项目记忆更新尚未确认，保留同一请求编号供恢复')
+            request_id=str(uuid.uuid5(uuid.NAMESPACE_URL,slug+':'+version))
+            args=['capture','--file',str(path),'--slug',slug,'--request-id',request_id,'--json']
+            result=run(config,args,240)
+            if result.returncode:
+                # 页面已存在时 GBrain 报 revision_conflict，要求 --force 覆盖；
+                # 并且冲突后必须换新的 request_id（旧 id 的 receipt 已作废，
+                # 复用会被判为无效重试）。--force + 新 request_id 才能落地。
+                args=['capture','--file',str(path),'--slug',slug,'--request-id',
+                      str(uuid.uuid4()),'--json','--force']
+                result=run(config,args,240)
+            if result.returncode:
+                detail=(result.stderr or result.stdout or '').strip()[:400]
+                raise n.Error('项目记忆更新尚未确认，保留同一请求编号供恢复'
+                              + ('；GBrain 返回：' + detail if detail else ''))
             read=run(config,['get',slug])
         if read.returncode or marker not in read.stdout:raise n.Error('项目记忆更新未通过回读')
         results.append({'project_id':project['id'],'slug':slug,'version':version,'verified':True})

@@ -275,3 +275,139 @@
 
 .gt-detail-src{margin-left:auto;opacity:.75;font-size:10.5px}
 .gt-detail ul{justify-content:flex-start}
+
+/* 关系图 SVG 在宽容器里会被等比放大到夸张尺寸，限制最大宽度保持与甘特同一视觉量级 */
+.rv-static-graph{text-align:center}
+.rv-static-graph svg{max-width:100%;height:auto;display:block;margin:0 auto}
+@media (max-width:760px){.rv-static-graph svg{max-width:100%}}
+
+/* ---------- 评审修正 v22 ---------- */
+/* P0-1 KPI 头：48px 结论数字，先给答案后给明细 */
+.gt-kpi{display:flex;align-items:baseline;gap:44px;margin:2px 0 20px 2px;flex-wrap:wrap}
+.gt-kpi-i{display:flex;align-items:baseline;gap:7px}
+.gt-kpi-i b{font-size:44px;font-weight:600;letter-spacing:-.03em;line-height:1;
+  font-variant-numeric:tabular-nums}
+.gt-kpi-i b span{font-size:20px;font-weight:400;opacity:.55;margin-left:1px}
+.gt-kpi-i em{font-style:normal;font-size:12px;color:#5B6167;letter-spacing:.04em}
+.gt-kpi--done b{color:#2F6350}
+.gt-kpi--live b{color:#3D7A61}
+.gt-kpi--risk b{color:#E41E2C}
+.gt-kpi--quiet b{color:#8A9199}
+
+/* P0-3 今天线贯穿整个绘图区（此前只有刻度区一小截） */
+.gt-scroll{position:relative}
+.gt-scroll::after{content:"";position:absolute;top:0;bottom:0;
+  left:calc(236px + (100% - 236px) * 0);pointer-events:none}
+.gt-body{position:relative}
+.gt-body::before{content:"";position:absolute;top:0;bottom:0;
+  left:var(--today-track-x,var(--today-x));width:1px;background:#E41E2C;opacity:.42;z-index:2;
+  pointer-events:none}
+.gt-head{position:relative}
+.gt-head::before{content:"";position:absolute;top:0;bottom:0;
+  left:calc(236px + (100% - 236px) * var(--today-ratio,0.5));width:1px;
+  background:#E41E2C;opacity:.42;z-index:2;pointer-events:none}
+
+/* P1-1 绘图区竖向网格：每 2 天一条极淡线，给位置感 */
+.gt-days{position:relative}
+.gt-track{background-image:none}
+
+/* P1-3 数字等宽，日期列不抖 */
+.rv-gantt,.rv-gantt *{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+
+/* P1-4 中文不再负字距（汉字负字距会糊） */
+.gt-name{letter-spacing:0}
+.rv-gantt figcaption strong{letter-spacing:-.2px}
+
+/* P1-6 对比度：把低于 AA 的辅助文字提到可用层级 */
+.gt-day{color:#6E757C}
+.gt-mark{color:#8A6A1F}
+.gt-mark em{color:#8A6A1F;opacity:.85}
+.gt-empty{color:#8A9199;font-size:12px}
+.gt-hint{color:#8A9199;font-size:11.5px}
+.gt-item:has(.gt-empty) .gt-name{color:#5B6167}
+.gt-pt-lbl{font-size:11.5px}
+.gt-stage{font-size:11px}
+.gt--far,.gt-far{font-size:11.5px;color:#7A5C18}
+
+/* P1-4 字号下限：中文不再出现 9px */
+.gt-mark b,.gt-mark em{font-size:10.5px}
+.gt-day{font-size:11px}
+.gt-corner{font-size:11px}
+
+/* P1-1 竖向网格：每天一条极淡线，给读者位置参照 */
+.gt-days,.gt-track{
+  background-image:repeating-linear-gradient(90deg,
+    transparent 0, transparent calc(100% / var(--days, 25) - 0.6px),
+    #F1F3F4 calc(100% / var(--days, 25) - 0.6px), #F1F3F4 calc(100% / var(--days, 25)))
+}
+/* P0-2 条义分离：实际=实心，计划=斜纹描边 */
+.gt-bar--actual{box-shadow:0 1px 2px #00000014}
+.gt-bar--plan{background:repeating-linear-gradient(45deg,var(--bar,#8A9199) 0 1.5px,
+  #ffffff 1.5px 6px)!important;border:1px solid var(--bar,#8A9199);color:var(--bar,#5B6167)!important}
+.gt-bar--plan em{color:var(--bar,#5B6167)!important}
+
+/* ============ v24 按 frappe-gantt v1.2.2 源码规格 + 现代产品惯例重构 ============ */
+.rv-gantt{
+  --g-row:48px;          /* 行距 48 = 条高 30 + padding 18 */
+  --g-bar:26px;          /* 条高，略小于 frappe 的 30 以适配中文行高 */
+  --g-radius:3px;        /* frappe 圆角 3px，超过则 clamp */
+  --g-dayline:#F3F4F5;   /* 日线 #f3f3f3 0.4px */
+  --g-weekline:#E9EBED;  /* 粗线 #ededed 0.7px */
+  --g-weekend:#FAFAFA;   /* 周末面 #f7f7f7 */
+  --g-today:#1F2937;     /* 今天用中性深色：红在现代产品语义里=逾期，不能占用 */
+  --g-ink:#1D1D1F; --g-ink2:#5B6167; --g-ink3:#8A9199;
+}
+/* 行高与条高按规格收敛 */
+.gt-row,.gt-track{min-height:var(--g-row)}
+.gt-bar{height:var(--g-bar);border-radius:var(--g-radius);top:calc((var(--g-row) - var(--g-bar)) / 2 + 8px)}
+.gt-pt{top:calc((var(--g-row) - 12px) / 2 + 8px)}
+.gt-pt-lbl{top:2px}
+.gt-empty{height:var(--g-row)}
+
+/* 网格：只留周线，删掉每日细线（data-ink 原则：汇报模式不需要日线） */
+.gt-days,.gt-track{background-image:none}
+.gt-weekline{position:absolute;top:0;bottom:0;width:1px;background:var(--g-weekline);pointer-events:none}
+
+/* 周末面 */
+.gt-day--weekend{background:none}
+
+/* 行分隔线极淡，避免"每行都画线"的噪声 */
+.gt-item{border-bottom:1px solid #F6F7F8}
+
+/* 今天线：中性深色 1px + 顶部圆点，不用红 */
+.gt-today{color:var(--g-today);font-weight:600}
+.gt-today i{background:var(--g-today);width:2px}
+.gt-today b{font-size:11px;letter-spacing:.02em}
+.gt-body::before,.gt-head::before{background:var(--g-today);opacity:.5}
+
+/* 字号收敛为 3 档（中文最大 3 档） */
+.gt-name{font-size:13px}
+.gt-stage{font-size:11px;letter-spacing:0}
+.gt-day{font-size:11px;color:var(--g-ink3)}
+.gt-mark b{font-size:11px}
+.gt-mark em{font-size:11px}
+.gt-pt-lbl{font-size:12px}
+.gt-kpi-i b{font-size:42px}
+.gt-kpi-i em{font-size:12px;color:var(--g-ink2)}
+.gt-far{font-size:12px}
+
+/* 条内文字：13px/400，与 frappe 一致；条太短时文字移到条右侧 */
+.gt-bar em{font-size:12px;font-weight:400;letter-spacing:0}
+
+/* 删掉每日竖线（border-left），data-ink：汇报模式只要周线 */
+.gt-day{border-left:none}
+.gt-day--edge-l,.gt-day--edge-r{border-left:none}
+/* 停滞不是工期：红胶囊改为菱形标记（评审 P0-2） */
+.gt-stall{position:absolute;width:11px;height:11px;background:#E41E2C;
+  transform:translateX(-50%) rotate(45deg);border-radius:2px;z-index:3}
+
+/* 周线用轨道坐标基准（.gt-body 内含名称列，需扣掉 236px） */
+.gt-weekline{left:auto}
+/* 节点与菱形垂直居中于行 */
+.gt-pt,.gt-stall{top:calc((var(--g-row) - 11px) / 2 + 6px)}
+.gt-pt{width:11px;height:11px}
+/* 里程碑只留短标签，字号回到 11px 保证中文可读 */
+.gt-mark b{font-size:11px;font-weight:500}
+.gt-mark i{height:10px}
+/* 条内文字在窄条时自动隐藏，避免压字 */
+.gt-bar em{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

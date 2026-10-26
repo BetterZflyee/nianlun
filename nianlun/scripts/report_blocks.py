@@ -108,12 +108,13 @@ def validate(config, evidence=None):
             segs = row.get('segments') or []
             if not isinstance(segs, list) or len(segs) > 6: raise ValueError('每行分段须为 0 至 6 段')
             for seg in segs:
-                if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state'}:
+                if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state', 'kind'}:
                     raise ValueError('分段字段不合法')
                 a, b = day(seg.get('from'), '分段起点'), day(seg.get('to'), '分段终点')
                 if b < a: raise ValueError('分段终点早于起点')
                 text(seg.get('label'), 12, '分段说明')
                 if seg.get('state') and seg['state'] not in STATES: raise ValueError('分段状态不合法')
+                if seg.get('kind') not in (None, 'actual', 'plan'): raise ValueError('分段类型只能为 actual 或 plan')
             pts = row.get('points') or []
             if not isinstance(pts, list) or len(pts) > 6: raise ValueError('每行节点须为 0 至 6 个')
             for pt in pts:
@@ -203,7 +204,12 @@ def positions(config):
 def graph_svg(config, uid):
     pos, width, height = positions(config); out = []
     marker = uid + '-arrow'
-    out.append(f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{escape(config["title"])}"><defs><marker id="{marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f947e"/></marker></defs>')
+    # 直接给出显示尺寸：SVG 作为替换元素在 flex/百分比下宽度解析不稳定，写死像素最可靠
+    show_w = 660
+    show_h = max(1, round(height * show_w / width))
+    out.append(f'<svg viewBox="0 0 {width} {height}" width="{show_w}" height="{show_h}" '
+               f'role="img" aria-label="{escape(config["title"])}" '
+               f'style="max-width:100%;height:auto;display:block;margin:0 auto"><defs><marker id="{marker}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6f947e"/></marker></defs>')
     for link in config['links']:
         x, y = pos[link['from']]; xx, yy = pos[link['to']]
         direction = 1 if xx > x else -1
@@ -315,12 +321,13 @@ def chart_svg(config):
     return ''.join(out)+'</svg>'
 
 
+# 三值编码：完成 / 在推进 / 静默；品牌红只留给风险与今天线（评审 P1-5）
 GANTT_TONE = {
-    'done':    ('#e8f0ea', '#2f6350', '#ffffff'),
-    'active':  ('#e3eeea', '#3d7a61', '#ffffff'),
-    'blocked': ('#fbe9e6', '#c0492f', '#ffffff'),
-    'planned': ('#f0f1f3', '#7c848c', '#ffffff'),
-    'unknown': ('#f6f7f8', '#98a1a6', '#ffffff'),
+    'done':    ('#e8f0ea', '#2F6350', '#ffffff'),
+    'active':  ('#e5efe9', '#3D7A61', '#ffffff'),
+    'blocked': ('#fbe9e6', '#E41E2C', '#ffffff'),
+    'planned': ('#f1f2f4', '#8A9199', '#ffffff'),
+    'unknown': ('#f4f5f6', '#8A9199', '#ffffff'),
 }
 
 
@@ -396,7 +403,14 @@ def gantt_html(config, uid):
         idx += 1
     head.append('</div>')
 
-    body = ['<div class="gt-body">']
+    # 每 7 天一条周分隔线（比日线更安静，符合 data-ink 原则）
+    weeklines = []
+    for i in range(1, total + 1):
+        d = first + datetime.timedelta(days=i)
+        if d.weekday() == 0:
+            weeklines.append('<span class="gt-weekline" style="left:calc(236px + (100% - 236px) * '
+                             f'{pct(d)/100:.4f})"></span>')
+    body = ['<div class="gt-body">'] + weeklines
     for i, row in enumerate(rows):
         state = row['state']
         tone_bg, tone_line, _ = GANTT_TONE.get(state, GANTT_TONE['unknown'])
@@ -425,8 +439,13 @@ def gantt_html(config, uid):
                 _, sline, _ = GANTT_TONE.get(seg.get('state') or state, GANTT_TONE['unknown'])
                 label = escape(seg.get('label') or '')
                 txt = f'<em>{label}</em>' if label and w > 7 else ''
-                body.append(f'<span class="gt-bar" style="left:{a:.4f}%;width:{w:.4f}%;'
-                            f'background:{sline}">{txt}</span>')
+                kind = seg.get('kind') or 'actual'
+                if kind == 'plan':
+                    body.append(f'<span class="gt-bar gt-bar--plan" style="left:{a:.4f}%;width:{w:.4f}%;'
+                                f'--bar:{sline}">{txt}</span>')
+                else:
+                    body.append(f'<span class="gt-bar gt-bar--actual" style="left:{a:.4f}%;width:{w:.4f}%;'
+                                f'background:{sline}">{txt}</span>')
         if pts:
             for pt in pts:
                 x = pct(datetime.date.fromisoformat(pt['date']))
@@ -469,7 +488,7 @@ def gantt_html(config, uid):
         lanes_used = max(lanes_used, lane + 1)
         marks_html.append(f'<span class="gt-mark" style="left:{pos:.4f}%;--lane:{lane}" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
-                          f'<i></i><b>{escape(m["label"])}</b><em>{d.month}-{d.day}</em></span>')
+                          f'<i></i><b>{escape(m["label"])}</b></span>')
     mark_height = 12 + lanes_used * 15
     today_html = ''
     if today:
@@ -483,8 +502,22 @@ def gantt_html(config, uid):
                         f'{datetime.date.fromisoformat(m["date"]).day}</em></span>'
                         for m in sorted(far_marks, key=lambda x: x['date']))
         far_html = '<div class="gt-far-bar"><span class="gt-far-lbl">此窗之后 →</span>' + chips + '</div>'
-    today_var = f'--today-x:{pct(today):.4f}%' if today else '--today-x:100%'
-    return (f'<div class="gt" style="{today_var}">'
+    # KPI 头：领导第一眼要看到结论，而不是自己去数绿点
+    done_n = sum(1 for r in rows if r['state'] == 'done')
+    block_n = sum(1 for r in rows if r['state'] == 'blocked')
+    quiet_n = sum(1 for r in rows if not (r.get('segments') or r.get('points')))
+    live_n = sum(1 for r in rows if r['state'] == 'active')
+    kpi = ('<div class="gt-kpi">'
+           f'<div class="gt-kpi-i gt-kpi--done"><b>{done_n}<span>/{len(rows)}</span></b><em>已验收</em></div>'
+           f'<div class="gt-kpi-i gt-kpi--live"><b>{live_n}</b><em>在推进</em></div>'
+           + (f'<div class="gt-kpi-i gt-kpi--risk"><b>{block_n}</b><em>停滞</em></div>' if block_n else '')
+           + (f'<div class="gt-kpi-i gt-kpi--quiet"><b>{quiet_n}</b><em>暂无记录</em></div>' if quiet_n else '')
+           + '</div>')
+    today_r = pct(today) / 100.0
+    today_var = (f'--today-x:{pct(today):.4f}%;--today-ratio:{today_r:.4f};'
+                 f'--today-track-x:calc(236px + (100% - 236px) * {today_r:.4f})') if today else '--today-x:100%;--today-ratio:1'
+    today_var += f';--days:{total}'
+    return (f'<div class="gt" style="{today_var}">' + kpi +
             f'<div class="gt-marks" style="--mark-h:{mark_height}px">' + ''.join(marks_html) + today_html + '</div>'
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'

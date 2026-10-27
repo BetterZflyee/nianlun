@@ -46,6 +46,10 @@ def validate(config, evidence=None):
     if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
     def source(value):
+        # 依据是可选的：里程碑/计划项本身没有出处（未来计划无从引用），
+        # 无出处时跳过校验；一旦给了就必须是合法的 [R#] 编号
+        if value is None or value == '':
+            return
         text(value, 150)
         refs = CITE.findall(value)
         if not refs: raise ValueError('图形须使用 [R1] 等给定依据编号')
@@ -92,7 +96,7 @@ def validate(config, evidence=None):
             if last <= first: raise ValueError('gantt 的 end 须晚于 start')
         if config.get('today'): day(config['today'], 'today')
         marks = config.get('milestones') or []
-        if not isinstance(marks, list) or len(marks) > 8: raise ValueError('里程碑须为 0 至 8 个')
+        if not isinstance(marks, list) or len(marks) > 16: raise ValueError('里程碑须为 0 至 16 个')
         for m in marks:
             if not isinstance(m, dict) or set(m) - {'date', 'label', 'source'}:
                 raise ValueError('里程碑字段不合法')
@@ -359,16 +363,12 @@ def _gantt_span(config):
     for m in marks:
         start_candidates.append(datetime.date.fromisoformat(m['date']))
     first = min(start_candidates)
-    near, far = [], []
-    for m in marks:
-        md = datetime.date.fromisoformat(m['date'])
-        # 今天及以前的里程碑全部上图；晚于今天的属于「未来排期」，放轴外右侧
-        (near if md <= today else far).append(m)
-    # 轴向右留 2 天余量给「今天」，向左留 1 天让最早节点不贴边
+    # 未来计划里程碑也要落轴上（用户要求图上体现规划），因此不再有「轴外里程碑」：
+    # 时间轴一直拉到最晚的那个里程碑（当前是 11-30 验收目标）
+    near, far = list(marks), []
     first = first - datetime.timedelta(days=1)
-    # 终点贴着最后一个事件，右侧最多留 1 天；末端标签靠「向左展开」解决，
-    # 不能靠拉长时间轴——否则今天线停在 88%，右边一条空带看起来像图画歪了
-    core = max(today, max(dates)) + datetime.timedelta(days=1)
+    core = max([today, max(dates)] + [datetime.date.fromisoformat(m['date']) for m in marks]) \
+        + datetime.timedelta(days=1)
     return first, core, far
 
 
@@ -443,12 +443,34 @@ def gantt_html(config, uid):
         if d <= last and d.weekday() == 0:
             week_dates.append(pct(d))
     week_spans = ''.join(f'<span class="gt-week" style="left:{p:.4f}%"></span>' for p in week_dates)
+    # 里程碑按场地编码挂到对应行：标题里带 028W/571WA 这类编码的里程碑，
+    # 若能匹配到某一行，就作为该行的「计划验收节点」，并在实际区间之后
+    # 补一段计划区间（斜纹）——这是图上体现未来规划的方式
+    code_marks = {}
+    for m in (config.get('milestones') or []):
+        mc = re.search(r'(\d{3}[A-Z]{1,2})', m.get('label') or '')
+        if mc:
+            code_marks.setdefault(mc.group(1).upper(), []).append(m)
+
     body = ['<div class="gt-body">']
     for i, row in enumerate(rows):
         state = row['state']
         tone_bg, tone_line, _ = GANTT_TONE.get(state, GANTT_TONE['unknown'])
-        segs = row.get('segments') or []
-        pts = row.get('points') or []
+        segs = list(row.get('segments') or [])
+        pts = list(row.get('points') or [])
+        rc = re.search(r'(\d{3}[A-Z]{1,2})', row.get('label') or '')
+        plan_marks = code_marks.get(rc.group(1).upper(), []) if rc else []
+        for pm in plan_marks:
+            pd = datetime.date.fromisoformat(pm['date'])
+            last = max((datetime.date.fromisoformat(x['to']) for x in segs),
+                       default=None) or max((datetime.date.fromisoformat(x['date']) for x in pts),
+                                            default=None)
+            # 计划区间：从「最后一次实际记录」到「计划验收日」，斜纹表示尚未发生
+            if last and pd > last:
+                segs.append({'from': last.isoformat(), 'to': pd.isoformat(),
+                             'label': '计划验收', 'state': 'planned', 'kind': 'plan',
+                             'marks': [last.isoformat()]})
+            pts.append({'date': pm['date'], 'label': pm['label'], 'state': 'planned'})
         # 详情面板：把节点与段落合并成时间线，点击行展开
         detail = []
         for seg in sorted(segs, key=lambda x: x['from']):
@@ -551,9 +573,15 @@ def gantt_html(config, uid):
 
     # 里程碑标签按需分层：估算标签宽度，贪心放进第一个不重叠的层级
     placed = []   # (lane, left_pct, right_pct)
+    # 已按场地编码挂到行上的里程碑，不再在「里程碑」行重复出现
+    _row_codes = {re.search(r'(\d{3}[A-Z]{1,2})', r.get('label') or '').group(1).upper()
+                  for r in rows if re.search(r'(\d{3}[A-Z]{1,2})', r.get('label') or '')}
+    _standalone = [m for m in (config.get('milestones') or [])
+                   if not (re.search(r'(\d{3}[A-Z]{1,2})', m.get('label') or '')
+                           and re.search(r'(\d{3}[A-Z]{1,2})', m.get('label') or '').group(1).upper() in _row_codes)]
     marks_html = []
     lanes_used = 1
-    for m in sorted(marks, key=lambda x: x['date']):
+    for m in sorted(_standalone, key=lambda x: x['date']):
         d = datetime.date.fromisoformat(m['date'])
         pos = pct(d)
         # 标签半宽（百分比）。宽屏（≥901px）track≈900px，1% ≈ 9px，中文 11px ≈ 1.2%/字，

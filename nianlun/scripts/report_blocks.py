@@ -570,17 +570,17 @@ def gantt_html(config, uid):
             lane += 1
         placed.append((lane, pos - half, pos + half))
         lanes_used = max(lanes_used, lane + 1)
-        edge = ' gt-mark--edge-r' if pos > 86 else (' gt-mark--edge-l' if pos < 6 else '')
+        edge = ' gt-mark--edge-r' if pos > 76 else (' gt-mark--edge-l' if pos < 8 else '')
         # 直接内联算好的 top（不用 --lane 自定义属性）：钉钉/微信文档粘贴 HTML 时
         # 会清洗内联 style 里的 --xxx，被删后 calc(36px + var(--lane,0)*16px)
         # 里 fallback 取 0，所有里程碑塌到同一行叠在一起，看起来就是「一堆奇怪的数字」。
-        mark_top = 36 + lane * 16
+        mark_top = lane * 18
         marks_html.append(f'<span class="gt-mark{edge}" style="left:{pos:.4f}%;top:{mark_top}px" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
                           f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
                           f'<em>{d.month}-{d.day}</em></span></span>')
     # 顶部 22px 留给「今天」胶囊（它是绝对定位在 marks 顶部的），里程碑从这条带之下开始
-    mark_height = 36 + 14 + lanes_used * 16
+    mark_height = max(48, 30 + lanes_used * 18)   # 行内高度：标签层 + 菱形+日期行
     today_html = ''
     if today:
         today_html = (f'<span class="gt-today" style="left:{pct(today):.4f}%">'
@@ -643,13 +643,23 @@ def gantt_html(config, uid):
     # --today-x / --days 从未被任何 CSS 消费（死代码），一并移除，
     # 避免内联自定义属性被文档编辑器清洗后产生意外
     today_var = ''
+    # 里程碑是甘特图的一行，不再是浮在表头上方的「图外数字」：
+    # 它和场地行共用同一个时间坐标系，读者一眼能看出某个节点落在哪个日期的竖切面上
+    today_in_head = f'<div class="gt-head gt-head--today">{today_html}</div>'
+    mile_row = ''
+    if marks_html:
+        mile_row = (
+            '<div class="gt-item gt-item--mile">'
+            f'<div class="gt-row gt-row--mile" style="--mile-h:{mark_height}px">'
+            '<span class="gt-cell"><span class="gt-dot gt-dot--mile"></span>'
+            '<span class="gt-name">里程碑</span></span>'
+            f'<span class="gt-track gt-track--mile">{"".join(marks_html)}</span>'
+            '</div></div>')
     return (f'<div class="gt" style="{today_var}">' + kpi + filter_html +
             '<div class="gt-scroll">'
-            f'<div class="gt-head gt-head--marks" style="height:{mark_height}px">'
-            '<div class="gt-corner"></div>'
-            f'<div class="gt-marks">{"".join(marks_html)}{today_html}</div></div>'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
-            + ''.join(body) +
+            + today_in_head
+            + ''.join(body) + mile_row +
             '</div>' + ms_list + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')

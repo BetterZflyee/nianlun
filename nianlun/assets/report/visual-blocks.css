@@ -494,3 +494,54 @@
   .gt-pt-lbl{display:none}
   .gt-bar{font-size:10px}
 }
+
+/* 里程碑行：作为甘特图主体的一行，与场地行同一时间坐标系。
+   过去它浮在表头上方（.gt-head--marks），读者看到的是「图外面一堆奇怪的数字」。 */
+.gt-item--mile{border-top:1px solid #E2E7EA;margin-top:2px;padding-top:2px}
+.gt-row--mile{min-height:var(--mile-h,60px);align-items:flex-start;
+  padding-top:calc(var(--mile-h,60px) - 30px)}
+.gt-row--mile .gt-cell{align-items:flex-start;padding-top:0}
+.gt-dot--mile{background:#8A6A1F;width:7px;height:7px;border-radius:1px;
+  transform:rotate(45deg);margin-top:3px}
+.gt-name--mile{letter-spacing:.02em}
+.gt-track--mile{position:relative}
+/* 行内里程碑：标签在上、竖线指向下方时间轴，菱形标记在日期行左侧 */
+.gt-track--mile .gt-mark{top:auto;bottom:2px;transform:translateX(-50%);
+  display:flex;flex-direction:column;align-items:center;gap:2px}
+.gt-track--mile .gt-mark i{order:2;height:0}
+.gt-track--mile .gt-mark .gt-mark-t{order:1}
+.gt-track--mile .gt-today{top:auto;bottom:2px}
+/* 菱形锚点画在日期行下方，与时间轴对齐 */
+.gt-track--mile .gt-mark::after{content:"";position:absolute;left:50%;bottom:-9px;
+  width:7px;height:7px;background:#8A6A1F;transform:translateX(-50%) rotate(45deg);border-radius:1px}
+.gt-track--mile .gt-today::after{content:"";position:absolute;left:50%;bottom:-9px;
+  width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:6px solid #1F2937;transform:translateX(-50%)}
+@media (max-width:760px){
+  .gt-track--mile .gt-mark::after{width:6px;height:6px;bottom:-8px}
+}
+
+/* 行内里程碑：菱形必须精确落在日期的竖切线上，名称从菱形右侧展开。
+   居中对齐会让名称跨在日期之间，读者对不上是哪天。 */
+.gt-track--mile .gt-mark{transform:translateX(0);align-items:flex-start}
+.gt-track--mile .gt-mark::after{left:0;transform:translateX(-50%) rotate(45deg)}
+.gt-track--mile .gt-mark .gt-mark-t{padding-left:6px}
+.gt-track--mile .gt-today{transform:translateX(0)}
+.gt-track--mile .gt-today::after{left:0;transform:translateX(-50%)}
+.gt-track--mile .gt-today b{margin-left:0}
+/* 今天胶囊在里程碑行内靠右时改为向左展开，避免溢出卡片 */
+.gt-track--mile .gt-today[style*="left:9"],.gt-track--mile .gt-today[style*="left:8"]{transform:translateX(-100%)}
+.gt-track--mile .gt-today[style*="left:9"]::after,.gt-track--mile .gt-today[style*="left:8"]::after{left:100%}
+
+/* 今天标记独占一条细带，位于时间轴刻度与场地行之间：不占行高、不与里程碑抢位 */
+.gt-head--today{height:26px;position:relative;overflow:visible}
+.gt-head--today .gt-today{position:absolute;top:0;transform:translateX(-50%)}
+.gt-head--today .gt-today i{height:10px}
+.gt-head--today .gt-today b{font-size:10px;padding:1px 7px}
+/* 里程碑行内不再有今天胶囊，全部空间留给里程碑名称 */
+.gt-track--mile .gt-today{display:none}
+
+/* 行内里程碑靠右时：菱形仍锚在日期，名称向左展开，避免被卡片右边界裁掉 */
+.gt-track--mile .gt-mark--edge-r{transform:translateX(-100%);align-items:flex-end}
+.gt-track--mile .gt-mark--edge-r::after{left:100%;transform:translateX(-50%) rotate(45deg)}
+.gt-track--mile .gt-mark--edge-r .gt-mark-t{padding-left:0;padding-right:6px;text-align:right}

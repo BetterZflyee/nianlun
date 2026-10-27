@@ -464,7 +464,8 @@ def gantt_html(config, uid):
                     f'{escape(row.get("stage") or {"done":"已完成","active":"推进中","blocked":"受阻","planned":"未启动","unknown":"待核"}.get(state,""))}</em>'
                     '</span>')
         if today:
-            body.append(f'<span class="gt-track gt-track--today" style="--today-pct:{pct(today):.4f}%">')
+            body.append(f'<span class="gt-track gt-track--today">'
+                        f'<i class="gt-today-line" style="left:{pct(today):.4f}%"></i>')
         else:
             body.append('<span class="gt-track">')
         body.append(week_spans)
@@ -570,7 +571,11 @@ def gantt_html(config, uid):
         placed.append((lane, pos - half, pos + half))
         lanes_used = max(lanes_used, lane + 1)
         edge = ' gt-mark--edge-r' if pos > 86 else (' gt-mark--edge-l' if pos < 6 else '')
-        marks_html.append(f'<span class="gt-mark{edge}" style="left:{pos:.4f}%;--lane:{lane}" '
+        # 直接内联算好的 top（不用 --lane 自定义属性）：钉钉/微信文档粘贴 HTML 时
+        # 会清洗内联 style 里的 --xxx，被删后 calc(36px + var(--lane,0)*16px)
+        # 里 fallback 取 0，所有里程碑塌到同一行叠在一起，看起来就是「一堆奇怪的数字」。
+        mark_top = 36 + lane * 16
+        marks_html.append(f'<span class="gt-mark{edge}" style="left:{pos:.4f}%;top:{mark_top}px" '
                           f'title="{escape(m["label"])} {d.isoformat()}">'
                           f'<i></i><span class="gt-mark-t"><b>{escape(m["label"])}</b>'
                           f'<em>{d.month}-{d.day}</em></span></span>')
@@ -635,11 +640,12 @@ def gantt_html(config, uid):
         f'#gtf-{uid}-{k}:checked~.gt-scroll .gt-item:not([data-state="{k}"]){{display:none}}'
         for k, _ in flist if k != 'all')
     filter_html = f'{finputs}<div class="gt-filter">{flabels}</div><style>{frules}</style>'
-    today_var = (f'--today-x:{pct(today):.4f}%') if today else '--today-x:100%'
-    today_var += f';--days:{total}'
+    # --today-x / --days 从未被任何 CSS 消费（死代码），一并移除，
+    # 避免内联自定义属性被文档编辑器清洗后产生意外
+    today_var = ''
     return (f'<div class="gt" style="{today_var}">' + kpi + filter_html +
             '<div class="gt-scroll">'
-            f'<div class="gt-head gt-head--marks" style="--mark-h:{mark_height}px">'
+            f'<div class="gt-head gt-head--marks" style="height:{mark_height}px">'
             '<div class="gt-corner"></div>'
             f'<div class="gt-marks">{"".join(marks_html)}{today_html}</div></div>'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'

@@ -171,7 +171,7 @@
 
 /* 里程碑区 */
 .gt-marks{position:relative;height:var(--mark-h,40px);padding-bottom:10px}
-.gt-mark{position:absolute;top:calc(36px + var(--lane,0) * 16px);transform:translateX(-50%);
+.gt-mark{position:absolute;top:36px;transform:translateX(-50%);
   text-align:center;white-space:nowrap;font-size:11px;color:#7A5C18;
   display:flex;flex-direction:column;align-items:center;gap:0;z-index:2}
 .gt-mark b{background:rgba(255,255,255,.92);padding:0 3px;border-radius:2px}
@@ -218,7 +218,7 @@
 /* 轨道：所有图形元素都在这里，百分比即轨道百分比 */
 .gt-track{position:relative;min-height:var(--g-row);min-width:0}
 .gt-week{position:absolute;top:0;bottom:0;width:1px;background:var(--g-week);z-index:0}
-.gt-track--today::before{content:"";position:absolute;top:0;bottom:0;left:var(--today-pct,50%);
+.gt-today-line{position:absolute;top:0;bottom:0;
   width:2px;margin-left:-1px;background:#8A9199;z-index:1}
 .gt-bar{position:absolute;top:calc((var(--g-row) - var(--g-bar)) / 2);height:var(--g-bar);
   border-radius:var(--g-radius);display:flex;align-items:center;padding:0 9px;z-index:2}

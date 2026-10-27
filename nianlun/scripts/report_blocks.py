@@ -96,7 +96,7 @@ def validate(config, evidence=None):
             if last <= first: raise ValueError('gantt 的 end 须晚于 start')
         if config.get('today'): day(config['today'], 'today')
         marks = config.get('milestones') or []
-        if not isinstance(marks, list) or len(marks) > 16: raise ValueError('里程碑须为 0 至 16 个')
+        if not isinstance(marks, list) or len(marks) > 24: raise ValueError('里程碑须为 0 至 24 个')
         for m in marks:
             if not isinstance(m, dict) or set(m) - {'date', 'label', 'source'}:
                 raise ValueError('里程碑字段不合法')
@@ -564,7 +564,8 @@ def gantt_html(config, uid):
                 parts.append(f'<p class="gt-detail-note">{note}</p>')
             if detail:
                 parts.append('<ul class="gt-detail-tl">' + ''.join(detail) + '</ul>')
-            parts.append(f'<p class="gt-detail-src">依据 {refs(row["source"])}</p>')
+            if row.get('source'):
+                parts.append(f'<p class="gt-detail-src">依据 {refs(row["source"])}</p>')
             body.append('<div class="gt-detail">' + ''.join(parts) + '</div>')
         else:
             body.append('<div class="gt-detail"><p class="gt-detail-note">本期没有可展开的节点记录</p></div>')
@@ -687,7 +688,9 @@ def gantt_html(config, uid):
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + today_in_head
-            + ''.join(body) + mile_row +
+            # 里程碑行放在场地行之上、紧贴时间轴：读者先看关键节点再看具体推进，
+            # 也让它成为图的一部分而不是底部的附加块
+            + mile_row + ''.join(body) +
             '</div>' + ms_list + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')

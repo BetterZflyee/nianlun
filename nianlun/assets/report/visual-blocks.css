@@ -497,7 +497,7 @@
 
 /* 里程碑行：作为甘特图主体的一行，与场地行同一时间坐标系。
    过去它浮在表头上方（.gt-head--marks），读者看到的是「图外面一堆奇怪的数字」。 */
-.gt-item--mile{border-top:1px solid #E2E7EA;margin-top:2px;padding-top:2px}
+.gt-item--mile{border-bottom:1px solid #E2E7EA;margin-bottom:2px;padding-bottom:2px}
 .gt-row--mile{min-height:var(--mile-h,60px);align-items:flex-start;
   padding-top:calc(var(--mile-h,60px) - 30px)}
 .gt-row--mile .gt-cell{align-items:flex-start;padding-top:0}

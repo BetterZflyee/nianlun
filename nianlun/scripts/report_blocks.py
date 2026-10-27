@@ -499,7 +499,8 @@ def gantt_html(config, uid):
                 w = max(1.2, raw_w)   # 兜底最小可见宽度
                 _, sline, _ = GANTT_TONE.get(seg.get('state') or state, GANTT_TONE['unknown'])
                 label = escape(seg.get('label') or '')
-                txt = f'<em>{label}</em>' if label and w > 7 else ''
+                # 长窗口下条变窄，宽度不足 12% 时条内不写字（会被省略号切成碎片）
+                txt = f'<em>{label}</em>' if label and w > 18 else ''
                 # 零长度或极短区间（from==to、只有 1 天）画成条会变成一个圆角小方块，
                 # 语义上就是一个「节点」，改用圆点表达
                 if raw_w < 1.2:   # 原始跨度不足 1.2%，本质是「一个节点」不是「一段区间」

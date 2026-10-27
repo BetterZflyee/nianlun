@@ -15,9 +15,11 @@ def sources(facts, memory_pages):
     result=[]
     for role,prefix in [('projects','P'),('records','R'),('milestones','M'),('sites','S')]:
         for i,row in enumerate(facts.get(role,[]),1):
+            body='\n'.join(str(row[k]) for k in ('code','goal','description','risk','notes','benefit','owner') if row.get(k))
             result.append({'key':prefix+str(i),'kind':role,'title':row.get('title','未命名'),
+                'code':row.get('code',''),
                 'date':row.get('date',''),'status':row.get('status',''),'url':row.get('table_url',''),
-                'text':'\n'.join(str(row[k]) for k in ('goal','description','risk','notes','benefit','owner') if row.get(k))})
+                'text':body})
     for i,page in enumerate(memory_pages,1):
         result.append({'key':'K'+str(i),'kind':'memory','title':page.get('title','未命名'),
             'slug':page.get('slug',''),'source_id':page.get('source_id'),
@@ -135,6 +137,18 @@ def issues(markdown,evidence):
     fences=re.findall(r'^```([^\n]*)$',markdown,re.M)
     if len(fences)%2 or any(fences[i].split(' ',1)[0] not in ('visual','flow','timeline','kv','callout') or fences[i+1].strip() for i in range(0,len(fences)-1,2)):
         errors.append('图形围栏只能用 visual、flow、timeline、kv、callout，并须完整闭合')
+    # 甘特必须覆盖 evidence 里在管的全部场地：模型很容易只挑「有近期记录的」，
+    # 把零记录的新场地（如杭州城南571WF）整个漏掉；也可能编出材料里没有的场地
+    site_titles = [x.get('title','') for x in evidence if x.get('kind')=='sites']
+    for block, cfg in blocks:
+        if cfg.get('type') != 'gantt':
+            continue
+        rows_txt = ' '.join(r.get('label','') for r in cfg.get('rows') or [])
+        missing = [t for t in site_titles if t and t not in rows_txt
+                   and t.replace('转运中心','').replace('转运枢纽','').replace('中心','') not in rows_txt]
+        if missing:
+            errors.append('甘特漏了在管场地：' + '、'.join(missing[:6]) +
+                          '。每个场地必须单独占一行（同城不同场地也不能合并）')
     # 甘特的分段必须带 marks（该区间内真正有记录的日期），否则读者无法判断长条中间是否空档
     for block, cfg in blocks:
         if cfg.get('type') != 'gantt':

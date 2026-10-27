@@ -545,3 +545,9 @@
 .gt-track--mile .gt-mark--edge-r{transform:translateX(-100%);align-items:flex-end}
 .gt-track--mile .gt-mark--edge-r::after{left:100%;transform:translateX(-50%) rotate(45deg)}
 .gt-track--mile .gt-mark--edge-r .gt-mark-t{padding-left:0;padding-right:6px;text-align:right}
+
+/* 长窗口（如 70 天跨到 11-30）下条会变窄，条内文字必然被裁成「571WA签约进…装」。
+   与其裁半截，不如整条不写字——信息由右侧节点标签承担。 */
+.gt-bar em{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 计划验收等右端节点标签：靠右自动向左展开，不再被卡片边界切掉 */
+.gt-pt-lbl{max-width:46vw}

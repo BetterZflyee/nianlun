@@ -696,9 +696,9 @@ def gantt_html(config, uid):
             '<div class="gt-scroll">'
             '<div class="gt-head"><div class="gt-corner">场地</div>' + ''.join(head) + '</div>'
             + today_in_head
-            # 里程碑行放在场地行之上、紧贴时间轴：读者先看关键节点再看具体推进，
-            # 也让它成为图的一部分而不是底部的附加块
-            + mile_row + ''.join(body) +
+            # 里程碑行必须落在 .gt-body 容器内部（与场地行同一 grid），
+            # 否则它只是视觉上排在前面、实际在表格体外，行高与列宽不受 grid 约束
+            + ''.join(body[:1]) + mile_row + ''.join(body[1:]) +
             '</div>' + ms_list + legend + far_html +
             '<p class="gt-hint">点击任意一行展开该场地的节点明细'
             '<span class="gt-hint-sw">· 时间轴可左右滑动</span></p>')

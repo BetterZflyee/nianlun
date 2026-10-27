@@ -453,3 +453,19 @@
 @media (max-width:760px){
   .gt-tick{width:1.5px}
 }
+
+/* 里程碑强化：原 10.5px 土黄小字太容易被忽略，读者只看得到日期不知道是什么事。
+   加大字号、加深颜色、竖线拉长，并在名称前加一个小方块标记。 */
+.gt-mark{font-size:11.5px;color:#6B4E12}
+.gt-mark b{font-size:11.5px;font-weight:600;padding:0 4px}
+.gt-mark em{font-size:10.5px;font-weight:500;color:#8A6A1F}
+.gt-mark i{height:14px;width:1.5px;background:#8A6A1F;opacity:.9}
+.gt-mark-t::before{content:"";display:inline-block;width:5px;height:5px;
+  background:#8A6A1F;transform:rotate(45deg);margin-right:5px;vertical-align:1px;border-radius:1px}
+.gt-today b{font-size:10.5px}
+/* 窄屏（≤760）里程碑只留日期时，弱化前的装饰 */
+@media (max-width:760px){
+  .gt-mark b{display:none}
+  .gt-mark-t::before{display:none}
+  .gt-mark em{font-size:9.5px}
+}

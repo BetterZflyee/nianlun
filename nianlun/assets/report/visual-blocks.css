@@ -469,3 +469,28 @@
   .gt-mark-t::before{display:none}
   .gt-mark em{font-size:9.5px}
 }
+
+/* 里程碑不再重复日期：竖线已指向它在时间轴上的位置，日期与下方刻度重复，
+   会让人看到「一堆对不上的数字」浮在图上方。桌面只留名称，日期交给刻度。 */
+@media (min-width:761px){
+  .gt-mark em{display:none}
+  .gt-mark-t{gap:0}
+}
+
+/* 窄屏关键修复：原来只隐藏里程碑名称、留日期，结果图上飘着「9-23 / 10-10 / 10-15」
+   一串孤立数字，读者根本不知道是什么。改为 —— 图上不标里程碑，只留「今天」胶囊；
+   里程碑统一放到图下方清单里（日期＋名称都有）。 */
+@media (max-width:760px){
+  .gt-mark{display:none}
+  /* marks 区收缩到只容纳「今天」胶囊 */
+  .gt-head--marks{height:42px;min-height:42px;padding-bottom:0}
+  .gt-mslist{display:flex;margin-top:12px}
+  .gt-mslist span{font-size:10.5px}
+}
+
+/* 窄屏节点标签必然被右边界裁成「1」「上:」这种碎片：空间不够，且点击行即可展开明细。
+   索性不画，图面留给条与记录点。 */
+@media (max-width:760px){
+  .gt-pt-lbl{display:none}
+  .gt-bar{font-size:10px}
+}

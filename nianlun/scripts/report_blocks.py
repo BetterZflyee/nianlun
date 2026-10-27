@@ -470,7 +470,12 @@ def gantt_html(config, uid):
                 segs.append({'from': last.isoformat(), 'to': pd.isoformat(),
                              'label': '计划验收', 'state': 'planned', 'kind': 'plan',
                              'marks': [last.isoformat()]})
-            pts.append({'date': pm['date'], 'label': pm['label'], 'state': 'planned'})
+            # 只有晚于今天的才是「计划验收」；已发生节点保留自己的名字（截短），
+            # 否则「二期优先级逻辑上线 10-18」会被误标成计划验收
+            is_future = (not today) or pd > today
+            short = '计划验收' if is_future else (pm['label'] or '')[:6]
+            pts.append({'date': pm['date'], 'label': short,
+                        'state': 'planned' if is_future else state})
         # 详情面板：把节点与段落合并成时间线，点击行展开
         detail = []
         for seg in sorted(segs, key=lambda x: x['from']):
@@ -544,8 +549,10 @@ def gantt_html(config, uid):
                         for sg in segs
                     )
                     side = 'gt-pt-lbl--left' if (x > 88 or (not on_bar_right and x > 76)) else ''
-                    body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}">'
-                                f'<i class="gt-pt-lbl-t">{lbl}</i><b>{d.month}-{d.day}</b></span>')
+                    # 图上只标日期：一行里往往有 2-3 个节点，带名称必然互相压叠/被裁；
+                    # 名称放在点的 title（悬停可见）与行展开明细里，信息不丢
+                    body.append(f'<span class="gt-pt-lbl {side}" style="left:{x:.4f}%;color:{pline}" '
+                                f'title="{lbl} {d.isoformat()}"><b>{d.month}-{d.day}</b></span>')
         if not segs and not pts:
             # 有 note 时用 note 当行内说明（信息量远大于「无记录」）；
             # 真的一条记录都没有，才用缺口框显式标注，让缺口可被追问

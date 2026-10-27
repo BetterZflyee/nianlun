@@ -551,3 +551,13 @@
 .gt-bar em{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 计划验收等右端节点标签：靠右自动向左展开，不再被卡片边界切掉 */
 .gt-pt-lbl{max-width:46vw}
+
+/* 计划验收节点：短标签+日期，靠右时向左展开；不再与相邻节点挤成一团 */
+.gt-pt-lbl-t{max-width:7em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gt-pt-lbl b{white-space:nowrap}
+/* 条内文字：长窗口下条普遍偏窄，文字被切成「…装」这种碎片，直接不显示 */
+.gt-bar em{display:none}
+
+/* 节点标签只留日期后可以贴紧节点，不再需要限宽 */
+.gt-pt-lbl{padding:0 5px;margin-left:12px}
+.gt-pt-lbl--left{margin-left:0;margin-right:12px}

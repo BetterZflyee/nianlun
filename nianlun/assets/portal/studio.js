@@ -425,8 +425,18 @@ async function renderTodos23(root, generation) {
             : t.link?.project_id === scope.value)) &&
         (priority.value === "all" || String(t.priority) === priority.value),
     );
+    // 最新添加的排在最前。没有创建时间时退回「优先级 → 截止日期」，
+    // 保证老数据（或上游未返回时间戳）的排序结果不会变差。
+    const stampOf = (value) => {
+      if (value === null || value === undefined || value === "") return 0;
+      const numeric = Number(value);
+      if (Number.isFinite(numeric) && numeric > 0) return numeric;
+      const parsed = Date.parse(String(value));
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
     visible.sort(
       (a, b) =>
+        stampOf(b.created) - stampOf(a.created) ||
         (b.priority || 20) - (a.priority || 20) ||
         (a.due || Infinity) - (b.due || Infinity),
     );
@@ -464,7 +474,15 @@ async function renderTodos23(root, generation) {
             },
             [
               el("strong", { text: t.title }),
-              el("small", { text: projectName(t) }),
+              el("small", {
+                text:
+                  projectName(t) +
+                  (stampOf(t.created)
+                    ? (t.created_source === "provider"
+                        ? " · 添加于 "
+                        : " · 同步于 ") + studioDate(stampOf(t.created))
+                    : ""),
+              }),
             ],
           ),
           el("div", { class: "todo-side" }, [

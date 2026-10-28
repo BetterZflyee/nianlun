@@ -2,6 +2,7 @@
 import json
 import re
 import subprocess
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +52,40 @@ class Workbench:
         state.update(identity=identity)
         return state
 
+    def created_stamps(self, config, gw, task_ids):
+        """Resolve true creation stamps, because the list endpoint omits them.
+
+        `todo +get-my-tasks` returns only taskId/subject/dueTime/priority, so "sort by
+        when I added it" is impossible from that payload alone. The detail endpoint does
+        return createdTime, but costs ~1s per task, so results are cached and only the
+        missing ids are fetched. Concurrency is capped (6) to stay friendly to the
+        provider; a failed lookup is skipped rather than failing the page.
+        """
+        cache_path = g.root(config)/'todos-created.json'
+        try:cache = n.load(cache_path) if cache_path.exists() else {}
+        except (OSError, ValueError):cache = {}
+        if not isinstance(cache, dict):cache = {}
+        missing = [tid for tid in task_ids if tid and tid not in cache]
+        if missing:
+            import concurrent.futures
+            def fetch(tid):
+                try:
+                    detail = gw.call(['todo', '+get', '--task-id', tid])
+                    stamp = detail.get('createdTime')
+                    return tid, stamp if stamp else None
+                except Exception:
+                    return tid, None
+            workers = 6 if len(missing) > 8 else min(6, len(missing))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                for tid, stamp in pool.map(fetch, missing):
+                    if stamp:cache[tid] = stamp
+            try:
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                n.save(cache_path, cache)
+            except OSError:
+                pass
+        return cache
+
     def todos(self, completed=False):
         config, gw, _ = self.connection()
         rows = g.complete(gw.call(['todo','+get-my-tasks','--all','--status','true' if completed else 'false']), 'todos')
@@ -67,9 +102,59 @@ class Workbench:
             matches=[p for p in projects if re.sub(r'\s+','',p['title']).casefold()==name]
             if len(matches)!=1:return None
             return {'project_id':matches[0]['id'],'record_ids':[],'inferred_from':'title_prefix'}
-        return {'complete':True, 'todos':[{
-            'id':str(row['taskId']), 'title':row['subject'], 'due':row.get('dueTime'),
-            'priority':row.get('priority'), 'completed':completed, 'link':associate(row)} for row in rows]}
+        # createdTime is the DingTalk task creation stamp (Unix ms). Field naming varies
+        # across API versions, so accept the known spellings and let the page sort by
+        # whichever one the provider actually returns.
+        def stamp(row,*names):
+            for name in names:
+                value=row.get(name)
+                if value not in (None,'',0,'0'):return value
+            return None
+        # Fallback: when the provider returns no creation stamp, remember when this
+        # account first saw the task. For a personal todo that is very close to "when I
+        # added it", so "newest first" still holds instead of silently keeping old order.
+        seen_path=g.root(config)/'todos-seen.json'
+        try:seen=n.load(seen_path) if seen_path.exists() else {}
+        except (OSError,ValueError):seen={}
+        now_ms=int(time.time()*1000);seen_changed=False
+        missing_created=[row for row in rows
+            if not stamp(row,'createdTime','createdAt','createTime','created')]
+        probe_needed=bool(missing_created)
+        for row in rows:
+            key=str(row.get('taskId'))
+            if key and key not in seen:
+                seen[key]=now_ms;seen_changed=True
+        if seen_changed:
+            try:
+                seen_path.parent.mkdir(parents=True,exist_ok=True);n.save(seen_path,seen)
+            except OSError:pass
+        if probe_needed:
+            # One-off diagnostic so the field name can be confirmed from real data
+            # without touching the user's tasks. Keys only, never values.
+            try:n.save(g.root(config)/'todos-field-probe.json',
+                {'at':n.stamp(config),'rows':len(rows),'missing_created':len(missing_created),
+                 'keys':sorted({k for row in missing_created for k in row})})
+            except OSError:pass
+        # The list payload has no creation stamp, so resolve it from the detail endpoint
+        # (cached). Listing 200+ tasks on a cold cache takes a while once, then only new
+        # ids are fetched.
+        stamps=self.created_stamps(config,gw,[str(row.get('taskId')) for row in rows])
+        def created_of(row):
+            tid=str(row.get('taskId'))
+            direct=stamp(row,'createdTime','createdAt','createTime','created')
+            if direct:return direct,'provider'
+            cached=stamps.get(tid)
+            if cached:return cached,'detail'
+            return seen.get(tid),'first_seen'
+        out=[]
+        for row in rows:
+            created,source=created_of(row)
+            out.append({
+                'id':str(row['taskId']), 'title':row['subject'], 'due':row.get('dueTime'),
+                'created':created, 'updated':stamp(row,'modifiedTime','updatedTime','modified'),
+                'created_source':source,
+                'priority':row.get('priority'), 'completed':completed, 'link':associate(row)})
+        return {'complete':True,'todos':out}
 
     def cells(self, config, state, role, values, creating):
         if role not in n.ROLES or not isinstance(values, dict):

@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 import nianlun as n
 
-VERSION = 'brief-v5-forest'
+VERSION = 'brief-v6-briefing'
 MAX_CHARS = 1800
 CITATION = re.compile(r'\[([PRMSK]\d+)\]')
 
@@ -110,6 +110,15 @@ def prompt(project,since,until,evidence,method):
         '8. 口吻：正式书面汇报语体，读者为直属上级与管理层。陈述句直接给出事实与结论，句子以数字、对象或结果开头；'
         '不使用口语、设问、感叹号、随意比喻，不使用“我们、咱们、来看、可以说、其实”等闲谈措辞；'
         '计划、待核、已核验、已解决严格区分，判断词只用有依据的。所选报告方法中的行文风格示例与本条冲突时，以本条为准。\n'
+        '9. 商务汇报写法（读者只关心四件事，缺一项即不合格）：做了什么、证据够不够、卡在哪里、需要什么决定或帮助。\n'
+        '   判断前置：Lead 不罗列本期事项，先用一句话给出最重要的管理判断——变化性质加上影响面，再给支撑数字；\n'
+        '   影响先于动作：每个进展先写它对交付节奏、范围或成本意味着什么，再写具体做了什么，过程细节不铺陈；\n'
+        '   证据分级：只分「已确认」（有数据、书面材料或对方明确答复）与「待确认」（推断、口头、未验证）两级并显式标注，'
+        '待确认项须写明还需什么才能确认；不得把待确认写成已确认；\n'
+        '   卡点成条：不写散段落，逐条写清「卡点是什么／影响哪些对象与什么时间／需要谁做什么／是否需上级介入」；'
+        '需要上级决策或协调的单独成句并放在该段开头，不得埋在结尾；无则明确写本期无需上级介入；\n'
+        '   时间绝对化：一律写具体日期（11月16日），不使用明日、昨天、下周等相对表述；\n'
+        '   克制修饰：「重大、全面、显著、彻底、大力」等无数据支撑的评价词一律删除，能写成可验证事实的不用评价词。\n'
         '项目：'+project['title']+'\n报告区间：'+since+' 至 '+until+
         '\n所选写作与图形契约：'+method.get('guidance','结论先行，短句，一个面板只答一个问题。')+
         '\n'+('' if '## 图文回顾契约' in method.get('guidance','') else (Path(__file__).resolve().parent.parent/'assets/report/visual-contract.md').read_text(encoding='utf-8'))+
@@ -154,8 +163,15 @@ def issues(markdown,evidence):
         if cfg.get('type') != 'gantt':
             continue
         for row in cfg.get('rows') or []:
+            # 区间可用的真实日期：本行节点日期落在该区间内的部分。模型已标出这些节点即可视为有据，
+            # 只有区间内一个真实节点都没有时才判不合格，避免为一个格式字段反复重写整篇。
+            known=[pt.get('date') for pt in (row.get('points') or []) if isinstance(pt,dict) and pt.get('date')]
             for seg in row.get('segments') or []:
-                if not seg.get('marks'):
+                if seg.get('marks'):continue
+                first,last=seg.get('from') or '',seg.get('to') or ''
+                inside=[d for d in known if isinstance(d,str) and first and last and first<=d<=last]
+                if inside:seg['marks']=sorted(set(inside))
+                else:
                     errors.append(f'甘特「{row.get("label","")}」的区间缺 marks：'
                                   '请列出该区间内真正有记录的日期，缺记录就不要画区间')
     for opening in fences[::2]:

@@ -17,13 +17,13 @@ stages 2–6 个真实阶段名，按推进先后排列；items 1–12 行，**�
 多个对象各自有里程碑、验收日、试运行或安装窗口时，用 gantt：按日期定位、可按状态筛选、点击任意行展开明细。
 
 ```visual
-{"type":"gantt","title":"四场地验收节奏","caption":"南昌与武汉同日落定验收，成都验证在即，汉唐记录停滞。","today":"2026-10-26","milestones":[{"date":"2026-10-15","label":"靠卡验收指标","source":"[M2]"},{"date":"2026-10-18","label":"二期028W试运行","source":"[M6]"}],"rows":[{"label":"南昌 · 791X","state":"done","stage":"已验收","segments":[],"points":[{"date":"2026-10-26","label":"验收完成","state":"done"}],"source":"[S6][R4]","note":"已完结，转入运维观察。"},{"label":"武汉 · 027W","state":"done","stage":"已验收","segments":[{"from":"2026-10-21","to":"2026-10-26","label":"验收推进","kind":"actual"}],"points":[{"date":"2026-10-26","label":"验收定型报告","state":"done"}],"source":"[S3][R68]","note":"定型报告已出具，待确认移交责任人。"}]}
+{"type":"gantt","title":"四场地验收节奏","caption":"南昌与武汉同日落定验收，成都验证在即，汉唐记录停滞。","today":"2026-10-26","milestones":[{"date":"2026-10-15","label":"靠卡验收指标","source":"[M2]"},{"date":"2026-10-18","label":"二期028W试运行","source":"[M6]"}],"rows":[{"label":"南昌 · 791X","state":"done","stage":"已验收","segments":[],"points":[{"date":"2026-10-26","label":"验收完成","state":"done"}],"source":"[S6][R4]","note":"已完结，转入运维观察。"},{"label":"武汉 · 027W","state":"done","stage":"已验收","segments":[{"from":"2026-10-21","to":"2026-10-26","label":"验收推进","kind":"actual","marks":["2026-10-21","2026-10-26"]}],"points":[{"date":"2026-10-26","label":"验收定型报告","state":"done"}],"source":"[S3][R68]","note":"定型报告已出具，待确认移交责任人。"}]}
 ```
 
 字段说明：
 - `rows[].label` 对象名；`state` 取 done/active/blocked/planned/unknown，决定行首圆点颜色与 KPI 分桶
 - `rows[].stage` 当前所处阶段（中文，如 筹备/安装/试运行/已验收），作为行内徽标显示；缺省时按 state 推导
-- `rows[].segments[{from,to,label,state,kind}]` 时间区间；`kind` 只能是 `actual`（已发生，实心）或 `plan`（计划窗口，斜纹）
+- `rows[].segments[{from,to,label,state,kind,marks}]` 时间区间；`kind` 只能是 `actual`（已发生，实心）或 `plan`（计划窗口，斜纹）；**`marks` 必填**——列出该区间内真正有记录的日期（YYYY-MM-DD 数组），区间内没有任何真实记录就不要画区间，改用 points
 - `rows[].points[{date,label,state}]` 单点节点（验收完成、现场验证、调试停滞等）；`state` 为 blocked 时画成菱形
 - `rows[].note` 图上推不出的判断、卡点或下一步，点击展开后显示；不写图内已有信息
 - `milestones[{date,label,source}]` 项目级里程碑，画在时间轴上方并自动分层避让

@@ -105,8 +105,11 @@ def validate(config, evidence=None):
         rows = config.get('rows')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('甘特图须为 1 至 12 个对象')
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source', 'note'}:
+            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source', 'note', 'marks'}:
                 raise ValueError('甘特行字段不合法')
+            # 行级 marks 是模型常见的另一种写法，等价于无说明的节点，归一化后并入 points。
+            for value in (row.get('marks') or []):
+                if isinstance(value, str): row.setdefault('points', []).append({'date': value, 'label': '节点'})
             text(row.get('label'), 26, 'label'); source(row.get('source'))
             if row.get('state') not in STATES: raise ValueError('甘特行状态不合法')
             if row.get('note'): text(row['note'], 120, '行补充说明')

@@ -18,20 +18,39 @@ from zoneinfo import ZoneInfo
 SKILL = Path(__file__).resolve().parents[1]
 ROLES = {'projects': '项目主表', 'milestones': '里程碑表', 'sites': '场地表', 'records': '项目记录表'}
 # Logical names are portable. Actual field IDs are resolved at bind time.
+# 字段别名：同一逻辑字段在各人自建表里的常见叫法。新增写法时只加别名，不改读取逻辑。
 FIELDS = {
- 'projects': {'title': ['项目名称'], 'number': ['编号','项目编码','项目编号'], 'priority': ['等级'], 'status': ['状态'],
-              'description': ['一句话描述'], 'risk': ['风险卡点'], 'notes': ['备注'],
-              'updated': ['最近更新'], 'report': ['阶段性汇报链接', '一页纸链接'], 'goal': ['项目目标'],
-              'deadline': ['目标日期','项目截止日期','计划完成日期']},
- 'milestones': {'title': ['里程碑'], 'project_ids': ['项目'], 'date': ['截止日期'], 'status': ['状态'],
-                'description': ['交付内容'], 'benefit': ['预期效益'], 'notes': ['备注'], 'attachments': ['附件']},
+ 'projects': {'title': ['项目名称'], 'number': ['编号','项目编码','项目编号'], 'priority': ['等级','优先级'],
+              'status': ['状态','进程','进度','项目状态'],
+              'description': ['一句话描述','项目描述','简介'], 'risk': ['风险卡点','风险','卡点'], 'notes': ['备注'],
+              'updated': ['最近更新','更新时间','更新日期'],
+              'report': ['阶段性汇报链接','一页纸链接','汇报链接','阶段汇报'], 'goal': ['项目目标','目标'],
+              'deadline': ['目标日期','项目截止日期','计划完成日期'],
+              'biz_owner': ['业务负责人'], 'tech_owner': ['科技负责人']},
+ 'milestones': {'title': ['里程碑','里程碑名称'], 'project_ids': ['项目'], 'date': ['截止日期','计划验收日期','验收日期','截止时间'],
+                'status': ['状态','里程碑状态'],
+                'description': ['交付内容','实际交付内容'], 'benefit': ['预期效益','预期交付内容'],
+                'notes': ['备注'], 'attachments': ['附件','里程碑汇报'],
+                'start_date': ['计划开始日期','开始日期'],
+                'actual_deliver': ['实际交付时间','实际交付日期'],
+                'actual_accept': ['实际验收时间','实际验收日期'],
+                'accept_result': ['验收结果'],
+                'r_owner': ['交付(R)负责人','交付负责人','R负责人'],
+                'a_owner': ['验收(A)责任人','验收责任人','A责任人'],
+                'c_contact': ['协商(C)对接人','协商对接人','C对接人'],
+                'i_contact': ['知会(I)对接人','知会对接人','I对接人']},
  'sites': {'title': ['场地名称'], 'code': ['场地编码', '场地代码'], 'project_ids': ['项目'],
-           'status': ['场地状态'], 'notes': ['当前卡点'], 'attachments': ['附件']},
- 'records': {'title': ['标题'], 'project_ids': ['项目'], 'site_ids': ['场地'], 'milestone_ids': ['里程碑'],
-             'description': ['详情'], 'date': ['日期'], 'kind': ['记录类型'], 'status': ['状态'],
-             'owner': ['反馈人'], 'solution': ['解决方案'], 'attachments': ['附件']}}
-REQUIRED = {'projects': ('title', 'status'), 'milestones': ('title', 'project_ids', 'date', 'status'),
-            'sites': ('title', 'project_ids'), 'records': ('title', 'project_ids', 'description', 'date', 'kind', 'status')}
+           'status': ['场地状态','状态'], 'notes': ['当前卡点','备注'], 'attachments': ['附件'],
+           'owner': ['场地负责人'], 'entry_date': ['进场日期','进场时间']},
+ 'records': {'title': ['标题','反馈内容','记录内容','事项'], 'project_ids': ['项目'], 'site_ids': ['场地','场地编码'],
+             'milestone_ids': ['里程碑'],
+             'description': ['详情','描述','说明'], 'date': ['日期','创建日期'],
+             'kind': ['记录类型','反馈类型','类型'], 'status': ['状态'],
+             'owner': ['反馈人','记录人'], 'solution': ['解决方案','处理方案'], 'attachments': ['附件'],
+             'sub_kind': ['反馈子类别','子类别'], 'contact': ['对接人']}}
+# 必需字段只保留表结构里稳定存在的项：日期/类型允许缺失，避免按人自建表缺列就整表不可用。
+REQUIRED = {'projects': ('title', 'status'), 'milestones': ('title', 'project_ids', 'status'),
+            'sites': ('title', 'project_ids'), 'records': ('title', 'status')}
 
 
 class Error(Exception):
@@ -183,9 +202,21 @@ def bind(client, base, base_url, mapping=None, field_mapping=None):
         if missing:
             raise Error(f'{name}缺少字段：{", ".join(sorted(missing))}')
         for logical, f in resolved.items():
-            expected = ('bidirectionalLink', 'unidirectionalLink') if logical.endswith('_ids') else ('date',) if logical in ('date', 'updated') else None
+            if logical.endswith('_ids'):
+                expected = ('bidirectionalLink', 'unidirectionalLink')
+            elif logical in ('date', 'updated'):
+                # createdTime / modifiedTime 是系统生成的日期，可读不可写，绑定后按只读取用。
+                expected = ('date', 'createdTime', 'modifiedTime')
+            elif logical in ('owner',):
+                expected = ('text', 'user', 'creator', 'modifiedBy')
+            else:
+                expected = None
             if expected and f['type'] not in expected:
                 raise Error(f'{name}.{logical} 类型不符：{f["type"]}')
+        # 系统字段（创建时间/创建人/公式/lookup）不可写；写入逻辑据此跳过，而不是报错。
+        readonly_types = {'createdTime', 'modifiedTime', 'creator', 'modifiedBy', 'lookup', 'autoNumber', 'formula', 'reference'}
+        for logical, field in resolved.items():
+            if field.get('type') in readonly_types: field['readonly'] = True
         config['tables'][role] = {'id': table['tableId'], 'name': table['tableName'], 'fields': resolved}
     verify_links(config)
     return config

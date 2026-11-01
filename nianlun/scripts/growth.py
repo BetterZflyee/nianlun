@@ -424,7 +424,36 @@ def validate(config,bundle,decision):
     return {'run_id':bundle['run_id'],'binding':n.digest(config),'evidence_hash':n.digest(bundle),'decision':decision,'actions':actions}
 
 
+def writable_cells(config, role, cells):
+    """写入前按目标表的真实结构收敛字段，避免辅助字段拖垮整条写入。
+
+    - 系统字段（创建时间、创建人、公式、lookup）只读，直接丢弃；
+    - 单选的取值不在当前选项内时留空，由核心在计划里说明，不硬造选项、不改表结构。
+    """
+    table = config['tables'][role]
+    by_id = {v['fieldId']: (k, v) for k, v in table['fields'].items()}
+    result = {}
+    dropped = []
+    for field_id, value in cells.items():
+        logical, field = by_id.get(field_id, (None, None))
+        if field is None:
+            dropped.append((field_id, 'UNKNOWN_FIELD'))
+            continue
+        if field.get('readonly'):
+            dropped.append((logical, 'READONLY'))
+            continue
+        if field.get('type') == 'singleSelect':
+            names = [o.get('name') if isinstance(o, dict) else o for o in ((field.get('config') or {}).get('options') or [])]
+            if names and value not in names:
+                dropped.append((logical, 'OPTION_MISSING'))
+                continue
+        result[field_id] = value
+    return result, dropped
+
+
 def table_write(config,gw,role,cells,record_id=None):
+    cells,dropped=writable_cells(config,role,cells)
+    if not cells:raise n.Error('写入字段均已失效（只读或选项不匹配），本次未提交')
     table=config['tables'][role]['id'];base=config['base_id']
     if record_id:
         gw.call(['aitable','+record-update','--base-id',base,'--table-id',table,'--records',json.dumps([{'recordId':record_id,'cells':cells}],ensure_ascii=False),'--yes'])
@@ -748,7 +777,14 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     if not current['complete']:raise n.Error('报告已上传，但主表回读不完整；重试将核验原链接，不会重复上传。')
     now=next(x for x in current['projects'] if x['id']==p['id'])
     if now.get('report') not in (receipt['previous_link'],receipt['url']):raise n.Error('主表汇报链接被其他人更新')
-    f=config['tables']['projects']['fields']['report']['fieldId']
+    report_field=config['tables']['projects']['fields'].get('report')
+    if not report_field:
+        # 目标表没有汇报链接列时不臆造字段：报告已上传留档，回执标记为未回填。
+        receipt.update(status='uploaded_no_link',project_id=p['id'],report_id=key,
+                       note='项目主表无汇报链接字段，报告已上传但未回填；需在表中新增该列后重新发布')
+        n.save(receipt_file,receipt)
+        return receipt
+    f=report_field['fieldId']
     if now.get('report')!=receipt['url']:
         table_write(config,gw,'projects',{f:receipt['url']},p['id'])
     receipt.update(status='verified',project_id=p['id'],report_id=key);n.save(receipt_file,receipt)

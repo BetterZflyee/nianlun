@@ -26,6 +26,21 @@ def prompt_evidence(bundle):
     result={k:v for k,v in bundle.items() if k not in ('tables','todos')}
     result['tables']={role:[{k:v for k,v in row.items() if k!='raw_cells'} for row in bundle['tables'][role]] for role in n.ROLES}
     result['todos']=[{k:todo.get(k) for k in ('taskId','subject','isDone','dueTime','priority')} for todo in bundle['todos']]
+    # 目标表的真实字段与可用取值：单选必须落在 options 内，只读字段不可写。
+    # 缺了这段，模型只能从历史记录反推类型，表结构一改就会写出失效的旧分类。
+    fields={}
+    for role in n.ROLES:
+        meta=(bundle.get('fields') or {}).get(role) or {}
+        columns={}
+        for logical,field in meta.items():
+            item={'type':field.get('type')}
+            if field.get('fieldName'):item['name']=field['fieldName']
+            if field.get('readonly'):item['readonly']=True
+            options=[o.get('name') if isinstance(o,dict) else o for o in ((field.get('config') or {}).get('options') or [])]
+            if options:item['options']=options
+            columns[logical]=item
+        fields[role]=columns
+    result['table_fields']=fields
     return result
 
 
@@ -83,6 +98,9 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                     '严格尊重开关；没有明确事实、身份或唯一对象时放入 pending。只处理配置中的项目，动作语义必须与原文相符。'
                     '用户说“完成一个任务”不等于整个项目完成。避免旧记忆推翻新事实。'
                     '逐条把本轮变化与已有项目记录比对：同一问题跨群聊、听记、邮件出现时复用原记录，不能换标题重复创建。'
+                    '写单选字段（类型、状态、等级、场地状态、项目名称）时，取值必须来自 table_fields 中该字段的 options；'
+                    'options 里没有的旧分类一律不要使用，改用最接近的现有选项；实在无法归类就把该事项放进 pending 并说明原因。'
+                    '标了 readonly 的字段（创建时间、创建人、公式、关联汇总）不可写，不要为它们生成取值。'
                     '当本轮较新原文明确证明某个既有问题已解决，使用 update_status 关闭那条记录为已解决，保留其历史描述；不要另建一条解决记录。'
                     '关闭必须唯一匹配同项目同事项，并逐字引用解决证据；仅安排、预计、讨论或含糊的已完成不可关闭。多个同名事项无法区分时保留 pending。'
                     'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'

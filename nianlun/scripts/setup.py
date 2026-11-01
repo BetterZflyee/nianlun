@@ -237,7 +237,7 @@ class Setup:
                     self.mutation(path,journal,'field:'+role+':'+logical,
                         lambda:gw.call(['aitable','field','create','--base-id',base,'--table-id',selected[role],
                                        '--fields',json.dumps([desired],ensure_ascii=False),'--yes']),verify_field)
-        config=n.bind(gw.table(),base,plan['snapshot']['base_url'],selected,spec.get('field_map'))
+        config=n.bind(gw.table(),base,plan['snapshot']['base_url'],selected,spec.get('field_map'),str(self.config_path))
         config.update(dws_bin=gw.config['dws_bin'],installer_version=VERSION)
         if self.config_path.exists():
             old=n.load(self.config_path)

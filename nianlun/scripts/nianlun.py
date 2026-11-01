@@ -24,7 +24,7 @@ FIELDS = {
               'status': ['状态','进程','进度','项目状态'],
               'description': ['一句话描述','项目描述','简介'], 'risk': ['风险卡点','风险','卡点'], 'notes': ['备注'],
               'updated': ['最近更新','更新时间','更新日期'],
-              'report': ['阶段性汇报链接','一页纸链接','汇报链接','阶段汇报'], 'goal': ['项目目标','目标'],
+              'report': ['定期汇报','阶段性汇报链接','一页纸链接','汇报链接','阶段汇报'], 'goal': ['项目目标','目标'],
               'deadline': ['目标日期','项目截止日期','计划完成日期'],
               'biz_owner': ['业务负责人'], 'tech_owner': ['科技负责人']},
  'milestones': {'title': ['里程碑','里程碑名称'], 'project_ids': ['项目'], 'date': ['截止日期','计划验收日期','验收日期','截止时间'],
@@ -173,15 +173,25 @@ def clean_name(name):
     return re.sub(r'[^\w\u4e00-\u9fff]', '', name)
 
 
-def bind(client, base, base_url, mapping=None, field_mapping=None):
+def bind(client, base, base_url, mapping=None, field_mapping=None, config_path=None):
     parsed = urlparse(base_url)
     if parsed.scheme != 'https' or not (parsed.hostname or '').endswith('.dingtalk.com') or base not in parsed.path.split('/'):
         raise Error('请提供包含同一 Base ID 的钉钉 HTTPS 链接')
     found = client.call(['+list-tables', '--base', base]).get('tables')
     if not isinstance(found, list):
         raise Error('DWS 表目录返回结构异常')
+    # 只重写表格绑定部分：growth（开关、文件夹、调度、状态目录）与 harness（宿主选择）
+    # 由接入向导维护，重新绑定绝不能把它们清掉。
     config = {'format': 'nianlun-binding-v1', 'base_id': base, 'base_url': base_url.split('?')[0],
               'profile': client.profile, 'utc_offset_hours': 8, 'tables': {}}
+    existing_path = Path(config_path).expanduser() if config_path else None
+    if existing_path and existing_path.exists():
+        try:
+            previous = load(existing_path)
+            for key in ('dws_bin', 'growth', 'timezone', 'harness'):
+                if key in previous: config[key] = previous[key]
+        except (OSError, ValueError):
+            pass
     for role, name in ROLES.items():
         matches = [t for t in found if t['tableId'] == mapping[role]] if mapping and role in mapping else [t for t in found if clean_name(t['tableName']) == name]
         if len(matches) != 1:
@@ -581,7 +591,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == 'bind':
-            config = bind(DWS(args.profile), args.base_id, args.base_url, load(args.table_map) if args.table_map else None)
+            config = bind(DWS(args.profile), args.base_id, args.base_url, load(args.table_map) if args.table_map else None, config_path=str(args.config))
             save(Path(args.config).expanduser(), config)
             result = {'bound': True, 'config': str(Path(args.config).expanduser()), 'tables': {k:v['name'] for k,v in config['tables'].items()}, 'remote_mutations': 0}
         else:

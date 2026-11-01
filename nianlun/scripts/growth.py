@@ -716,27 +716,48 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
-def report_target(config,state,project_id,since,until):
-    """决定这份阶段汇报挂到哪一列。
+def report_node_store(config):
+    """按项目记住汇报文档节点，草稿阶段也要记住：
+    否则未回填主表时每期都会新建一份，同一个项目越堆越多份汇报。"""
+    return root(config)/'report-nodes.json'
 
-    优先项目主表的汇报链接列；该列不存在时退到里程碑汇报列——报告是项目级成果，
-    挂到本期区间内日期最晚的那条里程碑（区间内没有任何里程碑时取项目下最近一条）。
-    找不到可挂载对象就返回 None，由调用方标记未回填，绝不新建记录或猜列。
+
+def remembered_report_node(config,project_id,current_url=None):
+    from_url=report_node_id(current_url)
+    if from_url:return from_url
+    path=report_node_store(config)
+    if not path.exists():return None
+    try:return (n.load(path) or {}).get(project_id)
+    except (OSError,ValueError):return None
+
+
+def remember_report_node(config,project_id,node_id):
+    if not project_id or not node_id:return
+    path=report_node_store(config)
+    try:
+        data=n.load(path) if path.exists() else {}
+        data[project_id]=node_id
+        n.save(path,data)
+    except (OSError,ValueError):pass
+
+
+def report_node_id(url):
+    """从钉盘/文档空间链接里取出可覆盖的节点 ID；取不到就当作需要新建。"""
+    if not isinstance(url,str):return None
+    match=re.search(r'/nodes/([A-Za-z0-9_-]{8,})',url)
+    return match.group(1) if match else None
+
+
+def report_target(config,state,project_id,since,until):
+    """汇报挂在项目级：整份文档就是该项目截止目前的整体进度。
+
+    不落到里程碑上——里程碑是交付节点，一份阶段汇报会横跨多个节点，
+    挂到任何单条都会让读者误以为只讲那一条。
     """
     projects=config['tables']['projects']['fields']
-    if projects.get('report'):
-        return ('projects',projects['report']['fieldId'],project_id,'项目主表')
-    milestone_fields=config['tables']['milestones']['fields']
-    slot=milestone_fields.get('attachments')
-    if not slot or slot.get('readonly'):
-        return None
-    rows=[m for m in state['milestones'] if project_id in (m.get('project_ids') or [])]
-    if not rows:return None
-    inside=[m for m in rows if m.get('date') and since<=m['date']<=until]
-    pool=inside or [m for m in rows if m.get('date')]
-    if not pool:return None
-    chosen=max(pool,key=lambda m:m['date'])
-    return ('milestones',slot['fieldId'],chosen['id'],str(chosen.get('title') or ''))
+    slot=projects.get('report')
+    if not slot or slot.get('readonly'):return None
+    return ('projects',slot['fieldId'],project_id,'项目主表')
 
 
 def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None,progress=lambda message:None,writeback=True):
@@ -778,9 +799,18 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
             html=report_style.render(report_method,md,folder,p['title']+' · 阶段回顾',appendix_html=source_details,subtitle=since+' — '+until)
         html=report_brief.citation_tooltips(html,source_index)
         n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
-        progress('正在上传报告到已绑定的文件夹')
-        receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)
-        try:d=gw.call(['drive','+upload','--file',filename,'--folder',config['growth']['report_folder'],'--yes'],cwd=folder)
+        # 汇报保持同一份文档持续迭代：该项目已有汇报链接时覆盖原节点，
+        # 链接不变，读者收藏的地址不会失效，也不会在文件夹里堆历史版本。
+        existing=remembered_report_node(config,p['id'],now.get('report'))
+        try:
+            if existing:
+                progress('正在把本期内容更新到已有汇报文档')
+                receipt['in_flight']={'step':'upload','file':filename,'node':existing};n.save(receipt_file,receipt)
+                d=gw.call(['drive','+upload','--file',filename,'--node',existing,'--yes'],cwd=folder)
+            else:
+                progress('正在上传报告到已绑定的文件夹')
+                receipt['in_flight']={'step':'upload','file':filename};n.save(receipt_file,receipt)
+                d=gw.call(['drive','+upload','--file',filename,'--folder',config['growth']['report_folder'],'--yes'],cwd=folder)
         except n.Error:
             receipt=reconcile_report_upload(config,gw,folder,receipt);d={'reconciled':True,'nodeId':receipt['node_id'],'url':receipt['url']}
         # Keep the full verified shortcut receipt; require a returned server URL rather than inventing one.
@@ -788,6 +818,7 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         item=uploaded_node(d)
         if not item:raise n.Error('上传返回未包含可核验的节点与链接，保留回执待对账')
         receipt.update(node_id=item.get('nodeId') or item['fileId'],url=item.get('url') or item['docUrl']);receipt.pop('in_flight',None);n.save(receipt_file,receipt)
+        remember_report_node(config,p['id'],receipt['node_id'])
     if not writeback:
         # 自动生长只产出可审阅的草稿：上传留档但不改写主表对外链接，
         # 呈报给领导的「输出结果」由负责人确认后再发布。

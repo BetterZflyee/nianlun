@@ -716,6 +716,29 @@ def reconcile_report_upload(config,gw,folder,receipt):
     return receipt
 
 
+def report_target(config,state,project_id,since,until):
+    """决定这份阶段汇报挂到哪一列。
+
+    优先项目主表的汇报链接列；该列不存在时退到里程碑汇报列——报告是项目级成果，
+    挂到本期区间内日期最晚的那条里程碑（区间内没有任何里程碑时取项目下最近一条）。
+    找不到可挂载对象就返回 None，由调用方标记未回填，绝不新建记录或猜列。
+    """
+    projects=config['tables']['projects']['fields']
+    if projects.get('report'):
+        return ('projects',projects['report']['fieldId'],project_id,'项目主表')
+    milestone_fields=config['tables']['milestones']['fields']
+    slot=milestone_fields.get('attachments')
+    if not slot or slot.get('readonly'):
+        return None
+    rows=[m for m in state['milestones'] if project_id in (m.get('project_ids') or [])]
+    if not rows:return None
+    inside=[m for m in rows if m.get('date') and since<=m['date']<=until]
+    pool=inside or [m for m in rows if m.get('date')]
+    if not pool:return None
+    chosen=max(pool,key=lambda m:m['date'])
+    return ('milestones',slot['fieldId'],chosen['id'],str(chosen.get('title') or ''))
+
+
 def publish_report(config,project,since,until,summary_file=None,expected_facts=None,report_method=None,memory_sources=None,progress=lambda message:None,writeback=True):
     from render_report import render
     from planning import evidence
@@ -777,17 +800,18 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     if not current['complete']:raise n.Error('报告已上传，但主表回读不完整；重试将核验原链接，不会重复上传。')
     now=next(x for x in current['projects'] if x['id']==p['id'])
     if now.get('report') not in (receipt['previous_link'],receipt['url']):raise n.Error('主表汇报链接被其他人更新')
-    report_field=config['tables']['projects']['fields'].get('report')
-    if not report_field:
-        # 目标表没有汇报链接列时不臆造字段：报告已上传留档，回执标记为未回填。
+    target=report_target(config,current,p['id'],since,until)
+    if not target:
+        # 找不到归属对象时不臆造写入：报告已上传留档，回执标明未回填。
         receipt.update(status='uploaded_no_link',project_id=p['id'],report_id=key,
-                       note='项目主表无汇报链接字段，报告已上传但未回填；需在表中新增该列后重新发布')
+                       note='项目主表无汇报链接列，且该项目没有可挂载的里程碑；报告已上传未回填')
         n.save(receipt_file,receipt)
         return receipt
-    f=report_field['fieldId']
-    if now.get('report')!=receipt['url']:
-        table_write(config,gw,'projects',{f:receipt['url']},p['id'])
-    receipt.update(status='verified',project_id=p['id'],report_id=key);n.save(receipt_file,receipt)
+    role,field_id,record_id,label=target
+    table_write(config,gw,role,{field_id:receipt['url']},record_id)
+    receipt.update(status='verified',project_id=p['id'],report_id=key,
+                   linked_table=role,linked_field=field_id,linked_record=record_id,linked_label=label)
+    n.save(receipt_file,receipt)
     return receipt
 
 

@@ -67,6 +67,12 @@ def _ensure_option(client, base, table, field, status):
     return status
 
 
+SITE_STATUS_DEPRECATED = (
+    '场地状态字段已停用：同一场地在不同项目里进度不同，单值无法表达。'
+    '请改为更新里程碑状态（项目 × 场地 × 阶段），例如把「571WA 设备安装」标为已达成。'
+)
+
+
 def site_fact(config, client, state, name, status, note='', source='', evidence='',
               project=None, yes=False):
     base = config['base_id']

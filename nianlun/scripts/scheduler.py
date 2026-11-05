@@ -72,7 +72,10 @@ def tick(config_path, binary=None, now=None, owner='codex'):
         for slot in slots:
             if run_control.paused(config):break
             previous=ledger['slots'].get(slot['key'],{})
-            if previous.get('status') in ('complete','skipped'):continue
+            # abandoned 是终结态：连续失败触顶后已经放弃该槽位，同一个 key 不得再被
+            # 重新捡起，否则 hours 内每个整点都会重跑同一个必然失败的槽位。
+            # 需要重试时由人工在执行记录里显式恢复，或等下一个新槽位。
+            if previous.get('status') in ('complete','skipped','abandoned'):continue
             item={**slot,'status':'running','started_at':now.isoformat(),'first_started_at':previous.get('first_started_at',previous.get('started_at',now.isoformat())),
                   'attempts':previous.get('attempts',0)+1}
             ledger['slots'][slot['key']]=item;n.save(ledger_path,ledger)

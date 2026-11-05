@@ -84,6 +84,17 @@ class Controls(unittest.TestCase):
         self.assertEqual(values[2]['runs'][0]['status'],'abandoned')
         self.assertEqual(values[-1]['runs'][0]['attempts'],1)
 
+    def test_abandoned_slot_is_never_picked_up_again(self):
+        """abandoned 是终结态：同一 key 不得再被重跑，否则整点会反复重试必然失败的槽位。"""
+        times=[10,12,14,14,14]
+        with patch('scheduler.flow.grow',side_effect=[n.Error('same')]*3+[{'verified':True},{'verified':True}]):
+            values=[scheduler.tick(self.path,now=datetime.fromisoformat(f'2026-10-21T{h}:00:00+08:00')) for h in times]
+        self.assertEqual(values[2]['runs'][0]['status'],'abandoned')
+        # 放弃之后，同一个槽位不再产生新的执行记录。
+        for later in values[3:]:
+            keys=[r['key'] for r in later['runs']]
+            self.assertNotIn(values[2]['runs'][0]['key'],keys)
+
     def test_stale_manual_resume_cannot_create_new_run(self):
         with patch('flow.g.collect') as collect:
             with self.assertRaisesRegex(n.Error,'已.*变化'):flow.grow(self.path,expected_run_id='stale')

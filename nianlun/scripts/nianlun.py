@@ -381,9 +381,16 @@ def plan(config, state, candidates):
                 if k not in fields:
                     raise Error(f'当前表没有 {k} 字段')
                 return fields[k]['fieldId']
-            for k in ('kind', 'status'):
-                desired = candidate.get(k, '开放')
-                if desired not in [o['name'] for o in fields[k].get('config', {}).get('options', [])]:
+            # 详情列在不同表版本里可能叫 详情(description)、解决方案(solution) 或 描述。
+            # 缺列时必须换一列落库，否则整条记录都写不进去；去重读取要用同一列，否则重复入库。
+            detail_key = next((k for k in ('description', 'solution', 'notes') if k in fields), None)
+            if not detail_key:
+                raise Error('反馈记录表缺少可写入详情的文本列（详情/解决方案/备注）')
+            kind_key = next((k for k in ('kind', 'sub_kind') if k in fields), None)
+            for k in filter(None, (kind_key, 'status')):
+                desired = candidate.get(k if k != kind_key else 'kind', '开放')
+                options = [o['name'] for o in fields[k].get('config', {}).get('options', [])]
+                if options and desired not in options:
                     raise Error(f'{k}={desired} 不在现有字段选项内')
             details = candidate['description'] + '\n\n来源：' + source['name'] + '\n来源标识：' + source['id'] + '\n原文摘录：' + source['quote']
             if source.get('url'):
@@ -394,9 +401,12 @@ def plan(config, state, candidates):
             details += '\n' + marker
             if len(details) > 20000 or len(candidate['title']) > 180:
                 raise Error('单条内容过长，请拆分或缩短')
-            cells = {field('title'): candidate['title'].strip(), field('description'): details,
-                     field('project_ids'): {'linkedRecordIds': [projects[0]['id']]}, field('date'): candidate['date'],
-                     field('kind'): candidate['kind'], field('status'): candidate.get('status', '开放')}
+            record_cells = {field('title'): candidate['title'].strip(), field(detail_key): details,
+                            field('project_ids'): {'linkedRecordIds': [projects[0]['id']]}, field('date'): candidate['date'],
+                            field('status'): candidate.get('status', '开放')}
+            if kind_key:
+                record_cells[field(kind_key)] = candidate['kind']
+            cells = record_cells
             for logical, role in (('site_ids', 'sites'), ('milestone_ids', 'milestones')):
                 ids = candidate.get(logical, [])
                 if ids:
@@ -407,11 +417,12 @@ def plan(config, state, candidates):
                         if len(rows) != 1 or projects[0]['id'] not in rows[0].get('project_ids', []):
                             raise Error(f'{logical} 不存在或不属于该项目')
                     cells[field(logical)] = {'linkedRecordIds': ids}
-            existing = [r for r in state['records'] if marker in r.get('description', '')]
+            existing = [r for r in state['records'] if marker in (r.get(detail_key) or '')]
             if len(existing) > 1:
                 raise Error('同一来源标记已出现多条记录，需先核实')
             action = {'op': op, 'role': 'records', 'title': candidate['title'], 'project': projects[0]['title'],
-                      'cells': cells, 'marker': marker, 'skip_existing': [r['id'] for r in existing]}
+                      'cells': cells, 'marker': marker, 'detail_key': detail_key,
+                      'skip_existing': [r['id'] for r in existing]}
             key = marker
         else:
             raise Error('仅支持 create_record 或 update_status，不执行删除及结构修改')
@@ -443,7 +454,7 @@ def reconcile_plan(config, client, document, receipt_path):
     for index,action in enumerate(document['actions'][:count]):
         rows=state[action['role']]
         if action['op']=='create_record':
-            matches=[r for r in rows if action['marker'] in r.get('description','')]
+            matches=[r for r in rows if action['marker'] in (r.get(action.get('detail_key','description')) or '')]
         else:matches=[r for r in rows if r['id']==action['record_id']]
         if len(matches)!=1 or not all(equivalent(matches[0]['raw_cells'].get(k),v) for k,v in action['cells'].items()):
             raise Error('原结果尚不能唯一核验：'+action['title']+'；保留待核，未重新提交')

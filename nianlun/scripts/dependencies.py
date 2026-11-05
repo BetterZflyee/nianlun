@@ -19,8 +19,12 @@ LOCK = n.load(n.SKILL / 'references/dependencies.lock.json')
 
 
 def platform_key():
-    system = {'Darwin': 'darwin', 'Windows': 'windows', 'Linux': 'linux'}.get(platform.system())
-    arch = {'arm64': 'arm64', 'aarch64': 'arm64', 'AMD64': 'x64', 'x86_64': 'x64'}.get(platform.machine())
+    # platform.machine() 的大小写随平台而异：Windows on ARM 返回 "ARM64"，
+    # macOS 返回 "arm64"，Linux 上可能是 "aarch64"。统一折叠成小写再查表，
+    # 否则 Windows ARM64 会被误判为「不支持的 CPU」。
+    system = {'darwin': 'darwin', 'windows': 'windows', 'linux': 'linux'}.get(platform.system().lower())
+    machine = platform.machine().lower()
+    arch = {'arm64': 'arm64', 'aarch64': 'arm64', 'amd64': 'x64', 'x86_64': 'x64'}.get(machine)
     if not system or not arch:
         raise n.Error('暂不支持当前系统或 CPU；支持 macOS / Windows / Linux 的 64 位平台')
     return system, arch

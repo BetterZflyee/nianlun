@@ -121,7 +121,8 @@ def apply(html):
         page.add_class(page.grid, 'nl-four-panels')
         for panel, name in zip(page.panels, ('nl-panel-primary', 'nl-panel-detail', 'nl-panel-context', 'nl-panel-actions')):
             page.add_class(panel, name)
-    css = CSS.read_text(encoding='utf-8')
+    from report_blocks import css_body
+    css = css_body(CSS.read_text(encoding='utf-8'))
     page.changes.append((page.head_end, page.head_end, '<style id="' + STYLE_ID + '">\n' + css + '\n</style>\n'))
     for start, end, replacement in sorted(page.changes, reverse=True):
         html = html[:start] + replacement + html[end:]

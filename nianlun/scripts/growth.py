@@ -787,8 +787,21 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
             raise n.Error('这份报告已发布，但主表目前指向另一份汇报；原报告保留，未覆盖最新链接。')
         return {**receipt,'report_id':key,'already_present':True}
     if receipt.get('in_flight'):
-        if receipt['in_flight'].get('step')!='upload':raise n.Error('报告存在待核验步骤')
-        receipt=reconcile_report_upload(config,gw,folder,receipt)
+        step=receipt['in_flight'].get('step')
+        if step=='writeback':
+            # 上一轮写回可能已经生效但响应丢失：核验主表链接是否已是本轮 URL，是则直接确认。
+            url=receipt['in_flight'].get('url')
+            if p.get('report')==url:
+                receipt.update(status='verified',project_id=p['id'],report_id=key);receipt.pop('in_flight',None)
+                n.save(receipt_file,receipt)
+                return receipt
+            if p.get('report')!=receipt.get('previous_link'):
+                raise n.Error('主表汇报链接被其他人更新')
+            receipt.pop('in_flight',None);n.save(receipt_file,receipt)
+        elif step!='upload':
+            raise n.Error('报告存在待核验步骤')
+        else:
+            receipt=reconcile_report_upload(config,gw,folder,receipt)
     if 'previous_link' not in receipt:
         receipt['previous_link']=p.get('report');n.save(receipt_file,receipt)
     safe=re.sub(r'[^\w\u4e00-\u9fff-]','-',p['title']);filename='阶段性汇报-'+safe+'-'+until+'-'+key[:8]+'.html'
@@ -801,7 +814,9 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         n.save(folder/filename,html);n.save(folder/Path(filename).with_suffix('.md'),md)
         # 汇报保持同一份文档持续迭代：该项目已有汇报链接时覆盖原节点，
         # 链接不变，读者收藏的地址不会失效，也不会在文件夹里堆历史版本。
-        existing=remembered_report_node(config,p['id'],now.get('report'))
+        # now 在本函数靠后处才由回读结果赋值（832 行），这里只能取回执里已记录的上一版链接；
+        # 直接引用 now.get(...) 会在首次发布（回执无 node_id）时抛 UnboundLocalError。
+        existing=remembered_report_node(config,p['id'],receipt.get('previous_link'))
         try:
             if existing:
                 progress('正在把本期内容更新到已有汇报文档')
@@ -839,9 +854,14 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
         n.save(receipt_file,receipt)
         return receipt
     role,field_id,record_id,label=target
+    # 写回前先登记 in_flight：若写接口已生效但响应丢失，重试必须能核验到「链接已是本轮 URL」，
+    # 否则会重复上传同一份报告，或者在链接已被本轮改写时误判为「被他人更新」。
+    receipt['in_flight']={'step':'writeback','role':role,'field':field_id,'record':record_id,'url':receipt['url']}
+    n.save(receipt_file,receipt)
     table_write(config,gw,role,{field_id:receipt['url']},record_id)
     receipt.update(status='verified',project_id=p['id'],report_id=key,
                    linked_table=role,linked_field=field_id,linked_record=record_id,linked_label=label)
+    receipt.pop('in_flight',None)
     n.save(receipt_file,receipt)
     return receipt
 

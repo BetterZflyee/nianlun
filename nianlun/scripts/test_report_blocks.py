@@ -17,7 +17,7 @@ GRAPH={'type':'graph','title':'推进路径','caption':'下一步，不代表已
     'links':[{'from':'a','to':'b','label':'下一步','source':'[R1]'}]}
 CHART={'type':'bar','title':'验收量','caption':'同口径的实际值。','unit':'个','categories':['上期','本期'],
        'series':[{'name':'已验收','data':[2,4]}],'source':'[R1]'}
-def draft(config):return 'Lead: 当前结论。\n\n## A 重点\n```visual\n'+json.dumps(config,ensure_ascii=False)+'\n```\n'
+def draft(config):return 'Lead: 当前结论。\n\n## A 重点\n```visual\n'+json.dumps(config,ensure_ascii=False)+'\n```\n\n## B 风险与待决\n验收结论仍需补充。[R1]\n'
 
 
 class BlockTests(unittest.TestCase):

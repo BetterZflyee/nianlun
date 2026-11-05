@@ -16,6 +16,18 @@ STATES = {'done': ('已完成', '#2f6350'), 'active': ('推进中', '#486d88'),
           'blocked': ('受阻', '#bc4941'), 'planned': ('计划', '#897c54'), 'unknown': ('待核实', '#788579')}
 
 
+def css_body(css):
+    """Strip document-level <style> wrappers before embedding into a <style> element.
+
+    Some stylesheet assets ship whole <style> blocks: the recap skill's
+    style-protocol.css carries three of them and its contract says to inject them
+    verbatim. Embedding that inside another <style> nests style elements, browsers
+    drop the whole block, and the page renders unstyled - inline SVG then falls
+    back to black fill. Strip the tags, keep the rules.
+    """
+    return re.sub(r'</?style\b[^>]*>', '', css or '', flags=re.I)
+
+
 def text(value, limit=160, field='图中文字'):
     if not isinstance(value, str) or not value.strip() or len(value) > limit:
         raise ValueError(field+' 须为 1 至 '+str(limit)+' 字的非空文本')
@@ -820,7 +832,7 @@ def widen_wide_panels(html):
 
 def enhance(html):
     if 'data-recap-visual=' not in html:return html
-    css=(ASSETS/'visual-blocks.css').read_text(encoding='utf-8')
+    css=css_body((ASSETS/'visual-blocks.css').read_text(encoding='utf-8'))
     # 所选汇报技能可能自带同 id 的旧版样式；核心必须用本安装的版本覆盖，
     # 否则新图形（矩阵条带等）会因为旧样式而完全失去排版。
     style='<style id="rv-visual-style">'+css+'</style>'
@@ -831,9 +843,18 @@ def enhance(html):
     html=widen_wide_panels(html)
     if not re.search(r'data-recap-visual="(?:graph|bar|line)"',html):return html
     script=(ASSETS/'charts.bundle.js').read_text(encoding='utf-8')+'\n'+(ASSETS/'visual-blocks.js').read_text(encoding='utf-8')
+    runtime='<script id="rv-visual-runtime">'+script+'</script>'
+    # 幂等：再次增强同一份已渲染页面时先移除上一轮注入的运行时，否则脚本会层层叠加。
+    html=re.sub(r'<script id="rv-visual-runtime">.*?</script>',lambda m:'',html,flags=re.S)
     meta=re.search(r'<meta\b[^>]*http-equiv=["\']Content-Security-Policy["\'][^>]*>',html,re.I)
     if meta:
         if 'script-src ' not in meta[0] or "script-src 'none'" in meta[0]:return html
         digest=base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
-        html=html[:meta.start()]+meta[0].replace('script-src ',"script-src 'sha256-"+digest+"' ",1)+html[meta.end():]
-    return ('<script id="rv-visual-runtime">'+script+'</script></body>').join(html.rsplit('</body>',1))
+        # 幂等：先清掉本运行时上一轮写入的摘要，再加本轮摘要，否则摘要会越叠越多。
+        tag=re.sub(r"script-src\s+'sha256-[^']*'\s*",'script-src ',meta[0],flags=re.I)
+        tag=tag.replace('script-src ',"script-src 'sha256-"+digest+"' ",1)
+        html=html[:meta.start()]+tag+html[meta.end():]
+    if '</body>' in html:
+        head,_,tail=html.rpartition('</body>')
+        return head+runtime+'</body>'+tail
+    return html+runtime

@@ -32,7 +32,8 @@ class FlowTests(unittest.TestCase):
     def test_invalid_model_action_json_does_not_write_or_finish(self):
         self.bundle['sources']=[{'id':'source','text':'项目进展','name':'原文'}];n.save(self.folder/'evidence.json',self.bundle)
         with self.patches(),patch('flow.harness.reason',return_value={'actions_json':'not JSON'}),patch('flow.g.apply') as apply,patch('flow.g.finish') as finish:
-            with self.assertRaisesRegex(n.Error,'未能解析'):flow.grow(self.config_path)
+            # 模型返回不可解析的动作时，流程在核验阶段统一拒绝：不写表、不 finish、不留 decision。
+            with self.assertRaisesRegex(n.Error,'未能通过核验'):flow.grow(self.config_path)
         apply.assert_not_called();finish.assert_not_called();self.assertFalse((self.folder/'decision.json').exists())
     def test_oversized_evidence_is_not_silently_truncated(self):
         self.bundle['sources']=[{'text':'大'*600001}];n.save(self.folder/'evidence.json',self.bundle)

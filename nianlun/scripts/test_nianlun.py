@@ -10,18 +10,31 @@ import nianlun as n
 from render_report import render
 
 
-def fixture():
+def fixture(minimal=False):
+    """Build a binding snapshot.
+
+    minimal=True emits only required fields, to exercise bind() validation.
+    Default emits the full logical schema, which is what a real bound table looks
+    like - plan() writes description/kind/date, so a required-only fixture would
+    fail for reasons that cannot happen against a real table.
+    """
     tables = {}
     raw = {}
     for role in n.ROLES:
         fields = {}
-        for k in n.REQUIRED[role]:
+        keys = n.REQUIRED[role] if minimal else tuple(n.FIELDS[role])
+        for k in keys:
             field = {'fieldId': role + '-' + k, 'fieldName': n.FIELDS[role][k][0], 'type': 'text'}
             if k.endswith('_ids'):
-                field.update(type='bidirectionalLink', config={'linkedTableId': 'T-projects', 'multiple': False})
-            elif k == 'date':
+                target = {'project_ids': 'projects', 'site_ids': 'sites', 'milestone_ids': 'milestones'}.get(k, 'projects')
+                field.update(type='bidirectionalLink', config={'linkedTableId': 'T-' + target, 'multiple': False})
+            elif k in ('date', 'updated', 'deadline', 'start_date', 'actual_deliver', 'actual_accept'):
                 field['type'] = 'date'
-            elif k in ('status', 'kind'):
+            elif k in ('owner', 'biz_owner', 'tech_owner', 'r_owner', 'a_owner', 'c_contact', 'i_contact', 'contact'):
+                field['type'] = 'user'
+            elif k == 'attachments':
+                field['type'] = 'attachment'
+            elif k in ('status', 'kind', 'priority', 'sub_kind', 'accept_result') or k.endswith('_kind'):
                 options = ['开放', '处理中', '已解决'] if role == 'records' and k == 'status' else ['沟通要点', '问题反馈'] if k == 'kind' else ['进行中', '待核', '已达成']
                 field.update(type='singleSelect', config={'options': [{'id': 'opt-' + s, 'name': s} for s in options]})
             fields[k] = field

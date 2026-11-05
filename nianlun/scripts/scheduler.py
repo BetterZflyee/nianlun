@@ -96,8 +96,11 @@ def tick(config_path, binary=None, now=None, owner='codex'):
                     (state/'active.json').unlink(missing_ok=True)
             signature=n.digest({'status':item['status'],'error':item.get('error'),'handoff':item.get('handoff',{}).get('id')})
             item['notification_key']=signature
+            # 上一轮处于异常态（失败/待接续/已放弃）时，本轮一旦恢复成功必须通知：
+            # abandoned 也属于异常结局，若不计入，连续失败触顶放弃后就再也不会报恢复。
+            unhealthy=('failed','waiting_harness','abandoned')
             item['notify']=(signature!=previous.get('notification_key') if item['status'] in ('failed','waiting_harness') else
-                            bool(item.get('result',{}).get('notify',False) or previous.get('status') in ('failed','waiting_harness')))
+                            bool(item.get('result',{}).get('notify',False) or previous.get('status') in unhealthy))
             item['finished_at']=datetime.now(timezone.utc).isoformat();n.save(ledger_path,ledger);runs.append(item)
         # Keep operational receipts, without making a second store of project data.
         ledger['slots']={k:v for k,v in ledger['slots'].items() if v['status'] not in ('complete','skipped') or datetime.fromisoformat(v['at'])>now-timedelta(days=60)}

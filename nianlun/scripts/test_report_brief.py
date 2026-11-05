@@ -1,3 +1,4 @@
+import re
 import tempfile,unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,8 @@ from render_report import render
 FACTS={'projects':[{'id':'p','title':'项目甲','status':'进行中','table_url':'https://example.test/table'}],
     'records':[{'id':'r','title':'原始流水条目','description':'不应再次堆到正文的材料','date':'2026-10-10','project_ids':['p'],'table_url':'https://example.test/records'}],
     'milestones':[{'id':'m','title':'全部计划节点','status':'待核','project_ids':['p'],'date':'2026-10-12','table_url':'https://example.test/milestones'}], 'sites':[]}
-DRAFT='Lead: 联调已推进，验收仍待确认。\n\n## A 本期变化\n现场已完成联调。[R1]\n\n## B 下阶段行动\n补充验收证据。[M1]'
+VISUAL='```visual\n{"type":"status","title":"当前状态","caption":"本期两个对象的状态对照","items":[{"label":"甲","detail":"联调完成","state":"done","source":"[R1]"}]}\n```'
+DRAFT='Lead: 联调已推进，验收仍待确认。\n\n## A 本期变化\n现场已完成联调。[R1]\n\n'+VISUAL+'\n\n## B 风险与待决\n验收证据缺失，需本周补齐。[M1]'
 
 class BriefTests(unittest.TestCase):
     def test_summary_is_not_followed_by_a_second_dump_of_records_and_milestones(self):
@@ -102,7 +104,12 @@ class BriefTests(unittest.TestCase):
             calls=[]
             def command(args,**kwargs):
                 calls.append((args,kwargs))
-                if 'render' in args:Path(args[args.index('-o')+1]).write_text('<html><head></head><body><main>内容</main></body></html>')
+                if 'render' in args:
+                    # Real am emits each NLVISUAL token as its own <p>; the stub must do the
+                    # same or restore() correctly refuses to publish an unrendered figure.
+                    tokens=re.findall(r'NLVISUAL[0-9A-F]+',kwargs.get('input',''))
+                    body=''.join('<p>'+t+'</p>' for t in tokens) or '<main>内容</main>'
+                    Path(args[args.index('-o')+1]).write_text('<html><head></head><body><main>'+body+'</main></body></html>')
                 return SimpleNamespace(returncode=0,stdout='',stderr='')
             method=report_style.method(root)
             self.assertNotIn('## 引擎A',method['guidance'])

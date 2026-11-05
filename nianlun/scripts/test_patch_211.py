@@ -76,9 +76,13 @@ class Controls(unittest.TestCase):
         times=[10,12,14,14]
         with patch('scheduler.flow.grow',side_effect=[n.Error('same'),n.Error('same'),n.Error('changed'),{'verified':True,'notify':False}]):
             values=[scheduler.tick(self.path,now=datetime.fromisoformat(f'2026-10-21T{h}:00:00+08:00')) for h in times]
-        self.assertEqual([v['notify'] for v in values],[True,False,True,True])
-        self.assertEqual(len({v['runs'][0]['key'] for v in values}),1)
-        self.assertEqual(values[-1]['runs'][0]['attempts'],4)
+        # 同一未完成槽位在前三次被连续重试：首次通知、重复错误静默、错误内容变化再通知。
+        # 第三次触及 MAX_ATTEMPTS 后被标记 abandoned 并不再重试，因此第四次改跑新槽位，
+        # 新槽位没有失败历史，不应触发恢复通知。
+        self.assertEqual([v['notify'] for v in values],[True,False,True,False])
+        self.assertEqual(len({v['runs'][0]['key'] for v in values[:3]}),1)
+        self.assertEqual(values[2]['runs'][0]['status'],'abandoned')
+        self.assertEqual(values[-1]['runs'][0]['attempts'],1)
 
     def test_stale_manual_resume_cannot_create_new_run(self):
         with patch('flow.g.collect') as collect:

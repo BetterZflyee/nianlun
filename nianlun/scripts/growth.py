@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -20,10 +21,42 @@ import intake
 import dws_transport
 from file_lock import file_lock
 
+# 只读调用的重试预算。DWS 偶发空结果不应终止整轮，但也不能无限重试掩盖真故障。
+READ_RETRIES = 3
+# 退避秒数可被测试覆盖（设为 0），生产用真实等待避免把服务瞬间打满。
+RETRY_BACKOFF = float(os.environ.get('NIANLUN_RETRY_BACKOFF') or 1.5)
+# 这些是瞬时故障，重试有意义；登录失效、程序缺失等确定性错误重试也没用。
+RETRYABLE_HINTS = ('未返回有效结果','读取超时','连接钉钉服务超时','DWS 失败或部分成功')
+
+
+def _retryable(exc):
+    text = str(exc)
+    if any(hint in text for hint in RETRYABLE_HINTS):
+        # 登录失效属于确定性错误：重试只会重复失败，应当立刻提示用户重新登录。
+        return '登录已失效' not in text and '重新登录' not in text
+    return False
+
+
 class Gateway:
     def __init__(self, config):
         self.config = config
     def call(self, args, cwd=None, partial=False):
+        # 只读调用允许有限次退避重试：DWS 偶发「未返回有效结果」会把整轮作废
+        # （历史 10 次失败都发生在会话第一句身份核验上）。写操作绝不重试——
+        # 结果未知时重发可能重复建记录、重复发消息，必须留给人工对账。
+        attempts = 1 if dws_transport.is_write(args) else READ_RETRIES
+        last = None
+        for attempt in range(attempts):
+            try:
+                return self._call_once(args, cwd, partial)
+            except n.Error as exc:
+                last = exc
+                if attempt == attempts - 1 or not _retryable(exc):
+                    raise
+                time.sleep(RETRY_BACKOFF * (attempt + 1))
+        raise last
+
+    def _call_once(self, args, cwd, partial):
         cmd = [self.config.get('dws_bin', 'dws')]
         if self.config.get('profile'):
             cmd += ['--profile', self.config['profile']]

@@ -20,9 +20,20 @@ DECISION_SCHEMA={'type':'object','properties':{
 
 
 DECISION_RETRIES = 3
-# 单轮提示词上限。超出时按下面的顺序裁剪，而不是直接放弃整轮：
-# 历史记录只做去重参考，远端历史可以被压缩成计数；来源原文与字段契约不能丢。
-EVIDENCE_BUDGET = 600000
+# 单轮提示词上限（字符）。超出时按 trim_evidence 的优先级裁剪，而不是直接放弃整轮。
+# 这个值是保守起点，不是模型真实窗口：不同宿主的上下文差很多，猜错就会撞
+# CONTEXT_WINDOW_EXCEEDED。真正的保障是 grow() 里撞到上限就减半重试的自适应逻辑。
+EVIDENCE_BUDGET = 300000
+# 撞到上下文上限时，每一轮把预算折半，直到模型能吃下或降到下限为止。
+EVIDENCE_FLOOR = 40000
+
+
+def is_context_overflow(exc):
+    """宿主用不同措辞报告上下文超限；这里统一识别，漏判会让整轮白跑。"""
+    text = str(exc).lower()
+    return any(hint in text for hint in (
+        'context_window_exceeded', 'context length', 'context_length_exceeded',
+        'maximum context', 'too many tokens', 'input is too long', 'invalidparam'))
 
 
 def _record_digest(rows):
@@ -93,6 +104,12 @@ def trim_evidence(document, budget=EVIDENCE_BUDGET):
                                     'dropped':len(sources)-len(kept),'kept_by_channel':per_channel}
         notes.append(f'来源 {len(sources)} 条压至 {len(kept)} 条（按渠道各留最近 40 条）')
     return document,notes
+
+
+def _build_prompt(base, evidence, memories):
+    """Assemble the final prompt so the evidence slice can be swapped for a smaller one."""
+    return (base + '\n本轮完整证据：' + evidence +
+            '\n独立记忆空间查询结果：' + json.dumps(memories, ensure_ascii=False))
 
 
 def prompt_evidence(bundle):
@@ -188,15 +205,35 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                     'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'
                     '引用原文里的对话或短语时使用中文引号「」，不要在 JSON 字符串内写 ASCII 双引号，否则会破坏结构。'
                     'source_id 必须逐字复制本轮证据 sources 里的 id 字段；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
-                    '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False)+
-                    '\n本轮完整证据：'+evidence+'\n独立记忆空间查询结果：'+json.dumps(memories,ensure_ascii=False))
+                    '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False))
+                # 证据与记忆单独拼装：撞到宿主上下文上限时要能用更小的证据重拼，而不必重建整段指令。
+                prompt_base=prompt
+                prompt=_build_prompt(prompt_base,evidence,memories)
                 # 校验失败时把具体原因反馈给模型再写一稿：盲重试同样的输入只会重复同样的错误。
                 # 每次重试使用独立目录，避免复用上一次被拒绝的答案。
                 decision=None;plan=None;current_prompt=prompt
+                budget = len(evidence)
                 for attempt in range(DECISION_RETRIES):
                     if attempt:
                         progress('上一稿未通过核验，正在按校验意见修正（第 %d 次）' % attempt)
-                    answer=harness.reason(current_prompt,folder/('harness-decision' if not attempt else 'harness-decision-fix%d'%attempt),binary,DECISION_SCHEMA)
+                    try:
+                        answer=harness.reason(current_prompt,folder/('harness-decision' if not attempt else 'harness-decision-fix%d'%attempt),binary,DECISION_SCHEMA)
+                    except n.Error as exc:
+                        # 宿主上下文小于预算时说「证据太多」是猜，撞一次才知道。撞到就折半再试，
+                        # 直到模型能吃下；仍然失败才交回宿主分批处理。
+                        if not is_context_overflow(exc):
+                            raise
+                        if budget <= EVIDENCE_FLOOR:
+                            raise n.Error('本轮证据超出宿主上下文，已缩到下限仍放不下。'
+                                          '证据完整保存在运行目录，请由宿主分批处理当前轮次；未执行写入。') from exc
+                        budget = max(EVIDENCE_FLOOR, budget // 2)
+                        tight, notes2 = trim_evidence(prompt_evidence(bundle), budget)
+                        current_prompt = _build_prompt(prompt_base, json.dumps(tight, ensure_ascii=False), memories)
+                        n.save(folder / 'evidence-trim.json',
+                               {'notes': notes2, 'chars': len(json.dumps(tight, ensure_ascii=False)),
+                                'budget': budget, 'reason': '宿主上下文不足，自动减半'})
+                        progress('宿主上下文不足，证据预算降至 %d 字符后重试' % budget)
+                        continue
                     try:
                         decision={k:v for k,v in answer.items() if k!='actions_json'};decision['actions']=json.loads(answer['actions_json'])
                     except (KeyError,ValueError,TypeError):

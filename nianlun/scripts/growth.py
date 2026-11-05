@@ -329,7 +329,20 @@ def project_for(bundle,a):
 # 语音转写常把场地编号听错。只收录已核实过的映射，其余未知编号一律打回，
 # 避免把错编号写进表格后污染里程碑、报告和记忆页。
 ASR_SITE_TRAPS={'752A':'755RA','755RD':'755RA','755RA-':'755RA'}
-SITE_CODE=re.compile(r'(?<![0-9A-Za-z])(\d{3}[A-Z]{1,3})(?![0-9A-Za-z])')
+# 合并场地在表里是「591W&591WA」这种带 & 的复合编号。模型和原文往往只说其中一半
+# （「591W」，口语和 ASR 都这样），所以匹配后还要查一份「单独编号 → 合并编号」的别名表，
+# 否则明明是合法场地，却会被判成「不在场地表中」。
+SITE_CODE=re.compile(r'(?<![0-9A-Za-z])(\d{3}[A-Z]{1,3}(?:&\d{3}[A-Z]{1,3})*)(?![0-9A-Za-z])')
+
+
+def site_code_aliases(codes):
+    """Map each half of a merged code back to the merged code: 591W -> 591W&591WA."""
+    aliases={}
+    for code in codes:
+        for part in str(code).split('&'):
+            part=part.strip().upper()
+            if part and part!=str(code).upper():aliases.setdefault(part,str(code))
+    return aliases
 
 
 def normalize_site_codes(bundle,action):
@@ -340,6 +353,7 @@ def normalize_site_codes(bundle,action):
     """
     codes={str(s.get('code') or '').strip().upper() for s in bundle.get('tables',{}).get('sites',[]) if s.get('code')}
     if not codes:return action
+    aliases=site_code_aliases(codes)
     known=', '.join(sorted(codes))
     for field in ('title','description'):
         value=action.get(field)
@@ -347,8 +361,10 @@ def normalize_site_codes(bundle,action):
         def fix(match):
             found=match.group(1).upper()
             if found in codes:return found
+            if found in aliases:return aliases[found]
             target=ASR_SITE_TRAPS.get(found)
             if target and target in codes:return target
+            if target and target in aliases:return aliases[target]
             raise n.Error(f'{field} 里的场地编号「{found}」不在场地表中，请核对后重新提交。'
                           f'当前表内编号：{known}')
         action[field]=SITE_CODE.sub(fix,value)

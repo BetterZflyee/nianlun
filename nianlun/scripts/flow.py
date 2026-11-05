@@ -195,7 +195,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                 decision=None;plan=None;current_prompt=prompt
                 for attempt in range(DECISION_RETRIES):
                     if attempt:
-                        progress('上一稿证据引用未通过核验，正在按校验意见修正（第 %d 次）' % attempt)
+                        progress('上一稿未通过核验，正在按校验意见修正（第 %d 次）' % attempt)
                     answer=harness.reason(current_prompt,folder/('harness-decision' if not attempt else 'harness-decision-fix%d'%attempt),binary,DECISION_SCHEMA)
                     try:
                         decision={k:v for k,v in answer.items() if k!='actions_json'};decision['actions']=json.loads(answer['actions_json'])
@@ -206,10 +206,13 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         plan=g.validate(config,bundle,decision);break
                     except n.Error as exc:
                         if attempt==DECISION_RETRIES-1:raise
+                        # 修正指令必须跟着真实原因走：早先这里无论什么原因都只说「引用不对」，
+                        # 于是场地编号错了、选项越界了，模型也会被推去改 source_id/quote，
+                        # 反反复复都改不到点子上，三次用尽后整轮作废。
                         current_prompt=(prompt+'\n\n上一稿被核验拒绝，原因：'+str(exc)[:500]+
-                            '\n请只针对这个原因修正：重新核对每个动作的 source_id 确实存在于本轮证据 sources 中，'
-                            'quote 必须从该来源 text 里连续逐字复制；无法逐字确认的事项移入 pending 数组，不要编造引用。'
-                            '其余已正确的动作保持不变，返回完整决策 JSON。')
+                            '\n请只针对这个原因修正上面这一条，不要改动其他已经通过的部分；'
+                            '返回完整决策 JSON。若这一条无法在本轮证据里自证，就把该事项移入 pending 数组，不要编造。'
+                            '\n上一稿的 actions 原文（供你定位并只改有问题的那几条）：'+json.dumps(decision.get('actions'),ensure_ascii=False)[:20000])
                         decision=None
                 if decision is None or plan is None:raise n.Error('动作计划未能通过核验，未执行业务写入')
             plan=g.validate(config,bundle,decision)

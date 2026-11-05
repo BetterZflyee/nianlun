@@ -20,6 +20,79 @@ DECISION_SCHEMA={'type':'object','properties':{
 
 
 DECISION_RETRIES = 3
+# 单轮提示词上限。超出时按下面的顺序裁剪，而不是直接放弃整轮：
+# 历史记录只做去重参考，远端历史可以被压缩成计数；来源原文与字段契约不能丢。
+EVIDENCE_BUDGET = 600000
+
+
+def _record_digest(rows):
+    """把历史记录压缩成「按项目计数」的摘要：去重只需要知道存在过什么，不需要全文。"""
+    counts={}
+    for row in rows:
+        for pid in (row.get('project_ids') or ['(未归属)']):
+            counts[pid]=counts.get(pid,0)+1
+    return counts
+
+
+def trim_evidence(document, budget=EVIDENCE_BUDGET):
+    """Shrink a prompt document until it fits the budget.
+
+    Order of what gets dropped matters: full historical records go first (they only
+    matter for duplicate detection), then long source bodies are truncated, then
+    records are reduced to per-project counts. Table field contracts and the source
+    list survive longest because the model cannot validate writes without them.
+    Returns (document, notes) where notes records what was reduced.
+    """
+    notes=[]
+    size=lambda d: len(json.dumps(d,ensure_ascii=False))
+    if size(document)<=budget:return document,notes
+
+    records=document.get('tables',{}).get('records') or []
+    if records:
+        # 1. 记录只保留最近 60 条，其余折叠成计数。本轮新增靠 sources 判定，历史靠计数去重。
+        recent=sorted(records,key=lambda r:str(r.get('date') or ''),reverse=True)[:60]
+        document['tables']['records']=recent
+        document['tables']['record_history']={'total':len(records),'kept_recent':len(recent),
+                                              'dropped':len(records)-len(recent),'by_project':_record_digest(records)}
+        notes.append(f'历史记录 {len(records)} 条压至最近 {len(recent)} 条，其余按项目计数保留')
+    if size(document)<=budget:return document,notes
+
+    # 2. 仍然超限时截断过长的来源正文，保留标题与首段，标明已截断。
+    #    单条来源本身超预算时不能截：截了模型就无法逐字引用原文，宁可让宿主分批处理。
+    oversize_single=[s for s in (document.get('sources') or []) if len(s.get('text') or '')>budget//4]
+    if oversize_single:
+        return document,notes+['存在单条超长来源，未截断，交由宿主分批处理']
+    for item in document.get('sources') or []:
+        body=item.get('text') or ''
+        if len(body)>1200:
+            item['text']=body[:1200]
+            item['text_truncated']={'original_chars':len(body),'kept_chars':1200}
+    notes.append('超长来源正文截断至 1200 字，已标注原始长度')
+    if size(document)<=budget:return document,notes
+
+    # 3. 最后才退到只留计数，丢掉记录明细本身。
+    if document.get('tables',{}).get('records'):
+        document['tables']['records']=[]
+        notes.append('记录明细全部折叠为计数')
+    if size(document)<=budget:return document,notes
+
+    # 4. 来源条数本身过多（长窗口补采）：按渠道保留最近若干条，其余折叠成计数。
+    #    模型判断「本轮发生了什么」靠的是新近材料，早期同渠道的大量流水只会挤占预算。
+    sources=document.get('sources') or []
+    if len(sources)>200:
+        ordered=sorted(sources,key=lambda s:str(s.get('time') or ''),reverse=True)
+        kept=[];per_channel={}
+        for item in ordered:
+            channel=(item.get('channels') or ['unknown'])[0]
+            if per_channel.get(channel,0)>=40:continue
+            per_channel[channel]=per_channel.get(channel,0)+1
+            kept.append(item)
+            if len(kept)>=200:break
+        document['sources']=kept
+        document['source_history']={'total':len(sources),'kept':len(kept),
+                                    'dropped':len(sources)-len(kept),'kept_by_channel':per_channel}
+        notes.append(f'来源 {len(sources)} 条压至 {len(kept)} 条（按渠道各留最近 40 条）')
+    return document,notes
 
 
 def prompt_evidence(bundle):
@@ -28,9 +101,12 @@ def prompt_evidence(bundle):
     result['todos']=[{k:todo.get(k) for k in ('taskId','subject','isDone','dueTime','priority')} for todo in bundle['todos']]
     # 目标表的真实字段与可用取值：单选必须落在 options 内，只读字段不可写。
     # 缺了这段，模型只能从历史记录反推类型，表结构一改就会写出失效的旧分类。
+    # 字段元数据位于 n.fetch() 返回值的 tables.fields 下，顶层没有 fields 键；
+    # 早先读 bundle.get('fields') 恒为空，提示词里的选项约束从未生效。
+    meta_all=(bundle.get('tables') or {}).get('fields') or {}
     fields={}
     for role in n.ROLES:
-        meta=(bundle.get('fields') or {}).get(role) or {}
+        meta=meta_all.get(role) or {}
         columns={}
         for logical,field in meta.items():
             item={'type':field.get('type')}
@@ -60,8 +136,14 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                 decision={'run_id':bundle['run_id'],'summary':'本轮没有采集到新的项目变化，未新增或修改项目记录与待办。',
                     'pending':[],'deferred_source_ids':[],'actions':[]}
             else:
-                evidence=json.dumps(prompt_evidence(bundle),ensure_ascii=False)
-                if len(evidence)>600000:
+                document,notes=trim_evidence(prompt_evidence(bundle))
+                evidence=json.dumps(document,ensure_ascii=False)
+                if notes:
+                    # 裁剪必须留痕：读者要能看出本轮提示词不是完整证据。
+                    n.save(folder/'evidence-trim.json',{'notes':notes,'chars':len(evidence),
+                                                        'budget':EVIDENCE_BUDGET})
+                    progress('本轮证据较多，已按预算裁剪：'+'；'.join(notes))
+                if len(evidence)>EVIDENCE_BUDGET:
                     raise n.Error('本轮证据较多，已完整保存在运行目录。请由宿主分批处理当前轮次；未截断来源或执行写入。')
                 memories=[]
                 if config['growth'].get('brain_dir'):

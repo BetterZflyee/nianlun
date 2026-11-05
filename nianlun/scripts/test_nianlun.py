@@ -183,5 +183,28 @@ class Tests(unittest.TestCase):
         self.assertNotIn('</script><script>alert',out.read_text())
 
 
+class DroppedFieldTests(unittest.TestCase):
+    """被剔除的字段必须回传，否则 verified=True 会掩盖「只写进去一部分」。"""
+
+    def test_writable_cells_reports_every_drop_reason(self):
+        import growth as g
+        cfg, _raw = fixture()
+        cfg['tables']['records']['fields']['updated'] = {
+            'fieldId': 'records-updated', 'fieldName': '最近更新', 'type': 'date', 'readonly': True}
+        cells = {'records-title': '自检', 'records-updated': '2026-11-06', 'records-nope': 'x'}
+        kept, dropped = g.writable_cells(cfg, 'records', cells)
+        self.assertEqual(kept, {'records-title': '自检'})
+        reasons = dict(dropped)
+        self.assertEqual(reasons['updated'], 'READONLY')
+        self.assertEqual(reasons['records-nope'], 'UNKNOWN_FIELD')
+
+    def test_clean_cells_drop_nothing(self):
+        import growth as g
+        cfg, _raw = fixture()
+        kept, dropped = g.writable_cells(cfg, 'records', {'records-title': '自检'})
+        self.assertEqual(kept, {'records-title': '自检'})
+        self.assertEqual(dropped, [])
+
+
 if __name__ == '__main__':
     unittest.main()

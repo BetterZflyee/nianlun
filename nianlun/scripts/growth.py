@@ -516,7 +516,11 @@ def table_write(config,gw,role,cells,record_id=None):
     d=gw.call(['aitable','+record-query','--base-id',base,'--table-id',table,'--record-ids',record_id])
     rows=d.get('records',[])
     if len(rows)!=1 or rows[0]['recordId']!=record_id or not all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):raise n.Error('表格写后验证不一致')
-    return {'record_id':record_id,'verified':True}
+    # dropped 不能悄悄丢掉：只读字段、越界选项、未知字段被剔除后，写进去的记录就少了几列，
+    # 而调用方看到 verified=True 会以为整条都写成功了。把剔除明细带回回执。
+    result={'record_id':record_id,'verified':True}
+    if dropped:result['dropped']=[{'field':f,'reason':r} for f,r in dropped]
+    return result
 
 
 def apply(config,folder,plan_file):

@@ -347,11 +347,31 @@ def similar_todos(project,title,todos):
     return matches
 
 
+def resolve_source(bundle, given):
+    """Find the one source the model meant, tolerating a dropped base64 pad.
+
+    钉钉的 source id 形如 message:msgtYQZ...==，末尾的 == 是 base64 填充。
+    模型引用时经常把它截掉（实测整轮失败就是这么来的），而 payload 本身完全正确。
+    只按「补回 ==」这一种确定性变换匹配，不做模糊匹配——否则会把不同消息认成同一来源。
+    """
+    sources = bundle['sources']
+    if not isinstance(given, str) or not given.strip():
+        return None
+    exact = [s for s in sources if s['id'] == given]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
+    # 只接受「末尾填充符数量不同」这一种偏差：模型常把 == 写成 = 或干脆省掉。
+    stripped = given.rstrip('=')
+    candidates = [s for s in sources if s['id'].rstrip('=') == stripped]
+    return candidates[0] if len(candidates) == 1 else None
+
 def evidence(bundle,a):
-    matches=[s for s in bundle['sources'] if s['id']==a.get('source_id')]
-    if len(matches)!=1 or not isinstance(a.get('quote'),str) or not a['quote'].strip() or a['quote'] not in matches[0]['text']:
+    match=resolve_source(bundle,a.get('source_id'))
+    if match is None or not isinstance(a.get('quote'),str) or not a['quote'].strip() or a['quote'] not in match['text']:
         raise n.Error('动作必须引用本轮来源 ID 与逐字摘录')
-    s=matches[0]
+    s=match
     return {'id':s['id'],'name':s['name'],'quote':a['quote'],'url':s.get('url','')}
 
 

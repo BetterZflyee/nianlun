@@ -42,6 +42,10 @@ def due_slots(schedule, now, activated_at):
 def tick(config_path, binary=None, now=None, owner='codex'):
     from setup import Setup, default_home
     config_path=Path(config_path).expanduser().resolve();config=n.load(config_path)
+    # 配置缺 growth 段时直接 KeyError，traceback 里看不出是配置问题——历史上
+    # tick.err.log 里已经躺了两份这样的堆栈。给一句能照着做的话。
+    if not isinstance(config.get('growth'),dict):
+        raise n.Error('配置缺少 growth 段，无法定时生长；请重新完成接入向导')
     state=Path(config['growth']['state_dir']);schedule=config['growth']['schedule']
     if schedule.get('enabled',True) is False or run_control.paused(config):return {'status':'paused','notify':False,'runs':[]}
     receipt_path=state/'scheduler.json'

@@ -142,7 +142,10 @@ def validate(config, evidence=None):
             for pt in pts:
                 if not isinstance(pt, dict) or set(pt) - {'date', 'label', 'state'}:
                     raise ValueError('节点字段不合法')
-                day(pt.get('date'), '节点日期'); text(pt.get('label'), 14, '节点说明')
+                # 14 字装不下一句正常的节点说明（如「WA密钥错误已修复、培训安排晚19:00」），
+                # 模型被迫压缩成电报体，两轮修订都过不了。渲染时标签会自动换行，
+                # 放宽到 24 字与其它 label 限制对齐。
+                day(pt.get('date'), '节点日期'); text(pt.get('label'), 24, '节点说明')
                 if pt.get('state') and pt['state'] not in STATES: raise ValueError('节点状态不合法')
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')

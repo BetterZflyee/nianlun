@@ -170,9 +170,34 @@ def issues(markdown,evidence):
             base = re.sub(r'\([^()]*\)$', '', token)
             if base and base in rows_flat: return True
             core = base or token
-            for suffix in ('转运中心','转运枢纽','陆运转笼中心','中心'):
+            for suffix in ('转运中心','转运枢纽','陆运转笼中心','中心','转运中心(靠离卡)'):
                 core = core.replace(suffix, '')
-            return bool(core) and core in rows_flat
+            if core and core in rows_flat: return True
+            # 模型也常写成「杭州萧山 571WA&571WF」——城市片区在前、场地编号在后，
+            # 而表里是「杭州萧山(城南)转运中心」。用「城市片区」这一共同前缀判断：
+            # 取去掉括号内容后的前 4 个字（如「杭州萧山」「福州闽侯」）比对。
+            head = re.sub(r'\([^()]*\)', '', core)
+            # 场地名里常夹着修饰词（深圳宝安**航空**转运枢纽 vs 甘特写「深圳宝安」），
+            # 逐个去掉再看前缀是否命中。
+            for noise in ('航空','陆运','大件','国际','货运'):
+                head = head.replace(noise, '')
+            # 城市名有长有短（南昌=2字、杭州萧山=4字），至少 2 字才算有意义的前缀。
+            if len(head) < 2: return False
+            if head in rows_flat:
+                # 纯城市名可能对应多个场地（「杭州」→ 杭州萧山 + 杭州城南），
+                # 那种情况不算覆盖，必须写到片区级别。
+                same_head = [t for t in site_titles if flat(t).startswith(head)]
+                return len(same_head) <= 1
+            # 同一城市但用了区名/街道名（表里「深圳宝安」、甘特写「深圳航城」）：
+            # 这属于地理称谓差异，字符层面无从判断对错。只要甘特里出现了该城市
+            # 且该城市在本项目只对应一个场地，就认作覆盖——否则一句称谓差异
+            # 会让整份报告重写两轮仍然作废。
+            city = head[:2]
+            if len(city) < 2 or city not in rows_flat:
+                return False
+            same_city = [t for t in site_titles if flat(t).startswith(city)]
+            return len(same_city) == 1
+
         missing = [t for t in site_titles if not covered(t)]
         if missing:
             # 只说「漏了哪几个」不够：模型可能分不清哪些是该覆盖的全集，改一轮又漏别处。

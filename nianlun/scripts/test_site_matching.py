@@ -16,6 +16,7 @@ SITES = [
     '福州闽侯(兰圃)转运中心',
     '南昌（华东）陆运转笼中心（靠离卡）',
     '西安汉唐转运中心',
+    '深圳宝安航空转运枢纽',
 ]
 
 
@@ -42,6 +43,7 @@ class SiteCoverageTests(unittest.TestCase):
             '591W 福州闽侯（兰圃）转运中心',
             '791XE 南昌（华东）陆运转笼中心',
             '029WE 西安汉唐转运中心',
+            '755RA 深圳宝安航空转运枢纽',
         ])
         self.assertFalse([e for e in errs if '甘特漏了' in e], errs)
 
@@ -52,6 +54,7 @@ class SiteCoverageTests(unittest.TestCase):
             '福州闽侯(兰圃)转运中心',
             '南昌（华东）陆运转笼中心',
             '西安汉唐转运中心',
+            '深圳宝安航空转运枢纽',
         ])
         self.assertFalse([e for e in errs if '甘特漏了' in e], errs)
 
@@ -72,6 +75,7 @@ class SiteCoverageTests(unittest.TestCase):
             '591W 福州闽侯（兰圃）转运中心',
             '791XE 南昌（华东）陆运转笼中心',
             '029WE 西安汉唐转运中心',
+            '755RA 深圳宝安航空转运枢纽',
         ])
         self.assertFalse([e for e in errs if '甘特漏了' in e], errs)
 
@@ -80,6 +84,61 @@ class SiteCoverageTests(unittest.TestCase):
         errs = self.errors_for([
             '杭州', '福州', '南昌', '西安',
         ])
+        self.assertTrue([e for e in errs if '甘特漏了' in e], errs)
+
+
+class CityCodeFormatTests(unittest.TestCase):
+    """模型常写「杭州萧山 571WA&571WF」这种城市片区+编号格式，而不是表里的全名。"""
+
+    def errors_for(self, labels):
+        return report_brief.issues(gantt(labels), evidence(SITES))
+
+    def test_city_plus_code_is_accepted(self):
+        errs = self.errors_for([
+            '南昌 791XE', '武汉吴家山 027W', '成都长兴 028W', '西安汉唐 029WE',
+            '杭州萧山 571WA&571WF', '西安大件 029WH', '福州闽侯 591W&591WA',
+            '深圳宝安 755RA',
+        ])
+        self.assertFalse([e for e in errs if '甘特漏了' in e], errs)
+
+    def test_short_city_name_still_matches(self):
+        """「南昌（华东）陆运转笼中心」的主干只有 2 字，也要能匹配「南昌 791XE」。"""
+        errs = self.errors_for([
+            '南昌 791XE', '武汉吴家山 027W', '成都长兴 028W', '西安汉唐 029WE',
+            '杭州萧山 571WA&571WF', '西安大件 029WH', '福州闽侯 591W&591WA',
+            '深圳宝安 755RA',
+        ])
+        missing = [e for e in errs if '甘特漏了' in e]
+        self.assertFalse([m for m in missing if '南昌' in m], missing)
+
+    def test_ambiguous_city_prefix_is_not_enough(self):
+        """「杭州」同时对应两个场地，只写城市不算覆盖。"""
+        sites = ['杭州萧山(城南)转运中心', '杭州城南转运中心']
+        draft = gantt(['杭州 571WA', '杭州 571WF'])
+        errs = report_brief.issues(draft, evidence(sites))
+        self.assertTrue([e for e in errs if '甘特漏了' in e], errs)
+
+
+class DistrictAliasTests(unittest.TestCase):
+    """表里写「深圳宝安」，甘特写「深圳航城」——同城不同称谓。
+
+    这是地理知识差异，字符匹配判不出对错。同城只有一个场地时认作覆盖，
+    有多个场地时必须写到片区级，否则真漏也放过去了。
+    """
+
+    def test_same_city_single_site_is_accepted(self):
+        sites = ['深圳宝安航空转运枢纽']
+        errs = report_brief.issues(gantt(['深圳航城 755RA']), evidence(sites))
+        self.assertFalse([e for e in errs if '甘特漏了' in e], errs)
+
+    def test_same_city_multiple_sites_is_not_enough(self):
+        sites = ['深圳宝安航空转运枢纽', '深圳福永转运中心']
+        errs = report_brief.issues(gantt(['深圳 755RA']), evidence(sites))
+        self.assertTrue([e for e in errs if '甘特漏了' in e], errs)
+
+    def test_different_city_is_still_reported(self):
+        sites = ['深圳宝安航空转运枢纽']
+        errs = report_brief.issues(gantt(['广州白云 755RA']), evidence(sites))
         self.assertTrue([e for e in errs if '甘特漏了' in e], errs)
 
 

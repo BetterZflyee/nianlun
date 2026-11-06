@@ -48,7 +48,12 @@ def build(output=None):
         (package / 'plugin.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
         for name in ('安装年轮.ps1', '打开年轮.ps1'):
             path = package / name
-            path.write_bytes(b'\xef\xbb\xbf' + path.read_text(encoding='utf-8-sig').encode('utf-8'))
+            data = b'\xef\xbb\xbf' + path.read_text(encoding='utf-8-sig').encode('utf-8')
+            path.write_bytes(data)
+            # 同时落一份纯 ASCII 文件名的副本给 .cmd 调用：cmd.exe 在 chcp 生效前
+            # 就解析脚本，中文文件名会被按 OEM 代码页解码成乱码，导致找不到 .ps1。
+            alias = {'安装年轮.ps1': 'install.ps1', '打开年轮.ps1': 'open.ps1'}[name]
+            (package / alias).write_bytes(data)
         for name in ('安装年轮.cmd', '打开年轮.cmd'):
             path = package / name
             path.write_bytes(path.read_text(encoding='utf-8').replace('\n', '\r\n').encode('utf-8'))

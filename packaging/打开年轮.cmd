@@ -1,4 +1,6 @@
 @echo off
-chcp 65001 >nul
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0打开年轮.ps1"
+rem Keep this file pure ASCII: cmd.exe parses it before "chcp 65001" takes effect.
+setlocal
+cd /d "%~dp0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "open.ps1"
 if errorlevel 1 pause

@@ -10,6 +10,46 @@ from urllib.request import getproxies
 import nianlun as n
 
 
+def repair_json_text(text):
+    """修复 JSON 字符串内部的裸控制字符。
+
+    模型偶尔不把多行正文转义成 \\n，而是直接输出原始换行——JSON 里这是非法控制
+    字符，整段解析就断在第 2 行。内容本身是对的，只是编码不合规。这里只动字符串
+    内部的裸控制字符：换行→\\n、制表→\\t、其余丢弃；字符串外一个字节都不改。
+    """
+    if not isinstance(text, str):
+        return text
+    out = []
+    in_string = False
+    escaped = False
+    for ch in text:
+        if escaped:
+            out.append(ch)
+            escaped = False
+            continue
+        if ch == '\\':
+            out.append(ch)
+            escaped = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            out.append(ch)
+            continue
+        if in_string:
+            if ch == '\n':
+                out.append('\\n')
+                continue
+            if ch == '\r':
+                continue
+            if ch == '\t':
+                out.append('\\t')
+                continue
+            if ord(ch) < 0x20:
+                continue
+        out.append(ch)
+    return ''.join(out)
+
+
 def runtime_env():
     env=os.environ.copy()
     # Native GUI apps use OS proxy settings; CLI children need their equivalent environment.
@@ -97,8 +137,9 @@ def codex_reason(prompt, directory, preferred=None, schema=None, timeout=900):
     content=output.read_text(encoding='utf-8').strip()
     if not content:raise n.Error('Codex 返回了空结果')
     if schema:
-        try:return json.loads(content)
-        except ValueError:raise n.Error('Codex 输出未符合结构要求，未执行写入')
+        value=json_from_text(content,single_field=single_string_schema(schema))
+        if value is None:raise n.Error('Codex 输出未符合结构要求，未执行写入')
+        return value
     return content
 
 
@@ -362,13 +403,9 @@ def deepseek_reason(prompt,directory,preferred=None,schema=None,timeout=1200,con
         if session and session!=saved:harness_session(config_path,'deepseek',session)
         if not answer:raise n.Error('DeepSeek Harness 返回了空结果')
         if schema:
-            raw=answer.strip()
-            if raw.startswith('```'):
-                raw=re.sub(r'^```[A-Za-z]*\n?|\n?```$','',raw).strip()
-            start,end=raw.find('{'),raw.rfind('}')
-            if start<0 or end<start:raise n.Error('DeepSeek Harness 输出未符合结构要求，未执行写入')
-            try:return json.loads(raw[start:end+1])
-            except ValueError:raise n.Error('DeepSeek Harness 输出未符合结构要求，未执行写入')
+            value=json_from_text(answer,single_field=single_string_schema(schema))
+            if value is None:raise n.Error('DeepSeek Harness 输出未符合结构要求，未执行写入')
+            return value
         return answer
     raise n.Error('DeepSeek Harness 会话重建失败，请检查 dsh 运行状态')
 
@@ -441,28 +478,86 @@ def repair_json_quotes(text):
     return ''.join(out)
 
 
-def json_from_text(raw):
-    """从一段文本里取出 JSON 对象：容忍代码围栏、前后解释和多余空行。"""
+def single_string_schema(schema):
+    """schema 是否「恰好一个字符串字段」：只有这种结构才能按边界兜底截取。"""
+    if not isinstance(schema,dict):return False
+    props=schema.get('properties')
+    if not isinstance(props,dict) or len(props)!=1:return False
+    only=next(iter(props.values()))
+    return isinstance(only,dict) and only.get('type')=='string'
+
+
+def json_from_text(raw, single_field=False):
+    """从一段文本里取出 JSON 对象：容忍代码围栏、前后解释、裸引号与裸换行。
+
+    single_field=True 表示 schema 只有一个字符串字段，此时才允许最后的按边界截取
+    兜底——多字段时那样截会把别的字段吞进值里，必须交给上层报错。
+    
+
+    模型的失效模式不止一种：引述原话时直接写 ASCII 双引号会让 JSON 断在中间，
+    多行正文不转义成 \\n 又会撞上非法控制字符。两种修复都要试，而且可以叠加。
+    """
     if not isinstance(raw,str):return None
     text=raw.strip()
     if text.startswith('```'):
         text=re.sub(r'^```[A-Za-z]*\s*','',text)
         text=re.sub(r'\s*```$','',text).strip()
-    try:
-        value=json.loads(text)
-        if isinstance(value,dict):return value
-    except ValueError:
-        try:
-            value=json.loads(repair_json_quotes(text))
-            if isinstance(value,dict):return value
-        except ValueError:pass
+    def accept(value):
+        return value if isinstance(value,dict) else None
+    def attempt(body):
+        for candidate in (body, repair_json_quotes(body),
+                          repair_json_text(body),
+                          repair_json_text(repair_json_quotes(body)),
+                          repair_json_quotes(repair_json_text(body))):
+            try:
+                value=json.loads(candidate)
+            except ValueError:
+                continue
+            got=accept(value)
+            if got is not None:return got
+        return None
+    got=attempt(text)
+    if got is not None:return got
     start,end=text.find('{'),text.rfind('}')
     if start>=0 and end>start:
-        try:
-            value=json.loads(text[start:end+1])
-            if isinstance(value,dict):return value
-        except ValueError:pass
+        got=attempt(text[start:end+1])
+        if got is not None:return got
+        if single_field:return salvage_single_field(text[start:end+1])
+        return None
     return None
+
+
+def salvage_single_field(body):
+    """最后一道兜底：schema 只有一个字符串字段时，按字段名直接截取它的值。
+
+    模型把一整篇 markdown 当字段值输出时，里面会有大量未转义的双引号和代码块，
+    任何「修复引号」的启发式都无从判断哪个引号是内容、哪个是收尾。但此时结构是
+    确定的：只有一个键，值是第一个引号到最后一个引号之间的全部内容。按这个边界
+    重建，比猜引号可靠得多。
+    """
+    if not isinstance(body,str) or not body.startswith('{') or not body.endswith('}'):
+        return None
+    # 只能看值的开引号之前的键：值内部本身就有大量 JSON（```visual 块里的
+    # {"type":"gantt",...}），全篇扫键会把它们一起算进来，永远判不出单字段。
+    match=re.match(r'\{\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*:',body)
+    if not match:return None
+    key=match.group(1)
+    marker='"%s"'%key
+    at=body.find(marker)
+    if at<0:return None
+    colon=body.find(':',at+len(marker))
+    if colon<0:return None
+    quote=body.find('"',colon+1)
+    if quote<0:return None
+    tail=body.rfind('"',quote+1)
+    if tail<=quote:return None
+    # 值之后必须只剩收尾括号，否则说明不止一个字段，不能这么截。
+    remainder=body[tail+1:].strip()
+    if remainder!='}':return None
+    # 不再检查值内部有没有「"键":」——单字符串字段的值里本来就可能嵌着 JSON
+    # （```visual 块里的 {"type":"gantt",...}）。是否允许多字段由调用方通过
+    # single_field 决定，这里只负责按边界截取。
+    return {key:body[quote+1:tail]}
 
 
 def structured_answer(text):

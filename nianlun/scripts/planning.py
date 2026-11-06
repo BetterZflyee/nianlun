@@ -29,6 +29,39 @@ def evidence(state, project_id):
 # 370 条记录就把 facts 顶到 22 万字符，加上记忆和已有节点超过 36 万，多数宿主
 # 直接报 CONTEXT_WINDOW_EXCEEDED。trim_evidence 只认 tables 结构，这里另写一份。
 PLAN_FACTS_BUDGET = 60000
+# 记忆正文预算。实测一个项目的连续记忆有 7.7 万字符，其中 projects 页面单个
+# 就占 6 万；直接砍前 N 字会把会议纪要和概念说明全丢掉，只剩原始 JSON。
+MEMORY_BUDGET = 12000
+
+
+def trim_memory(history, budget=MEMORY_BUDGET):
+    """把记忆正文压到预算内，按页面均摊而不是砍前 N 字。
+
+    实测一个项目的连续记忆 7.7 万字符，其中 projects 页面单个占 6 万。
+    直接砍前 12000 字留下的全是 projects 表的原始 JSON（table_id、钉钉 userId），
+    真正有价值的会议纪要、概念说明、人物关系全在后面。按页面均摊能让每类依据
+    都露一部分脸，模型才判断得出「做过什么、卡在哪」。
+    """
+    body = history.get('text') or ''
+    if len(body) <= budget:
+        return history
+    pages = history.get('pages') or []
+    share = max(800, budget // max(1, len(pages)))
+    parts = []
+    for page in pages:
+        text = str(page.get('text') or '')
+        title = str(page.get('slug') or page.get('title') or '')
+        if not text:
+            continue
+        chunk = text[:share]
+        if len(text) > share:
+            chunk += '\n…（已截断）'
+        parts.append('## ' + title + '\n' + chunk)
+    merged = '\n\n'.join(parts) if parts else body[:budget]
+    merged = merged[:budget]
+    return {**history, 'text': merged,
+            'text_truncated': {'original_chars': len(body), 'kept_chars': len(merged),
+                               'strategy': '按页面均摊'}}
 
 
 def trim_facts(facts, budget=PLAN_FACTS_BUDGET):
@@ -167,11 +200,7 @@ def run(config, project_ids, choice, folder):
         else:
             if config['growth'].get('brain_dir'):
                 history=memory.retrieve(config,project['title'],limit=6)
-                # 记忆正文动辄七八万字，全塞进 prompt 会把上下文撑爆。
-                # 倒排只需要最近的项目脉络，截到 12000 字足够判断「做过什么、卡在哪」。
-                body=history.get('text') or ''
-                if len(body)>12000:
-                    history={**history,'text':body[:12000],'text_truncated':{'original_chars':len(body),'kept_chars':12000}}
+                history=trim_memory(history)
             else:
                 history={'pages':[],'text':''}
             n.save(context_file,history)

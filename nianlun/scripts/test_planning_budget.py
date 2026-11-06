@@ -71,5 +71,51 @@ class PlanFactsBudgetTests(unittest.TestCase):
         self.assertEqual(notes, [], '小规模数据不该触发裁剪')
 
 
+class MemoryTrimTests(unittest.TestCase):
+    """记忆裁剪要按页面均摊，不能砍前 N 字。
+
+    实测：车辆靠离卡的连续记忆 7.7 万字符，projects 页面单个占 6 万。
+    直接 `body[:12000]` 留下的全是 table_id、钉钉 userId 这些原始 JSON，
+    会议纪要、概念说明、人物关系全被砍掉——模型拿到的是噪音。
+    """
+
+    def history(self):
+        return {
+            'text': 'x' * 50000,
+            'pages': [
+                {'slug': 'projects/big', 'text': 'P' * 40000},
+                {'slug': 'meetings/周会', 'text': 'M' * 8000},
+                {'slug': 'concepts/规范', 'text': 'C' * 3000},
+                {'slug': 'people/某人', 'text': 'R' * 1000},
+            ],
+        }
+
+    def test_every_page_gets_a_slice(self):
+        trimmed = planning.trim_memory(self.history(), budget=12000)
+        text = trimmed['text']
+        for marker, name in (('M', 'meetings'), ('C', 'concepts'), ('R', 'people')):
+            self.assertIn(marker, text, f'{name} 页面的内容被整段砍掉了')
+
+    def test_stays_within_budget(self):
+        trimmed = planning.trim_memory(self.history(), budget=12000)
+        self.assertLessEqual(len(trimmed['text']), 12000)
+
+    def test_records_whole_original_length(self):
+        trimmed = planning.trim_memory(self.history(), budget=12000)
+        self.assertEqual(trimmed['text_truncated']['original_chars'], 50000)
+        self.assertEqual(trimmed['text_truncated']['strategy'], '按页面均摊')
+
+    def test_small_memory_untouched(self):
+        history = {'text': 'short', 'pages': [{'slug': 'a', 'text': 'b'}]}
+        trimmed = planning.trim_memory(history, budget=12000)
+        self.assertEqual(trimmed['text'], 'short')
+        self.assertNotIn('text_truncated', trimmed)
+
+    def test_empty_pages_falls_back_to_prefix(self):
+        history = {'text': 'y' * 20000, 'pages': []}
+        trimmed = planning.trim_memory(history, budget=12000)
+        self.assertLessEqual(len(trimmed['text']), 12000)
+
+
 if __name__ == '__main__':
     unittest.main()

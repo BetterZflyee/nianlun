@@ -90,6 +90,45 @@ class UnknownSectionTests(unittest.TestCase):
         got = rb.merge_revision(two, '## 进展\n\n新内容')
         self.assertEqual(got.count('\n## '), 2, '两节的报告不能被撑成三节')
 
+class WholeVsFragmentTests(unittest.TestCase):
+    """篇幅大不等于「这是一整篇」。
+
+    真实事故（2026-11-07 05:12 那轮）：模型修订时只返回了一个 visual 图块，
+    3404 字节；而原文是 3874 字节。判据 `len(body) >= len(prev) * 0.8` 成立，
+    于是被当成完整稿**直接替换**——整篇报告的 Lead 和所有小节全没了。
+
+    校验立刻报「须以 Lead: 核心结论开头」，但那时正文已经丢了，那一轮报告
+    直接作废，连带的 6 个项目也没生成。
+    """
+
+    def test_large_visual_block_is_not_whole_document(self):
+        prev = PREV  # 有 Lead 和三个小节
+        big_visual = ('```visual\n{"type":"gantt","rows":['
+                      + ','.join('{"label":"行%d"}' % i for i in range(200))
+                      + ']}\n```')
+        self.assertGreater(len(big_visual), len(prev) * 0.8, '前提：它确实够长')
+        got = rb.merge_revision(prev, big_visual)
+        self.assertTrue(got.strip().startswith('Lead:'), '正文不能丢')
+        self.assertEqual(got.count('\n## '), prev.count('\n## '))
+
+    def test_fragment_starting_with_visual_is_not_whole(self):
+        frag = '```visual\n{"type":"status","items":[]}\n```'
+        got = rb.merge_revision(PREV, frag)
+        self.assertTrue(got.strip().startswith('Lead:'))
+
+    def test_real_whole_document_still_replaces(self):
+        """整篇（有 Lead、小节数不减、不以图块开头）仍然要能替换。"""
+        revised = PREV.replace('第一段', '改过的第一段')
+        got = rb.merge_revision(PREV, revised)
+        self.assertIn('改过的', got)
+        self.assertEqual(got.count('\n## '), 3)
+
+    def test_whole_document_missing_lead_is_treated_as_fragment(self):
+        """原文有 Lead，新稿没有 → 不能当整篇用。"""
+        no_lead = PREV.split('\n', 1)[1]  # 去掉 Lead 行
+        got = rb.merge_revision(PREV, no_lead)
+        self.assertTrue(got.strip().startswith('Lead:'), 'Lead 不能被抹掉')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -271,8 +271,31 @@ def merge_revision(previous, revised):
     if not body:
         return previous
     prev = previous or ''
-    # 看起来像完整文稿：小节数量接近或超过原文，或篇幅超过原文的八成。
-    if body.count('\n## ') >= max(1, prev.count('\n## ') - 1) or len(body) >= len(prev) * 0.8:
+    # 判断「这是完整文稿还是片段」。不能只看篇幅：实测一份 3404 字的 visual
+    # 图块配上一份 3874 字的报告，比例超过 0.8，被误当成完整稿直接替换，
+    # 整篇正文（Lead 和所有小节）就没了。必须同时看结构特征。
+    body_has_lead = re.match(r'^Lead\s*[:：]', body) is not None
+    prev_has_lead = re.match(r'^Lead\s*[:：]', prev.strip()) is not None
+    body_sections = body.count('\n## ')
+    prev_sections = prev.count('\n## ')
+    # 修订稿的三种面貌：
+    #   1) 完整稿（有 Lead、小节数不减、不以图块开头）→ 直接替换
+    #   2) 片段（某个 ## 小节 / 一个 visual 块）→ 合并回去
+    #   3) 以图块开头且篇幅大 → 仍按片段处理（实测 3404 字的图块配 3874 字的
+    #      正文，光看比例会被误判成完整稿，把 Lead 和所有小节抹掉）
+    starts_with_visual = '```visual' in body[:40]
+    is_whole = (
+        body_has_lead
+        and body_sections >= max(1, prev_sections - 1)
+        and not starts_with_visual
+    )
+    # 原文没有 Lead 时，只要不是以图块开头、小节数够，也算完整稿。
+    if not prev_has_lead and not starts_with_visual and body_sections >= max(1, prev_sections - 1):
+        is_whole = True
+    if is_whole:
+        return body
+    # 模型给了完整结构但离得远（比如把超长稿整篇压短）——结构对就用它。
+    if body_has_lead and not starts_with_visual and len(body) < len(prev) * 0.5:
         return body
     # 片段：按 ## 小节标题定位并替换整节。
     heading = None

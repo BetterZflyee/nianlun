@@ -320,7 +320,8 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             # 这里因模型超时或网络抖动失败时，不该把整轮标记为失败——那会迫使同一批
             # 已生效的写入重试，而且执行记录也看不出「主体成功、汇报未出」。
             try:
-                post['reports']=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+                post['reports'],reports_failed=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+                if reports_failed:post['reports_failed']=reports_failed
             except Exception as exc:
                 post['reports_error']={'message':str(exc)[:500],'at':n.stamp(config)}
                 progress('阶段汇报未生成，主体写入已保留：'+str(exc)[:120])
@@ -350,7 +351,7 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
         settings=Path(binary['queue']).parent/'portal/settings.json'
         if settings.exists():report_skill=n.load(settings).get('report_skill_path')
     method=report_style.method(report_skill)
-    results=[]
+    results=[];failures=[]
     for pid in project_ids:
         if cancelled():
             from deepseek_report import Cancelled
@@ -394,12 +395,28 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
             from deepseek_report import Cancelled
             raise Cancelled('已停止生成，尚未上传或写回报告。')
         progress('正在生成汇报并上传，随后回读项目链接')
-        result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]),progress=progress,writeback=writeback)
+        # 单个项目失败不能拖垮整批：一个项目的正文不合格，不该让其余六个都没有报告。
+        # 失败的记进 failures，其余照常生成，最后由调用方决定怎么提示。
+        try:
+            result=g.publish_report(config,pid,since,until,summary,expected_facts=n.digest(facts),report_method=method,memory_sources=history.get('pages',[]),progress=progress,writeback=writeback)
+        except n.ReportStale:
+            raise
+        except Exception as exc:
+            # 只有一个项目时没有「其余项目」可救，直接抛出比记账更有用——
+            # 调用方（手动生成、批量补采）都按异常处理更简单，也不会丢掉错误类型。
+            if len(project_ids)==1:
+                raise
+            failures.append({'project_id':pid,'project_title':project['title'],
+                             'message':str(exc)[:400]})
+            progress('《'+project['title']+'》汇报未生成，继续下一个：'+str(exc)[:100])
+            continue
         progress('报告已发布，项目主表链接已回读确认' if writeback else '报告草稿已就绪，主表链接保持不变，待确认后发布')
         results.append({**result,'project_title':project['title'],'project_id':pid,'summary':summary.read_text(encoding='utf-8'),'since':since,'until':until,
             'memory_pages':[{k:p.get(k) for k in ('title','slug','full_page')} for p in history.get('pages',[])],
             'method':method.get('name','年轮阶段汇报')})
-    return results
+    if failures:
+        progress('本轮 '+str(len(results))+' 份汇报完成，'+str(len(failures))+' 份未生成')
+    return results,failures
 
 
 def reports(config_path,since,until,binary=None):
@@ -408,8 +425,9 @@ def reports(config_path,since,until,binary=None):
     with g.locked(config):
         gw=g.Gateway(config);identity=g.self_identity(gw);state=n.fetch(config,gw.table())
         if not state['complete']:raise n.Error('表格读取不完整，本次未生成阶段汇报')
-        results=report_projects(config,[p['id'] for p in state['projects']
+        results,failures=report_projects(config,[p['id'] for p in state['projects']
             if n.project_active(p)],since,until,binary)
+        if failures and not results:raise n.Error('本轮汇报全部未生成：'+failures[0]['message'])
         digest=None
         if config['growth']['switches'].get('digest') and results:
             path=g.root(config)/'scheduled-reports'/('digest-'+n.digest({'since':since,'until':until,'urls':[r['url'] for r in results]})[:20]+'.json')

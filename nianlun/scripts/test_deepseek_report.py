@@ -114,7 +114,7 @@ class PublishRetry(unittest.TestCase):
             with patch('flow.g.Gateway',side_effect=case.cloud.gateway),patch('flow.memory.retrieve',return_value={'pages':[],'matched':False,'text':''}) as memory,patch('flow.harness.report_reason',return_value={'answer':'Lead: 项目回顾。\n\n## A 当前状态\n以项目档案为准。[P1]\n\n## B 风险与待决\n当前无新增风险。[P1]'}) as model,patch('flow.g.publish_report',side_effect=[n.Error('upload failed'),{'url':'https://example.test/report'}]) as publish:
                 args=(case.config,[pid],'2026-10-01','2026-10-22',{})
                 with self.assertRaises(n.Error):flow.report_projects(*args,request_dir=case.dir/'reports')
-                result=flow.report_projects(*args,request_dir=case.dir/'reports')[0]
+                result=flow.report_projects(*args,request_dir=case.dir/'reports')[0][0]
                 self.assertEqual(model.call_count,1);self.assertEqual(memory.call_count,1);self.assertEqual(publish.call_count,2)
                 self.assertEqual(result['url'],'https://example.test/report')
         finally:case.doCleanups()

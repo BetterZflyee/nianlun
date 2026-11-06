@@ -419,10 +419,12 @@ class Application:
                     if self.jobs[jid].get('cancel_requested'):raise deepseek_report.Cancelled('已停止生成，尚未上传或写回报告。')
                     self.jobs[jid]['report_cancellable']=False;self.persist_job(self.jobs[jid])
             with g.locked(config):
-                return flow.report_projects(config,[data['project_id']],since,until,choice,
+                items,failures=flow.report_projects(config,[data['project_id']],since,until,choice,
                     progress=lambda message:self.phase(jid,message),request_dir=self.runtime/'reports'/jid,
                     legacy_handoff=self.jobs[jid].get('handoff'),report_skill=self.settings.get('report_skill_path'),
-                    cancelled=lambda:self.jobs[jid].get('cancel_requested',False),before_publish=before_publish)[0]
+                    cancelled=lambda:self.jobs[jid].get('cancel_requested',False),before_publish=before_publish)
+                if failures and not items:raise n.Error(failures[0]['message'])
+                return items[0]
         raise n.Error('未知工作台操作')
 
     def workflow(self,jid,data,export_only=False):

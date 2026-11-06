@@ -167,3 +167,115 @@ print(g.prune_runs('$HOME/.local/state/nianlun', cfg['growth']))
 - 错误原文（`controller.json` 里那条 `error`）
 
 **不要**贴 `evidence.json` 全文——里面有消息原文和可能的敏感内容。
+
+## 八、图不显示、按钮点不动
+
+这一类最容易被误判成「设备不支持」。判断顺序：
+
+**1. 先看浏览器控制台有没有 `[nianlun]` 开头的警告**
+
+我们所有降级路径都会留一条：
+
+```
+[nianlun] 3D 路径解析失败：...
+[nianlun] 关系图渲染失败，已降级为节点列表：...
+[nianlun] 星系布局 worker 出错，已降级：...
+```
+
+有这条 = 真的出错了，把里面的 message 贴出来即可定位。
+只有「当前设备使用二维路径 / 使用静态图与数据」而**没有** `[nianlun]` 警告，
+才是结构本身不支持（正常降级）。
+
+**2. 3D 按钮点了没反应**
+
+3D 是**点击触发**的弹窗，不是自动渲染。报告打开时看到的是平面图，
+点「立体查看 ↗」才会进 3D 视窗。
+
+如果按钮文案变成「立体视图加载失败」，说明渲染出错，看控制台的 `[nianlun]` 行。
+
+**3. 「交互图表」点了变成「使用静态图与数据」且变灰**
+
+这是 ECharts 初始化失败。检查该图表的 `type` 是否有对应的 option 分支：
+
+| type | 需要交互运行时 |
+|---|---|
+| graph / bar / line / gantt | 是 |
+| status / matrix | 否（走独立静态分支）|
+
+运行时白名单在 `report_blocks.enhance()` 里，格式是
+`data-recap-visual="(?:graph|bar|line|gantt)"`。**加了新图表类型时，
+白名单和 `visual-blocks.js` 的 `option()` 分支必须一起改**，只改一边等于没改。
+
+**4. 甘特日期挤在一起**
+
+日期轴按像素预算选步长（`min_slot_pct=14`）。如果现场屏宽特别窄（<600px），
+轨道会更短，标签数会自动减少——这是预期行为，不是 bug。
+
+---
+
+## 九、报告没生成出来
+
+**1. 先看待补清单**
+
+```bash
+cat ~/.local/state/nianlun/report-backlog.json
+```
+
+有内容 = 上一轮失败、已排队等下轮自动补。不需要手工干预。
+清单空 = 没有欠账。
+
+**2. 看这一轮的记录**
+
+```bash
+ls -t ~/.local/state/nianlun/runs/ | head -1
+cat ~/.local/state/nianlun/runs/<最新>/postprocess.json
+```
+
+关注 `reports` / `reports_failed` / `reports_error` / `backlog` 四个键。
+
+**3. 工作台上「阶段性汇报」页**
+
+- 绿色条：上轮欠的已补齐
+- 黄色条：还有几份待补，下轮重试
+- 两条都没有：一切正常
+
+**4. 常见原因**
+
+| 报错 | 原因 |
+|---|---|
+| DeepSeek Harness 未完成本次推理 | 模型侧超时/额度，可重试 |
+| 报告正文仍需修订：可视化格式 | 模型写的图不合格，看具体字段 |
+| 未配置推理宿主 | `config.json` 缺 `harness` 段 |
+
+---
+
+## 十、改了代码但没生效
+
+按这个顺序查，能省很多时间：
+
+1. **改的文件是不是真正运行的那份？**
+   生产代码在 `~/.local/share/nianlun/core/nianlun/`，
+   仓库在项目目录。改完仓库要 **cp 到生产**才生效。
+
+2. **是不是预打包产物？**
+   `charts.bundle.js`、`path3d.bundle.js`、`visual-blocks.js` 会被拼接注入报告。
+   改 `visual-blocks.js` 里的业务逻辑有效；但**不能拿它整体替换报告里的
+   650KB 块**——那里面有 ECharts 全库，替换会把库删掉。
+
+3. **代码有没有被执行路径覆盖？**
+   这是最隐蔽的一类。真实案例：给 `option()` 补了 gantt 分支，但
+   `enhance()` 的白名单没放行 gantt，整个运行时都不注入——**分支等于白写**。
+
+   验证方法：改完后跑一次真实生成，检查产出的报告里有没有你新加的东西。
+
+   ```bash
+   python -c "
+   import render_report, report_visual
+   h = report_visual.enhance(render_report.brief_html(md, 'T', '2026-10-01', '2026-10-07'))
+   print('大小:', len(h), '含改动:', '你的特征串' in h)
+   "
+   ```
+
+4. **浏览器缓存**
+   换文件名或加 `?v=2` 再打开。
+

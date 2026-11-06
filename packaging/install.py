@@ -75,12 +75,21 @@ def register_entry(root,home):
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--home',default=str(Path.home()/'.local/share/nianlun'))
-    p.add_argument('--codex-home',default=os.environ.get('CODEX_HOME',str(Path.home()/'.codex')))
+    # 默认 None 而不是展开好的绝对路径：这样能区分「用户没传」和「用户传了」。
+    # 传了 --home 却没传 --codex-home 时，宿主目录要跟着 home 走，否则一次
+    # 隔离安装（测试、装到 U 盘、多环境并存）会悄悄写进真实的 ~/.codex。
+    p.add_argument('--codex-home',default=None)
     p.add_argument('--runtime-ready',action='store_true')
     p.add_argument('--register-only',action='store_true',help='测试或已有运行环境时仅注册 Skill')
     p.add_argument('--host',action='append',choices=('codex','claude'),help='仅给明确选择的宿主注册入口；不改宿主的设置、账号或权限')
     p.add_argument('--open',action='store_true',help='安装后打开页面接入向导')
-    args=p.parse_args();home=Path(args.home).expanduser().resolve();home.mkdir(parents=True,exist_ok=True)
+    args=p.parse_args()
+    home=Path(args.home).expanduser().resolve()
+    custom_home=args.home!=p.get_default('home')
+    if args.codex_home is None:
+        # 装了自定义 home 就把宿主目录也挪到它底下，保证隔离安装真的隔离。
+        args.codex_home=str(home.parent/'codex') if custom_home else os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))
+    home.mkdir(parents=True,exist_ok=True)
     try:
         if not args.runtime_ready and not args.register_only:
             python=prepare_python(home)

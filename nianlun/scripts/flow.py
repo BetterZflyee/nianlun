@@ -103,6 +103,22 @@ def trim_evidence(document, budget=EVIDENCE_BUDGET):
         document['source_history']={'total':len(sources),'kept':len(kept),
                                     'dropped':len(sources)-len(kept),'kept_by_channel':per_channel}
         notes.append(f'来源 {len(sources)} 条压至 {len(kept)} 条（按渠道各留最近 40 条）')
+    # 5. 四级都做完仍超限：按比例继续减半来源，直到进预算或只剩少量。
+    #    宁可少看一些早期流水，也不能整轮放弃——放弃意味着这一小时的变化全部丢失，
+    #    而且水位不前进，下一轮面对同样的体量，形成死锁。
+    guard=0
+    while size(document)>budget and len(document.get('sources') or [])>20 and guard<12:
+        guard+=1
+        current=document['sources']
+        keep=max(20,len(current)//2)
+        document['sources']=current[:keep]
+        history=document.setdefault('source_history',{})
+        history['adaptive_rounds']=guard
+        history['adaptive_from']=len(current)
+        history['adaptive_kept']=keep
+    if guard:
+        notes.append(f'仍超预算，自适应减半 {guard} 轮，最终来源 {len(document.get("sources") or [])} 条'
+                     + ('（已进预算）' if size(document)<=budget else '（仍超预算，交回宿主分批）'))
     return document,notes
 
 

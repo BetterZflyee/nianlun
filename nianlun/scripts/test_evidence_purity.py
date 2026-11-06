@@ -76,5 +76,43 @@ class EvidencePurityTests(unittest.TestCase):
         self.assertTrue(notes)
 
 
+class AdaptiveTrimTests(unittest.TestCase):
+    """四级裁剪后仍超预算时要继续减半，而不是整轮放弃。
+
+    放弃意味着这一小时的变化全部丢失，而且水位不前进，下一轮面对同样体量，
+    会形成死锁。
+    """
+
+    def dense_bundle(self, sources=300):
+        """每条来源 1400 字、渠道各异：四级裁剪后仍可能超预算，逼出自适应减半。"""
+        return {
+            'format': 'x', 'run_id': 'r', 'since': 's', 'until': 'u', 'binding': 'b',
+            'identity': {}, 'todos': [], 'todo_links': {},
+            'tables': {'projects': [{'id': 'P1', 'title': '甲'}], 'milestones': [], 'sites': [],
+                       'records': [], 'fields': {r: {} for r in n.ROLES}},
+            'sources': [{'id': f's{i}', 'text': '正' * 1400,
+                         'time': f'2026-10-01T10:00:{i % 60:02d}+08:00',
+                         'channels': [f'ch{i}']} for i in range(sources)],
+        }
+
+    def test_extreme_volume_still_fits_the_budget(self):
+        import json
+        doc, notes = flow.trim_evidence(flow.prompt_evidence(self.dense_bundle()), 100000)
+        size = len(json.dumps(doc, ensure_ascii=False))
+        self.assertLessEqual(size, 100000, f'裁剪后仍超预算：{size}')
+        self.assertTrue(any('自适应减半' in x for x in notes), notes)
+
+    def test_adaptive_trim_records_what_it_dropped(self):
+        doc, _notes = flow.trim_evidence(flow.prompt_evidence(self.dense_bundle()), 100000)
+        history = doc.get('source_history') or {}
+        self.assertIn('adaptive_rounds', history)
+        self.assertGreater(history['adaptive_from'], history['adaptive_kept'])
+
+    def test_it_stops_before_starving_the_prompt(self):
+        """不能把来源削到零：模型没有材料就什么都判断不了。"""
+        doc, _notes = flow.trim_evidence(flow.prompt_evidence(self.dense_bundle(600)), 3000)
+        self.assertGreaterEqual(len(doc.get('sources') or []), 20)
+
+
 if __name__ == '__main__':
     unittest.main()

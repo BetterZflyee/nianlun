@@ -219,8 +219,11 @@ def issues(markdown,evidence):
                 inside=[d for d in known if isinstance(d,str) and first and last and first<=d<=last]
                 if inside:seg['marks']=sorted(set(inside))
                 else:
-                    errors.append(f'甘特「{row.get("label","")}」的区间缺 marks：'
-                                  '请列出该区间内真正有记录的日期，缺记录就不要画区间')
+                    # 给出明确出路，否则模型只会反复补 marks 而不知道那些日期本来就不存在。
+                    errors.append(f'甘特「{row.get("label","")}」的区间 {first}~{last} 内没有任何真实记录：'
+                                  '请二选一——要么在 marks 里列出该区间内确有记录的日期，'
+                                  '要么删掉这个区间改用 points 只标注真实节点，'
+                                  '要么把该行 stage 改成筹备/待集采且不画区间')
     for opening in fences[::2]:
         if opening.startswith('visual') and opening.strip()!='visual':errors.append('visual 须单独作为围栏名称')
         if opening.startswith('flow') and not re.fullmatch(r'flow (?:LR|TD|TB)',opening.strip()):

@@ -17,6 +17,8 @@ STATES = {'done': ('已完成', '#2f6350'), 'active': ('推进中', '#486d88'),
 
 # 甘特图能放下的日期标签数。再多会叠在一起看不清。
 MARK_LIMIT = 24
+# 关系图每列能放下的节点数。再多框会重叠。
+LAYER_LIMIT = 3
 
 def _state_error(field, got):
     """状态报错要列出合法值。
@@ -183,13 +185,20 @@ def validate(config, evidence=None):
         ids = set(); layers = {}
         for row in rows:
             item(row, {'id', 'label', 'detail', 'state', 'layer', 'source'}, require_source=False)
-            if not isinstance(row.get('id'), str) or not re.fullmatch(r'[a-zA-Z][\w-]{0,20}', row['id']): raise ValueError('节点 id 需为 1 至 24 位小写字母/数字/下划线，且不重复；收到：' + repr(row.get('id')))
+            if not isinstance(row.get('id'), str) or not re.fullmatch(r'[a-zA-Z][\w-]{0,20}', row['id']): raise ValueError('节点 id 需以字母开头、最多 21 位，可用字母/数字/下划线/横线；收到：' + repr(row.get('id')))
             if row['id'] in ids: raise ValueError('节点 id 重复')
             ids.add(row['id'])
             layer = row.get('layer')
             if type(layer) is not int or layer not in (0, 1, 2): raise ValueError('layer 须为 0、1 或 2')
             layers[layer] = layers.get(layer, 0) + 1
-        if max(layers.values()) > 3: raise ValueError('每列最多 3 个节点')
+        # 一列超过 3 个节点，图上的框会叠在一起。但只报「最多 3 个」，模型不知道
+        # 该合并哪几个。给出可操作的方向。
+        if max(layers.values()) > LAYER_LIMIT:
+            over = {k: v for k, v in layers.items() if v > LAYER_LIMIT}
+            raise ValueError(
+                f'每列最多 {LAYER_LIMIT} 个节点，当前超限的列：' +
+                '、'.join(f'layer {k} 有 {v} 个' for k, v in sorted(over.items())) +
+                '。把同类事项合并成一个节点，或拆到相邻 layer；细节放节点说明里')
         if not any(row.get('source') for row in rows) and not any(isinstance(link,dict) and link.get('source') for link in (links or [])): raise ValueError('关系图至少需要一个节点或连线标注依据编号')
         seen = set()
         by_id={n['id']:n for n in rows}

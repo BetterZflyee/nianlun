@@ -142,5 +142,46 @@ class MilestoneCountTests(unittest.TestCase):
         self.assertIn(str(report_blocks.MARK_LIMIT), str(ctx.exception))
 
 
+class GraphLayerTests(unittest.TestCase):
+    """关系图层内超限要指出是哪一列超了。
+
+    只说「每列最多 3 个节点」，模型不知道该合并哪几个——9 个节点按 3 层排，
+    很容易变成某层 5 个。
+    """
+
+    def too_many_in_layer(self):
+        nodes = [{'id': f'n{i}', 'label': f'N{i}', 'state': 'active', 'layer': 0,
+                  'detail': 'd', 'source': '[R1]'} for i in range(5)]
+        links = [{'from': 'n0', 'to': 'n1', 'label': 'x', 'source': '[R1]'}]
+        return {'type': 'graph', 'title': 'T', 'caption': 'c', 'nodes': nodes, 'links': links}
+
+    def test_names_the_over_limit_layer(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many_in_layer())
+        msg = str(ctx.exception)
+        self.assertIn('layer 0', msg, '要指出是哪一列超了')
+        self.assertIn('5', msg, '要说出该列实际有几个')
+
+    def test_gives_actionable_direction(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many_in_layer())
+        msg = str(ctx.exception)
+        self.assertTrue(any(w in msg for w in ('合并', '拆')), '要给出解决办法')
+
+    def test_id_rule_matches_regex(self):
+        """id 报错要描述真实规则：正则允许字母开头，不是「小写字母」。"""
+        nodes = [{'id': 'N1', 'label': 'A', 'state': 'active', 'layer': 0,
+                  'detail': 'd', 'source': '[R1]'},
+                 {'id': 'n2', 'label': 'B', 'state': 'active', 'layer': 1,
+                  'detail': 'd', 'source': '[R2]'}]
+        links = [{'from': 'N1', 'to': 'n2', 'label': 'x', 'source': '[R1]'}]
+        cfg = {'type': 'graph', 'title': 'T', 'caption': 'c', 'nodes': nodes, 'links': links}
+        html = render(cfg)              # 大写字母开头的 id 应当合法
+        self.assertIn('N1', html)
+
+    def test_limit_is_named_constant(self):
+        self.assertEqual(report_blocks.LAYER_LIMIT, 3)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -574,6 +574,13 @@ def build_home(state, output, config=None):
                 for key in ('reports_error', 'planning_error', 'memory_error'):
                     if post.get(key):
                         reports_state['error'] = reports_state['error'] or str(post[key].get('message') or '')[:200]
+                # 补生成的结果单独展示：它在 reports 之外，不读的话用户在页面上
+                # 完全看不到「上轮欠的报告已经补上了」。
+                backlog_result = post.get('backlog') or {}
+                if backlog_result.get('recovered'):
+                    reports_state['recovered'] = len(backlog_result['recovered'])
+                if backlog_result.get('pending'):
+                    reports_state['still_pending'] = len(backlog_result['pending'])
         state['growth'] = {'schedule': config['growth'].get('schedule', {}),
                            'status': latest.get('status', '尚未运行'), 'last_run': latest.get('finished_at', ''),
                            'memory_verified': latest.get('brain', {}).get('verified', False),

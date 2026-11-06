@@ -331,6 +331,10 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         progress('补生成仍失败，保留待补：'+str(exc)[:100])
                 post['backlog']={'recovered':recovered,'pending':still}
                 _clear_report_backlog(config,recovered)
+                # 补过的项目从本轮活跃列表里摘掉：否则紧接着的正常生成会对同一个
+                # 项目再跑一遍（同一目录、同样的输入），纯属重复消耗。
+                if recovered:
+                    active_project_ids=[x for x in active_project_ids if x not in recovered]
                 n.save(post_path,post)
         if switches.get('continuous_reports') and switches.get('reports') and active_project_ids and 'reports' not in post:
             progress('正在根据最新进度和里程碑自动生成阶段汇报')

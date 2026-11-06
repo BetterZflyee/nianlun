@@ -75,5 +75,13 @@ class ReportBacklogTests(unittest.TestCase):
                       '只清理成功的，失败的必须保留')
 
 
+    def test_recovered_projects_are_excluded_from_normal_run(self):
+        """补过的项目不能再被正常生成跑一遍，那是同一目录的重复消耗。"""
+        source = Path(flow.__file__).read_text(encoding='utf-8')
+        idx = source.index('正在补生成上轮未完成的阶段汇报')
+        block = source[idx:idx + 1600]
+        self.assertIn('active_project_ids=[x for x in active_project_ids if x not in recovered]', block)
+
+
 if __name__ == '__main__':
     unittest.main()

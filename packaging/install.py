@@ -79,6 +79,7 @@ def main():
     # 传了 --home 却没传 --codex-home 时，宿主目录要跟着 home 走，否则一次
     # 隔离安装（测试、装到 U 盘、多环境并存）会悄悄写进真实的 ~/.codex。
     p.add_argument('--codex-home',default=None)
+    p.add_argument('--claude-home',default=None)
     p.add_argument('--runtime-ready',action='store_true')
     p.add_argument('--register-only',action='store_true',help='测试或已有运行环境时仅注册 Skill')
     p.add_argument('--host',action='append',choices=('codex','claude'),help='仅给明确选择的宿主注册入口；不改宿主的设置、账号或权限')
@@ -89,6 +90,9 @@ def main():
     if args.codex_home is None:
         # 装了自定义 home 就把宿主目录也挪到它底下，保证隔离安装真的隔离。
         args.codex_home=str(home.parent/'codex') if custom_home else os.environ.get('CODEX_HOME',str(Path.home()/'.codex'))
+    if args.claude_home is None:
+        # claude 分支原来是独立的 Path.home()/'.claude'，同样会漏到主目录。
+        args.claude_home=str(home.parent/'claude') if custom_home else os.environ.get('CLAUDE_CONFIG_DIR',str(Path.home()/'.claude'))
     home.mkdir(parents=True,exist_ok=True)
     try:
         if not args.runtime_ready and not args.register_only:
@@ -110,7 +114,8 @@ def main():
             codex_entry=Path(args.codex_home).expanduser().resolve()/'skills/nianlun'
             if old.get('skills') and (codex_entry.exists() or codex_entry.is_symlink()):hosts.add('codex')
             for provider in hosts:
-                root=Path(args.codex_home).expanduser().resolve()/'skills' if provider=='codex' else Path(os.environ.get('CLAUDE_CONFIG_DIR',Path.home()/'.claude'))/'skills'
+                base=args.codex_home if provider=='codex' else args.claude_home
+                root=Path(base).expanduser().resolve()/'skills'
                 register_entry(root,home)
                 result['host_entries'][provider]=str(root/'nianlun')
             n.save(home/'install.json',{**result,'ready':False})

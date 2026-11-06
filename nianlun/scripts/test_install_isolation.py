@@ -44,5 +44,30 @@ class InstallerIsolationTests(unittest.TestCase):
         self.assertNotIn("Path.home()/'.codex'/'skills'", src)
 
 
+class ClaudeHostIsolationTests(unittest.TestCase):
+    """claude 分支原来也是独立的 Path.home()/'.claude'，同样会漏到主目录。"""
+
+    def source(self):
+        return INSTALLER.read_text(encoding='utf-8')
+
+    def test_claude_home_defaults_to_none(self):
+        src = self.source()
+        match = re.search(r"add_argument\('--claude-home',default=([^)]+)\)", src)
+        self.assertIsNotNone(match, '找不到 --claude-home 参数')
+        self.assertEqual(match.group(1).strip(), 'None')
+
+    def test_claude_branch_uses_configured_home(self):
+        """claude 分支不能再直接用 Path.home()。"""
+        src = self.source()
+        self.assertIn("args.claude_home", src)
+        self.assertNotIn("Path(os.environ.get('CLAUDE_CONFIG_DIR',Path.home()/'.claude'))", src,
+                         'claude 分支还在直接用 Path.home()')
+
+    def test_both_hosts_share_generic_base(self):
+        """两个宿主应该走同一段推导，避免再出现只修一个的情况。"""
+        src = self.source()
+        self.assertIn("base=args.codex_home if provider=='codex' else args.claude_home", src)
+
+
 if __name__ == '__main__':
     unittest.main()

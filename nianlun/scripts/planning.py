@@ -172,7 +172,14 @@ def validate(answer, target):
     def walk(key,trail):
         if key in trail:raise n.Error('倒排节点存在循环依赖')
         for parent in bykey[key]['depends_on']:
-            if not isinstance(parent,str) or parent not in bykey:raise n.Error('节点依赖不存在')
+            # 报错要点名「哪个节点依赖了哪个不存在的 key」，否则模型只能瞎猜。
+            # 实测 2026-11-07 03:52 那轮倒排就是因为只说「节点依赖不存在」而失败：
+            # 模型不知道自己写错了哪一个，下一稿很可能还是错。
+            if not isinstance(parent,str) or parent not in bykey:
+                known='、'.join(sorted(bykey)) or '（无）'
+                raise n.Error(
+                    f'节点「{key}」的 depends_on 里有「{parent}」，但节点列表里没有这个 key。'
+                    f'可用的 key：{known}。请改成已有 key，或删掉这条依赖')
             if bykey[parent]['date']>bykey[key]['date']:raise n.Error('前置节点不能晚于后续节点')
             walk(parent,trail|{key})
     for key in keys:walk(key,set())

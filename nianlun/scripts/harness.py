@@ -373,7 +373,17 @@ def deepseek_reason(prompt,directory,preferred=None,schema=None,timeout=1200,con
             if state:Path(state).mkdir(parents=True,exist_ok=True);cwd=Path(state).expanduser()
         except Exception:pass
     if schema:
-        prompt=(prompt.rstrip()+'\n\n只返回一个 JSON 对象，严格符合以下 JSON Schema，不要输出解释、前后缀或代码围栏：\n'
+        # 报告类任务的材料里带有写作规范（skill guidance），里面常出现「输出 Markdown
+        # 正文」这类要求。模型会把那条当成输出格式，直接把 Markdown 当答案返回，
+        # 外层 JSON 契约落空——实测 2026-11-07 03:55 那轮报告连续两次这样失败，
+        # 报错却是「输出未符合结构要求」，看不出是格式打架。
+        # 所以这里要明确说明：材料里的写作要求描述的是 answer 的内容，不是回答格式。
+        prompt=(prompt.rstrip()+
+            '\n\n【输出契约，优先级最高】'
+            '\n上面材料中出现的写作规范、排版要求、Markdown 模板，描述的都是 answer 字段里该写什么，'
+            '不是你这一轮回答的格式。'
+            '\n你的整个回答必须是且只能是一个 JSON 对象，严格符合以下 JSON Schema，'
+            '不要输出解释、前后缀或代码围栏：\n'
             +json.dumps(schema,ensure_ascii=False))
     events=directory/'events.jsonl';error=directory/'stderr.txt'
     saved=harness_session(config_path,'deepseek')
@@ -479,12 +489,29 @@ def repair_json_quotes(text):
 
 
 def single_string_schema(schema):
-    """schema 是否「恰好一个字符串字段」：只有这种结构才能按边界兜底截取。"""
+    """若 schema 恰好只有一个字符串字段，返回它的字段名；否则返回 False。
+
+    返回字段名而不是 True，是为了让 json_from_text 在模型只吐正文时，
+    能把这整段文本当作该字段的值兜底。
+    """
     if not isinstance(schema,dict):return False
     props=schema.get('properties')
     if not isinstance(props,dict) or len(props)!=1:return False
-    only=next(iter(props.values()))
-    return isinstance(only,dict) and only.get('type')=='string'
+    name,only=next(iter(props.items()))
+    return name if isinstance(only,dict) and only.get('type')=='string' else False
+
+
+def looks_like_document(text):
+    """这段文本像不像一份「直接返回的正文」。
+
+    模型偶尔不套外层 JSON，把 Markdown 正文直接吐出来。这类输出要救，
+    但不能无条件收——否则真正的乱码也会被当成正文，报告发出去是空的。
+    判据：有换行结构，或长到一句话装不下。
+    """
+    body=text.strip()
+    if not body:return False
+    lines=[x for x in body.splitlines() if x.strip()]
+    return len(lines)>=2 or len(body)>=120
 
 
 def json_from_text(raw, single_field=False):
@@ -519,11 +546,26 @@ def json_from_text(raw, single_field=False):
     got=attempt(text)
     if got is not None:return got
     start,end=text.find('{'),text.rfind('}')
-    if start>=0 and end>start:
+    field=single_field if isinstance(single_field,str) else 'answer'
+    if start>=0 and end>start and (not single_field or not text[:start].strip()):
         got=attempt(text[start:end+1])
         if got is not None:return got
-        if single_field:return salvage_single_field(text[start:end+1])
-        return None
+        if single_field:
+            got=salvage_single_field(text[start:end+1])
+            if got is not None:return got
+            # 括号里的东西解析不成 JSON，说明那不是外套壳，是正文里的正常文字。
+            # 往下走，把整段当正文。
+    if single_field and text.strip():
+        # 正文中段夹着一个「含目标字段」的 JSON（前后有引导语/收尾）：取它。
+        # 判据是字段名命中，不是「随便一段 JSON」——否则报告里的 ```visual``` 图配置
+        # 会被当成答案，交上去的就是一张图。
+        if start>=0 and end>start:
+            got=attempt(text[start:end+1])
+            if got is not None and field in got:return got
+        # 模型把正文直接返回、没套外层 JSON 时，整段文本就是该字段的值。
+        # 但要有下限：一句话的胡言乱语不是「正文」，不能当成功收下——
+        # 否则「输出不合法」这类问题会被永久吞掉，报告发出去是空的。
+        if looks_like_document(text):return {field: text}
     return None
 
 

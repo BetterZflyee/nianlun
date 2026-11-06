@@ -7,6 +7,9 @@ const url = v => {try {return new URL(v).protocol==='https:' ? v : '#';}catch{re
 const icons={home:'M3 10 12 3l9 7M5 9v11h5v-6h4v6h5V9',projects:'M3 7h7l2 3h9v10H3zM3 7V4h7l2 3h9v3',memory:'M12 3a9 9 0 1 1-7 3M3 3v5h5M12 7v5l3 2',reports:'M6 3h8l4 4v14H6zM14 3v5h5M9 12h6M9 16h6',settings:'M4 6h16M4 12h16M4 18h16M8 3v6M16 9v6M10 15v6',search:'m20 20-5-5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',arrow:'M5 12h14m-6-6 6 6-6 6',up:'M6 18 18 6M6 6h12v12',plus:'M12 5v14M5 12h14',close:'m6 6 12 12M6 18 18-12',leaf:'M4 19C1 9 9 3 20 3c0 12-6 18-16 16ZM4 19 16 7',node:'M12 3v18M6 7h12M6 17h12',pin:'M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0ZM12 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6',check:'m5 12 4 4L19 6',copy:'M8 8h12v13H8zM16 8V3H3v13h5',chat:'M4 4h16v12H8l-4 4z',info:'M12 10v7M12 6v1M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0',grid:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'};
 const icon=(name,size=17)=>`<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[name]||icons.node}"/></svg>`;
 const logo=()=>`<svg class="brand-symbol" viewBox="0 0 44 48" fill="none" stroke="currentColor"><ellipse cx="22" cy="24" rx="18" ry="21" transform="rotate(14 22 24)"/><ellipse cx="22" cy="24" rx="13" ry="16" transform="rotate(24 22 24)"/><ellipse cx="22" cy="24" rx="8" ry="11" transform="rotate(34 22 24)"/><ellipse cx="22" cy="24" rx="3" ry="5" transform="rotate(44 22 24)"/></svg>`;
+// 表里「待核」和「待核对」两种写法并存（各 20/15 个，后者是历史遗留；
+// 代码只写「待核」）。严格相等会漏掉「待核对」，首页与弹窗都少报 43%。
+const PENDING=['待核','待核对'];
 const status=s=>`<span class="status ${/待核|待确认|未开始/.test(s)?'warn':/暂停|完成|概念/.test(s)?'gray':''}">${e(s||'未填写')}</span>`;
 const active=p=>p.active === true;
 const sortProjects=a=>[...a].sort((x,y)=>(x.priority||'P9').localeCompare(y.priority||'P9')||(x.number||'').localeCompare(y.number||''));
@@ -37,7 +40,8 @@ function projectCard(p){const records=related('records',p.id),nodes=related('mil
 function event(r){const p=proj((r.project_ids||[])[0]);return `<div class="event"><span class="event-mark">${icon('chat',14)}</span><div class="event-main"><div class="event-top"><span class="event-date">${e(r.date||'日期待补')}</span><span class="pill">${e(r.kind||'项目记录')}</span>${p?`<button class="source-proj" data-project="${e(p.id)}">${e(p.title)}</button>`:''}</div><h3>${e(r.title)}</h3><p>${e((r.description||'').split('\n')[0].slice(0,120))}</p><div class="event-source">${status(r.status)}${button('evidence',`${icon('up',11)} 查看记录与依据`,'source-link',`data-id="${e(r.id)}"`)}</div></div></div>`;}
 function growthPanel(){const g=S.growth;if(!g)return '';const hours=(g.schedule.growth_hours||[]).map(h=>h+':00').join(' · ');return `<section class="panel growth-panel"><div><div class="eyebrow">GROWTH / 年轮生长</div><h2>${e(g.scheduler?.message||'离线快照：运行状态请到工作台核验')}</h2><p>每天 ${e(hours)} · ${e(g.schedule.timezone||'配置时区')}</p><p>Harness 理解 →独立记忆空间→ AI 表格与待办 → 钉钉摘要</p></div><div class="growth-health">${status(g.status==='complete'?'本轮已完成':g.status==='partial'?'部分来源待补采':g.status)}<p>最近运行：${e(g.last_run?g.last_run.replace('T',' ').slice(0,16):'尚无记录')}</p><p>记忆归档：${g.memory_verified?'已核验':'待核验'} · 摘要：${g.digest_status==='delivered'?'已投递':g.digest_status==='submitted'?'已提交':'待处理'}</p>${button('prompt','查看这轮生长','text-button',`data-text="请用年轮读取最近一轮采集覆盖、执行回执、待核项和摘要。"`)}</div></section>`;}
 function home(){
- const ps=sortProjects(S.projects.filter(active));const pending=S.milestones.filter(m=>m.status==='待核');
+ const ps=sortProjects(S.projects.filter(active));
+ const pending=S.milestones.filter(m=>PENDING.includes(m.status));
  const nodes=S.milestones.filter(m=>m.date&&m.status!=='已达成').sort((a,b)=>a.date.localeCompare(b.date)).slice(0,4);
  return heading('让经历，慢慢长成记忆。',`来自 AI 表格 · ${dt} 读取（UTC+08:00）`,button('refresh',`${icon('memory',14)} 刷新记忆`)+link(S.base_url,'在钉钉管理','btn primary'))+
  `<section class="hero"><div class="hero-copy"><div class="eyebrow">A LITTLE EVERY DAY. A LOT OVER TIME.</div><h2>你只管往前，<br><span>让它自己长。</span></h2><p>把散落在沟通里的每一个片段，<br>串成项目的连续记忆。需要汇报时，随时展开。</p><div class="small-line">${icon('leaf',12)} 一场沟通，一圈年轮。</div></div>${rings()}<span class="ring-legend">项目记忆 · 随时间积累</span></section>`+
@@ -75,7 +79,7 @@ document.addEventListener('click',async ev=>{
  if(a==='search')search();
  if(a==='query'){$('search-input').value=node.dataset.query;searchResults(node.dataset.query);}
  if(a==='evidence')evidence(node.dataset.id);
- if(a==='pending')modal(`<h2>待核的里程碑</h2><p class="subheading">状态需要事实确认，日期过去不代表已经完成。</p>${milestoneList(S.milestones.filter(m=>m.status==='待核'))}`,true);
+ if(a==='pending')modal(`<h2>待核的里程碑</h2><p class="subheading">状态需要事实确认，日期过去不代表已经完成。</p>${milestoneList(S.milestones.filter(m=>PENDING.includes(m.status)))}`,true);
  if(a==='refresh')promptDialog('使用 $nianlun 从当前绑定的 AI 表格重新读取项目、里程碑、场地和记录，刷新并打开我的年轮入口。');
  if(a==='newProject')promptDialog('使用 $nianlun 在当前 AI 表格中建立一个新项目。请先让我说明项目名称、目标和优先级，再按现有表结构创建，不另建独立系统。');
  if(a==='recordPrompt')promptDialog(`使用 $nianlun 将我接下来提供的沟通材料整理到${proj(node.dataset.id)?.title||'对应项目'}。先查已有记忆，保留来源 ID 和原文摘录，生成写入计划；不确定的归属单独列出。`);

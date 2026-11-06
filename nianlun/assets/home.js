@@ -9,7 +9,9 @@ const icon=(name,size=17)=>`<svg width="${size}" height="${size}" viewBox="0 0 2
 const logo=()=>`<svg class="brand-symbol" viewBox="0 0 44 48" fill="none" stroke="currentColor"><ellipse cx="22" cy="24" rx="18" ry="21" transform="rotate(14 22 24)"/><ellipse cx="22" cy="24" rx="13" ry="16" transform="rotate(24 22 24)"/><ellipse cx="22" cy="24" rx="8" ry="11" transform="rotate(34 22 24)"/><ellipse cx="22" cy="24" rx="3" ry="5" transform="rotate(44 22 24)"/></svg>`;
 // 表里「待核」和「待核对」两种写法并存（各 20/15 个，后者是历史遗留；
 // 代码只写「待核」）。严格相等会漏掉「待核对」，首页与弹窗都少报 43%。
-const PENDING=['待核','待核对'];
+// 空状态也要算进去：实表里有 1 个「成都028W验收」（11-10，就在眼前）状态是空的，
+// 它最该被确认，却因为 status==='' 不被任何筛选捕获。
+const PENDING=['待核','待核对',''];
 const status=s=>`<span class="status ${/待核|待确认|未开始/.test(s)?'warn':/暂停|完成|概念/.test(s)?'gray':''}">${e(s||'未填写')}</span>`;
 const active=p=>p.active === true;
 const sortProjects=a=>[...a].sort((x,y)=>(x.priority||'P9').localeCompare(y.priority||'P9')||(x.number||'').localeCompare(y.number||''));

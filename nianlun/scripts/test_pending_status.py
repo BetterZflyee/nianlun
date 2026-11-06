@@ -36,5 +36,16 @@ class PendingStatusTests(unittest.TestCase):
         self.assertIn('/待核|待确认|未开始/', src)
 
 
+    def test_empty_status_is_pending(self):
+        """空状态也要算待确认。
+
+        实表里「成都028W验收」（11-10，就在眼前）status 是空的——它最该被确认，
+        却因为 status==='' 不被任何筛选捕获。
+        """
+        src = self.source()
+        self.assertIn("'待核','待核对',''", src,
+                      'PENDING 白名单没包含空状态，空状态里程碑会漏掉')
+
+
 if __name__ == '__main__':
     unittest.main()

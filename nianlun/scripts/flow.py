@@ -424,7 +424,17 @@ def pending_reports(config):
 
 def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None,cancelled=lambda:False,before_publish=lambda:None,writeback=True):
     """Freeze table and memory evidence together; resume the same host request safely."""
-    import report_style, report_brief
+    import report_style, report_brief, harness
+    # binary 可能没传（补生成、测试、脚本调用都会这样）。不归一化就会让
+    # report_brief.compose 落到错误的默认宿主上——实测报出「Codex 未完成推理」，
+    # 而配置的明明是 DeepSeek。
+    if binary is None:
+        # 只能用 config 里已配置的 harness。绝不能调 harness.selection(None)：
+        # 那个函数拿不到配置文件时会**默认回落到 Codex**，于是明明配的是 DeepSeek，
+        # 补生成却报「Codex 未完成本次推理」（实测踩到）。
+        configured=config.get('harness')
+        if not configured:raise n.Error('未配置推理宿主，请先在接入设置中选择')
+        binary=harness.normalize(configured)
     progress('正在读取项目事实与里程碑')
     gw=g.Gateway(config);g.self_identity(gw);state=n.fetch(config,gw.table())
     if not state['complete']:raise n.Error('表格读取不完整，本次未生成阶段汇报')

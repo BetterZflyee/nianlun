@@ -3,17 +3,32 @@
   margin-block: 10px;
 }
 .nl-path-open {
-  display: block;
-  margin: 5px 0 0 auto;
-  padding: 4px 8px;
-  border: 1px solid var(--line, #d3dfd3);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink-2, #42634e);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 0 auto;
+  padding: 6px 14px;
+  border: 1px solid #6f947e;
+  border-radius: 999px;
+  background: #eef4ed;
+  color: #2f5340;
   font-family: inherit;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1.4;
   cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease,
+    box-shadow 0.16s ease;
+  box-shadow: 0 1px 3px #2f53401f;
+}
+.nl-path-open:hover {
+  background: #2f5340;
+  color: #f4f7f1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px #2f53403d;
+}
+.nl-path-open:active {
+  transform: translateY(0);
 }
 .nl-path-dialog {
   width: min(860px, 94vw);

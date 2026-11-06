@@ -63,6 +63,21 @@ def tick(config_path, binary=None, now=None, owner='codex'):
     with file_lock(state/'controller.lock'):
         if run_control.paused(config):return {'status':'paused','notify':False,'runs':[]}
         ledger_path=state/'controller.json';ledger=n.load(ledger_path) if ledger_path.exists() else {'slots':{}}
+        # 回收僵尸槽位：进程被 kill（重启、崩溃、拔电源）时 except 分支根本没机会执行，
+        # 槽位会永久停在 running。这里按「超过 3 小时仍是 running」判定为僵尸，
+        # 放回 failed 让它按正常重试逻辑走，否则那个时段永远不再生长。
+        stale_running=0
+        for ck,cv in ledger['slots'].items():
+            if cv.get('status')!='running':continue
+            started=cv.get('started_at')
+            try:
+                age=(now-datetime.fromisoformat(started)).total_seconds() if started else 0
+            except ValueError:
+                age=0
+            if age>3*3600:
+                cv.update(status='failed',error='上一次执行未正常结束（进程中断），已回收后重试')
+                cv.pop('started_at',None);stale_running+=1
+        if stale_running:n.save(ledger_path,ledger)
         slots=due_slots(schedule,now,activated);runs=[]
         # Finish a delegated slot before starting a newer slot of the same role.
         for old in sorted(ledger['slots'].values(),key=lambda x:x['at']):

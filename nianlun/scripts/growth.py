@@ -215,7 +215,12 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
     if start >= end: raise n.Error('采集起止时间不合法')
     run_id = end.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     folder = r/'runs'/run_id; folder.mkdir(parents=True)
-    prune_runs(r, settings)
+    # 清理是副作用，不该让采集失败：磁盘满、权限、并发占用都可能抛错，
+    # 但这一轮的业务价值远高于腾空间，失败留到下次即可。
+    try:
+        prune_runs(r, settings)
+    except Exception as exc:
+        progress('清理旧运行目录失败，已跳过：'+str(exc)[:120])
     bundle = {'format':'nianlun-evidence-v1','run_id':run_id,'since':start.isoformat(),'until':end.isoformat(),
               'binding':n.digest(config),'sources':[], 'coverage':[], 'identity':self_identity(gw)}
     if selection is not None:

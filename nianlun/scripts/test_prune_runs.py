@@ -86,5 +86,20 @@ class PruneTests(unittest.TestCase):
         self.assertTrue(odd.exists(), '名字不合规的目录不该被猜着删')
 
 
+class PruneFailureIsolationTests(unittest.TestCase):
+    """清理是副作用，不能让采集跟着失败。"""
+
+    def test_prune_is_wrapped_so_collect_survives(self):
+        source = Path(g.__file__).read_text(encoding='utf-8')
+        marker = 'prune_runs(r, settings)'
+        self.assertIn(marker, source)
+        idx = source.index(marker)
+        window = source[max(0, idx - 200):idx]
+        self.assertIn('try:', window, 'prune_runs 没有被 try 包住')
+        after = source[idx:idx + 300]
+        self.assertIn('except Exception', after)
+        self.assertIn('已跳过', after)
+
+
 if __name__ == '__main__':
     unittest.main()

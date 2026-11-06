@@ -67,11 +67,13 @@ def failure_message(text):
 
 def parse_answer(text,schema,task_kind='report'):
     import host_bridge
-    value=text.strip()
-    if value.startswith('```') and value.endswith('```'):
-        value=value.split('\n',1)[-1].rsplit('```',1)[0].strip()
-    try:answer=json.loads(value)
-    except ValueError:raise n.Error('DeepSeek 返回格式不完整；未生成最终结果，可重试原任务。')
+    from harness import json_from_text, single_string_schema
+    # 报告正文常被模型当成原始 markdown 直接塞进字段值：裸换行、未转义双引号、
+    # 内嵌 ```visual 代码块。旧实现只试一次 json.loads，内容明明是好的也判死，
+    # 一次报告要跑好几分钟，白跑的代价太高。这里复用 harness 的容错解析。
+    answer=json_from_text(text,single_field=single_string_schema(schema))
+    if answer is None:
+        raise n.Error('DeepSeek 返回格式不完整；未生成最终结果，可重试原任务。')
     host_bridge.validate(answer,schema)
     if not isinstance(answer.get('answer'),str) or not answer['answer'].strip():
         raise n.Error('DeepSeek 返回了空结果，可重试原任务。')

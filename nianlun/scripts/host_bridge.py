@@ -85,7 +85,14 @@ def check_actions(value,item):
     if raw in (None,''):return
     if not isinstance(raw,str):raise n.Error('actions_json 必须是 JSON 字符串')
     try:actions=json.loads(raw)
-    except ValueError as exc:raise n.Error('actions_json 不是合法 JSON：'+str(exc)[:80])
+    except ValueError as exc:
+        # 动作数组里也可能带未转义的裸换行（正文片段被塞进 title/quote），
+        # 把字符串内部的控制字符转义后再试一次。
+        try:
+            from harness import repair_json_text
+            actions=json.loads(repair_json_text(raw))
+        except (ImportError,ValueError):
+            raise n.Error('actions_json 不是合法 JSON：'+str(exc)[:80])
     if not isinstance(actions,list):raise n.Error('actions_json 必须是动作数组')
     if not actions:return
     sources={}

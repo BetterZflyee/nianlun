@@ -93,5 +93,43 @@ class ParseToleranceTests(unittest.TestCase):
         self.assertIsNone(harness.json_from_text(''))
 
 
+class ReportParseTests(unittest.TestCase):
+    """报告实际走 deepseek_report.parse_answer，这条路径也必须容错。
+
+    harness.json_from_text 修好了但报告走另一套解析，等于没修——12:00 那次失败
+    就是这条路径判死的。
+    """
+
+    def setUp(self):
+        import deepseek_report
+        self.report = deepseek_report
+
+    def schema(self):
+        return harness.ANSWER_SCHEMA
+
+    def test_clean_json_still_works(self):
+        raw = json.dumps({'answer': '正文'}, ensure_ascii=False)
+        self.assertEqual(self.report.parse_answer(raw, self.schema())['answer'], '正文')
+
+    def test_raw_markdown_value_is_accepted(self):
+        raw = '{\n  "answer": "%s"\n}' % BODY
+        value = self.report.parse_answer(raw, self.schema())
+        self.assertIn('## 风险与待决', value['answer'])
+        self.assertIn('gantt', value['answer'])
+
+    def test_fenced_raw_markdown_is_accepted(self):
+        raw = '```json\n' + '{\n  "answer": "%s"\n}' % BODY + '\n```'
+        value = self.report.parse_answer(raw, self.schema())
+        self.assertIn('阶段回顾', value['answer'])
+
+    def test_empty_answer_is_still_rejected(self):
+        with self.assertRaises(harness.n.Error):
+            self.report.parse_answer(json.dumps({'answer': '   '}), self.schema())
+
+    def test_garbage_is_still_rejected(self):
+        with self.assertRaises(harness.n.Error):
+            self.report.parse_answer('完全不是 JSON', self.schema())
+
+
 if __name__ == '__main__':
     unittest.main()

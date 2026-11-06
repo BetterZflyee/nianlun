@@ -66,5 +66,34 @@ class GatewayRetryTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
 
 
+class ExponentialBackoffTests(unittest.TestCase):
+    """退避必须指数增长。
+
+    线性 1.5/3 秒加起来才 4.5 秒，网络抖动常持续更久——实测 14:00 与 16:00
+    两轮就是因为三次重试都撞在同一段断网里而整轮作废。
+    """
+
+    def sleeps(self):
+        """按 growth.Gateway.call 的逻辑算出每次重试前的等待时间。"""
+        base = 1.5
+        return [base * (2 ** (i + 1) - 1) for i in range(g.READ_RETRIES - 1)]
+
+    def test_backoff_grows(self):
+        values = self.sleeps()
+        self.assertGreater(len(values), 0)
+        for earlier, later in zip(values, values[1:]):
+            self.assertLess(earlier, later, '退避没有递增')
+
+    def test_total_backoff_is_meaningful(self):
+        """总退避要够长，覆盖常见的网络抖动。"""
+        self.assertGreaterEqual(sum(self.sleeps()), 15,
+                                '总退避偏短，扛不住持续几十秒的断网')
+
+    def test_formula_matches_source(self):
+        source = Path(g.__file__).read_text(encoding='utf-8')
+        self.assertIn('2 ** (attempt + 1) - 1', source,
+                      '退避公式被改回线性了')
+
+
 if __name__ == '__main__':
     unittest.main()

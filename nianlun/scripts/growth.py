@@ -22,7 +22,9 @@ import dws_transport
 from file_lock import file_lock
 
 # 只读调用的重试预算。DWS 偶发空结果不应终止整轮，但也不能无限重试掩盖真故障。
-READ_RETRIES = 3
+# 5 次 + 指数退避合计约 39 秒，能覆盖实测里持续几十秒的连接中断
+# （14:00 与 16:00 两轮就是三次重试都撞在同一段断网里而整轮作废）。
+READ_RETRIES = 5
 # 退避秒数可被测试覆盖（设为 0），生产用真实等待避免把服务瞬间打满。
 RETRY_BACKOFF = float(os.environ.get('NIANLUN_RETRY_BACKOFF') or 1.5)
 # 这些是瞬时故障，重试有意义；登录失效、程序缺失等确定性错误重试也没用。
@@ -53,7 +55,10 @@ class Gateway:
                 last = exc
                 if attempt == attempts - 1 or not _retryable(exc):
                     raise
-                time.sleep(RETRY_BACKOFF * (attempt + 1))
+                # 指数退避（1×、3×、7× 基数）。线性 1.5/3 秒加起来才 4.5 秒，
+                # 网络抖动往往持续更久——实测 14:00 与 16:00 两轮就是因为退避太短、
+                # 三次都撞在同一段断网里而整轮作废。
+                time.sleep(RETRY_BACKOFF * (2 ** (attempt + 1) - 1))
         raise last
 
     def _call_once(self, args, cwd, partial):

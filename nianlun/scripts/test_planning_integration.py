@@ -139,5 +139,53 @@ class StaleStateTests(unittest.TestCase):
                          '不能再用循环外的旧 state 比较')
 
 
+class ExpiredDeadlineTests(unittest.TestCase):
+    """全部里程碑都过期时，不能拿过期日期当目标。
+
+    实表里已有 47 个过期未完成里程碑。如果某个项目的里程碑全在过去，
+    `deadline()` 会返回一个过去的日期，倒排据此算出来的节点日期全在过去——
+    写进表里就是一批「已过期的计划」。
+    """
+
+    def test_all_expired_milestones_gives_no_deadline(self):
+        state = {'projects': [{'id': 'p1', 'notes': ''}],
+                 'milestones': [
+                     {'id': 'm1', 'date': '2026-10-01', 'status': '未开始', 'project_ids': ['p1']},
+                     {'id': 'm2', 'date': '2026-10-15', 'status': '已延期', 'project_ids': ['p1']},
+                 ]}
+        self.assertIsNone(planning.deadline(state['projects'][0], state),
+                          '全过期时应视为没有可用目标')
+
+    def test_one_future_milestone_is_enough(self):
+        state = {'projects': [{'id': 'p1', 'notes': ''}],
+                 'milestones': [
+                     {'id': 'm1', 'date': '2026-10-01', 'status': '未开始', 'project_ids': ['p1']},
+                     {'id': 'm2', 'date': '2099-01-30', 'status': '未开始', 'project_ids': ['p1']},
+                 ]}
+        self.assertIsNotNone(planning.deadline(state['projects'][0], state))
+
+    def test_validate_rejects_expired_target(self):
+        """即使调用方硬塞一个过期日期，validate 也要拒绝并说清怎么办。"""
+        from datetime import date, timedelta
+        past = date.today() - timedelta(days=30)
+        answer = {'nodes': [{'key': 'k1', 'title': '交付', 'description': 'd',
+                             'days_before_deadline': 0, 'depends_on': []}],
+                  'rationale': 'r'}
+        with self.assertRaises(Exception) as ctx:
+            planning.validate(answer, past)
+        msg = str(ctx.exception)
+        self.assertIn('已过期', msg)
+        self.assertIn('更新', msg, '要告诉用户怎么处理')
+
+    def test_validate_accepts_future_target(self):
+        from datetime import date, timedelta
+        future = date.today() + timedelta(days=30)
+        answer = {'nodes': [{'key': 'k1', 'title': '交付', 'description': 'd',
+                             'days_before_deadline': 0, 'depends_on': []}],
+                  'rationale': 'r'}
+        nodes = planning.validate(answer, future)
+        self.assertEqual(nodes[0]['date'], future.isoformat())
+
+
 if __name__ == '__main__':
     unittest.main()

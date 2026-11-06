@@ -139,11 +139,23 @@ def deadline(project,state=None):
             if m.get('status') in ('已达成','已完成','已取消'):continue
             try:dates.append(date.fromisoformat(m.get('date') or ''))
             except (TypeError,ValueError):continue
-        if dates:return max(dates)
+        if dates:
+            latest=max(dates)
+            # 全部里程碑都已过期时不能拿来当目标：倒排会算出一批已成过去的
+            # 节点，写进表里就是「已过期的计划」。当作没有目标，让调用方提示。
+            if latest < date.today():return None
+            return latest
     return None
 
 
 def validate(answer, target):
+    """校验模型给的倒排节点。
+
+    目标日期若已过期，倒排毫无意义——算出来的节点日期全在过去，写进表里
+    就是一批「已过期的计划」。宁可拒绝并说清楚，也不生成垃圾数据。
+    """
+    if target < date.today():
+        raise n.Error(f'目标日期 {target} 已过期，无法倒排；请先更新里程碑日期或补填目标日期')
     nodes=answer.get('nodes',[])
     if not isinstance(nodes,list) or not 1<=len(nodes)<=12:raise n.Error('倒排节点数量须为 1 至 12 个')
     keys=set();titles=set();result=[]

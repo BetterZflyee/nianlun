@@ -42,8 +42,16 @@ def css_body(css):
 
 
 def text(value, limit=160, field='图中文字'):
-    if not isinstance(value, str) or not value.strip() or len(value) > limit:
-        raise ValueError(field+' 须为 1 至 '+str(limit)+' 字的非空文本')
+    # 三种失败要分开说：模型看到「须为 1 至 N 字」时，第一反应是把内容改短，
+    # 而实际往往是**漏了这个字段**——它会把本来没问题的内容越改越短。
+    # 实测 2026-11-07 04:16 那轮报告前两稿都卡在 caption 为空。
+    if not isinstance(value, str):
+        got = '没写这个字段' if value is None else f'写成了{type(value).__name__}'
+        raise ValueError(f'{field}缺失，须提供 1 至 {limit} 字的文本（当前{got}）')
+    if not value.strip():
+        raise ValueError(f'{field}是空的，须填写 1 至 {limit} 字的内容')
+    if len(value) > limit:
+        raise ValueError(f'{field}有 {len(value)} 字，超过 {limit} 字上限，请精简')
     if re.search(r'<|>|https?://|[\x00-\x08]', value):
         raise ValueError('图形仅接受文字，不接受 HTML 或外部链接')
     return value

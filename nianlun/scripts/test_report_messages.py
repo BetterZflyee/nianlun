@@ -229,5 +229,55 @@ class VisualFieldTests(unittest.TestCase):
             self.assertIn(field, msg, f'要列出该类型允许的字段，缺了 {field}')
 
 
+class _NotSet:
+    def __repr__(self):
+        return 'NOT_SET'
+
+
+NOT_SET = _NotSet()
+
+
+class MissingFieldVsTooLongTests(unittest.TestCase):
+    """「字段缺失」和「字段太长」必须分开说。
+
+    原来三种情况共用一句「须为 1 至 N 字的非空文本」。模型看到这句的第一反应
+    是**把内容改短**，而实际问题往往是**漏了这个字段**——于是它把本来没问题的
+    内容越改越短，改到第三稿还是错。
+
+    实测 2026-11-07 04:16 那轮报告前两稿都卡在 caption 为空。
+    """
+
+    def block(self, caption):
+        item = {'label': 'x', 'state': 'done', 'detail': 'd', 'source': '[R1]'}
+        cfg = {'type': 'status', 'title': 'T', 'items': [item]}
+        if caption is not NOT_SET:
+            cfg['caption'] = caption
+        return cfg
+
+    def test_missing_field_says_so(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block(NOT_SET))
+        msg = str(ctx.exception)
+        self.assertIn('缺失', msg, '漏字段要说「缺失」，不是「须为 N 字」')
+        self.assertIn('没写', msg)
+
+    def test_empty_field_says_so(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block(''))
+        self.assertIn('是空的', str(ctx.exception))
+
+    def test_too_long_reports_actual_length(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block('长' * 200))
+        msg = str(ctx.exception)
+        self.assertIn('200', msg, '超长要说实际多少字，模型才知道删多少')
+        self.assertIn('精简', msg)
+
+    def test_wrong_type_says_so(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block(123))
+        self.assertIn('写成了', str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

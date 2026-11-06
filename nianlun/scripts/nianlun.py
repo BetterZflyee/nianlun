@@ -347,6 +347,17 @@ def select_projects(state, names, all_active=False):
     return chosen
 
 
+def readonly_field(config, role, field_id):
+    """该字段是否只读（创建时间、创建人、公式等系统字段）。
+
+    只读字段写不进去，比对时也不该拿它当预期值——否则永远对不上。
+    """
+    for field in (config['tables'][role].get('fields') or {}).values():
+        if field.get('fieldId') == field_id:
+            return bool(field.get('readonly'))
+    return False
+
+
 def plan(config, state, candidates):
     if not isinstance(candidates, list) or not 1 <= len(candidates) <= 100:
         raise Error('候选必须为 1–100 项 JSON 数组')
@@ -426,6 +437,12 @@ def plan(config, state, candidates):
             existing = [r for r in state['records'] if marker in (r.get(detail_key) or '')]
             if len(existing) > 1:
                 raise Error('同一来源标记已出现多条记录，需先核实')
+            # 只读字段（创建时间、创建人、公式）写不进去，必须在这里就剔除：
+            # 否则写后验证拿模型给的值去比对系统自动生成的值，永远对不上，
+            # 整轮被误判成「写后验证失败」——记录其实已经写成功了。
+            # 实测 2026-11-07 03:38 那轮：模型给 date=2026-11-06，而该字段是
+            # createdTime，实际写入 2026-11-07，验证必然失败。
+            cells = {k: v for k, v in cells.items() if not readonly_field(config, 'records', k)}
             action = {'op': op, 'role': 'records', 'title': candidate['title'], 'project': projects[0]['title'],
                       'cells': cells, 'marker': marker, 'detail_key': detail_key,
                       'skip_existing': [r['id'] for r in existing]}

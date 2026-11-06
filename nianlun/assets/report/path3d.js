@@ -76,12 +76,31 @@ export function install() {
     button.disabled = false;
     button.setAttribute("aria-label", "以三维方式查看这条推进路径");
     button.onclick = () => {
+      let data = null;
       try {
-        const data = captureFlow(svg);
-        if (!data) throw Error("unsupported");
-        openPath(data, button);
-      } catch {
+        data = captureFlow(svg);
+      } catch (err) {
+        // captureFlow 只在结构不支持 3D 时 return null；抛异常说明是真 bug。
+        // 以前裸 catch 会把两者一起说成「当前设备使用二维路径」，把代码缺陷
+        // 伪装成设备限制，既误导用户又让问题永远查不出来。
+        console.warn("[nianlun] 3D 路径解析失败：", err);
+        button.textContent = "立体视图加载失败";
+        button.title = String((err && err.message) || err);
+        button.disabled = true;
+        return;
+      }
+      if (!data) {
+        // 合理的降级：这条流程的结构本身不适合立体化，不是故障。
         button.textContent = "当前设备使用二维路径";
+        button.disabled = true;
+        return;
+      }
+      try {
+        openPath(data, button);
+      } catch (err) {
+        console.warn("[nianlun] 3D 视图打开失败：", err);
+        button.textContent = "立体视图加载失败";
+        button.title = String((err && err.message) || err);
         button.disabled = true;
       }
     };
@@ -144,7 +163,7 @@ function openPath(data, opener) {
     selected = new THREE.Color("#92b39c");
   for (const [i, node] of data.nodes.entries()) {
     const geometry = own(new THREE.BoxGeometry(node.width, node.height, 10));
-    const material = own(new THREE.MeshLambertMaterial({ color: fill }));
+    const material = own(new THREE.MeshLambertMaterial({ color: fill, emissive: fill, emissiveIntensity: 0.06 }));
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.copy(position(node));
     group.add(mesh);

@@ -29,10 +29,25 @@ class Path3DVisualTests(unittest.TestCase):
         self.assertIsNotNone(match, '找不到节点几何构造')
         self.assertGreaterEqual(int(match.group(1)), 20, '节点厚度被改薄了，立体感会消失')
 
-    def test_material_supports_roughness(self):
-        """MeshLambertMaterial 没有粗糙度/金属度，质感很平。"""
+    def test_material_uses_supported_params_only(self):
+        """材质参数必须是该材质真支持的。
+
+        这个 bundle 只打包了 MeshBasic 和 MeshLambert 两种材质。Lambert 不支持
+        roughness/metalness——之前加了这两个，浏览器只打警告然后默默忽略，
+        视觉没变化，测试却因为「字符串里有 roughness」而假通过。
+        改用 Lambert 支持的 emissive + emissiveIntensity。
+        """
         src = self.bundle()
-        self.assertIn('roughness', src, '材质退回了不支持粗糙度的类型')
+        # Three.js 库内部有 shader uniform 也叫 roughness/metalness，要排除掉，
+        # 只看业务代码构造的节点材质。
+        import re as _re
+        node_materials = _re.findall(r'new ws\(\{[^}]*\}\)', src)
+        self.assertTrue(node_materials, '找不到节点材质构造')
+        for material in node_materials:
+            self.assertNotIn('roughness', material,
+                             'MeshLambertMaterial 不支持 roughness，加了也无效还会打警告')
+            self.assertNotIn('metalness', material, 'MeshLambertMaterial 不支持 metalness')
+        self.assertIn('emissiveIntensity', src, '质感应改用 Lambert 支持的参数')
 
     def test_shadow_map_enabled(self):
         src = self.bundle()

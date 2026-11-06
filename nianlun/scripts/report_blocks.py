@@ -111,14 +111,21 @@ def validate(config, evidence=None):
         if not isinstance(marks, list) or len(marks) > 24: raise ValueError('里程碑须为 0 至 24 个')
         for m in marks:
             if not isinstance(m, dict) or set(m) - {'date', 'label', 'source'}:
-                raise ValueError('里程碑字段不合法')
-            day(m.get('date'), '里程碑日期'); text(m.get('label'), 18, '里程碑说明')
+                # 要点名多出来的是哪个字段。只说「字段不合法」，模型只能乱猜，
+                # 实测有草稿把 state 写进里程碑，三轮修订都没改掉。
+                extra = set(m) - {'date', 'label', 'source'} if isinstance(m, dict) else set()
+                raise ValueError('里程碑只允许 date/label/source，多出：' + '、'.join(sorted(extra)))
+            # 18 字装不下「集采框招上架（原定 10-30，延后 17 天）」这类正常表述，
+            # 也和甘特行 label 的 26 字上限不一致。统一到 26。
+            day(m.get('date'), '里程碑日期'); text(m.get('label'), 26, '里程碑说明')
             source(m.get('source'))
         rows = config.get('rows')
         if not isinstance(rows, list) or not 1 <= len(rows) <= 12: raise ValueError('甘特图须为 1 至 12 个对象')
         for row in rows:
-            if not isinstance(row, dict) or set(row) - {'label', 'state', 'stage', 'segments', 'points', 'source', 'note', 'marks'}:
-                raise ValueError('甘特行字段不合法')
+            ALLOWED_ROW = {'label', 'state', 'stage', 'segments', 'points', 'source', 'note', 'marks'}
+            if not isinstance(row, dict) or set(row) - ALLOWED_ROW:
+                extra = set(row) - ALLOWED_ROW if isinstance(row, dict) else set()
+                raise ValueError('甘特行只允许 ' + '/'.join(sorted(ALLOWED_ROW)) + '，多出：' + '、'.join(sorted(extra)))
             # 行级 marks 是模型常见的另一种写法，等价于无说明的节点，归一化后并入 points。
             for value in (row.get('marks') or []):
                 if isinstance(value, str): row.setdefault('points', []).append({'date': value, 'label': '节点'})

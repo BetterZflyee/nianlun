@@ -292,11 +292,23 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
         active_project_ids=[p['id'] for p in bundle['tables']['projects'] if n.project_active(p)]
         if switches.get('milestone_planning') and 'planning' not in post:
             progress('正在按目标日期倒排里程碑')
-            post['planning']=planning.run(config,active_project_ids,binary,g.root(config)/'milestone-plans');n.save(post_path,post)
+            # 倒排、记忆、汇报都是收尾步骤：写表与建待办已经落库，这里失败不该把
+            # 整轮标记为失败，否则同一批已生效的写入会被迫重试，记录也看不清真相。
+            try:
+                post['planning']=planning.run(config,active_project_ids,binary,g.root(config)/'milestone-plans')
+            except Exception as exc:
+                post['planning_error']={'message':str(exc)[:500],'at':n.stamp(config)}
+                progress('里程碑倒排未完成，主体写入已保留：'+str(exc)[:120])
+            n.save(post_path,post)
         if switches.get('gbrain') and project_ids and 'memory' not in post:
             progress('正在自动维护各项目的连续记忆')
-            state=n.fetch(config,g.Gateway(config).table())
-            post['memory']=memory.refresh(config,state,project_ids);n.save(post_path,post)
+            try:
+                state=n.fetch(config,g.Gateway(config).table())
+                post['memory']=memory.refresh(config,state,project_ids)
+            except Exception as exc:
+                post['memory_error']={'message':str(exc)[:500],'at':n.stamp(config)}
+                progress('项目记忆未更新，主体写入已保留：'+str(exc)[:120])
+            n.save(post_path,post)
         if switches.get('continuous_reports') and switches.get('reports') and active_project_ids and 'reports' not in post:
             progress('正在根据最新进度和里程碑自动生成阶段汇报')
             end=datetime.fromisoformat(bundle['until']).date()

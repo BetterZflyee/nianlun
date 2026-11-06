@@ -12,7 +12,7 @@ import sys
 import time
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from difflib import SequenceMatcher
 import nianlun as n
@@ -133,6 +133,66 @@ def sanitize(text):
     return '\n'.join('[凭据内容已省略]' if re.search(r'(?i)password|passwd|api[_-]?key|secret|token\s*[:=]|admin\s*/|密码\s*[:：]', line) else line for line in text.splitlines())
 
 
+def prune_runs(state_root, settings, keep_days=None, keep_completed=None):
+    """Drop old run directories so evidence does not accumulate forever.
+
+    每次生长都留一份完整证据（含 sources 原文），单个 run 可达数 MB。没有清理时
+    状态目录会无限制增长（实测 178 个 run 已占 179MB，其中 evidence.json 占 133MB）。
+
+    保守策略：
+    - 已完成（有 finish.json 或 receipt.json）的 run 保留最近 keep_completed 个；
+    - 未完成的 run 只在超过 keep_days 天且不在 active 指针上时才删；
+    - 当前 active.json 指向的 run 永远保留，避免删掉正在恢复的任务。
+    返回被删除的目录数与释放的字节数。
+    """
+    import shutil
+    runs = Path(state_root) / 'runs'
+    if not runs.is_dir():
+        return {'removed': 0, 'freed': 0}
+    keep_days = float(keep_days if keep_days is not None else settings.get('keep_run_days', 7))
+    keep_completed = int(keep_completed if keep_completed is not None else settings.get('keep_completed_runs', 20))
+    active_dir = None
+    pointer = Path(state_root) / 'active.json'
+    if pointer.exists():
+        try:
+            active_dir = Path(n.load(pointer).get('run_dir') or '').resolve()
+        except Exception:
+            active_dir = None
+    now = datetime.now(timezone.utc)
+    completed, pending = [], []
+    for entry in runs.iterdir():
+        if not entry.is_dir():
+            continue
+        if active_dir and entry.resolve() == active_dir:
+            continue
+        try:
+            started = datetime.strptime(entry.name[:15], '%Y%m%d-%H%M%S').replace(
+                tzinfo=timezone(timedelta(hours=float(settings.get('utc_offset_hours', 8)))))
+        except ValueError:
+            # 名字不合规的目录不猜，交给人工处理。
+            continue
+        done = (entry / 'finish.json').exists() or (entry / 'receipt.json').exists()
+        (completed if done else pending).append((started, entry))
+    completed.sort(reverse=True)
+    removed = 0
+    freed = 0
+    def drop(target):
+        nonlocal removed, freed
+        try:
+            size = sum(f.stat().st_size for f in target.rglob('*') if f.is_file())
+            shutil.rmtree(target)
+            removed += 1; freed += size
+        except OSError:
+            pass
+    for _, entry in completed[keep_completed:]:
+        drop(entry)
+    cutoff = now - timedelta(days=keep_days)
+    for started, entry in pending:
+        if started < cutoff:
+            drop(entry)
+    return {'removed': removed, 'freed': freed}
+
+
 def collect(config, since=None, until=None, selection=None, progress=lambda message:None):
     r = root(config); gw = Gateway(config); settings = config['growth']
     progress('正在核验钉钉组织身份与原轮次')
@@ -155,6 +215,7 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
     if start >= end: raise n.Error('采集起止时间不合法')
     run_id = end.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8]
     folder = r/'runs'/run_id; folder.mkdir(parents=True)
+    prune_runs(r, settings)
     bundle = {'format':'nianlun-evidence-v1','run_id':run_id,'since':start.isoformat(),'until':end.isoformat(),
               'binding':n.digest(config),'sources':[], 'coverage':[], 'identity':self_identity(gw)}
     if selection is not None:

@@ -106,6 +106,27 @@ python3 -m unittest discover -s nianlun/scripts -p "test_*.py"
 | 证据预算 | 73 个历史 run 超限 37 → 0 |
 | 端到端生长 | 沙箱真实窗口跑通采集→裁剪→检索→推理→校验→归档，一次通过无重试 |
 
+## 跨平台修复
+
+### Windows 双击安装原本是坏的
+
+`.cmd` 里写了中文文件名，而 cmd.exe 在 `chcp 65001` 生效前就解析批处理文件，中文被按 OEM 代码页解码：
+
+```
+期望: 安装年轮.ps1
+实际: 瀹夎骞磋疆.ps1
+```
+
+PowerShell 找不到脚本，Windows 用户双击直接失败。现已改为纯 ASCII 脚本 + `install.ps1`/`open.ps1` 别名。
+
+### 已核对的三平台脚本
+
+| 文件 | 编码 | 状态 |
+|---|---|---|
+| 安装年轮.cmd / 打开年轮.cmd | ASCII | ✓ |
+| 安装年轮.ps1 / 打开年轮.ps1 | UTF-8 with BOM | ✓ |
+| 安装年轮.command / 打开年轮.command | UTF-8，可执行 | ✓ |
+
 ## 未验证的部分
 
 诚实边界，以下仍然待验：

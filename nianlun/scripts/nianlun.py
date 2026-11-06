@@ -581,6 +581,22 @@ def build_home(state, output, config=None):
                     reports_state['recovered'] = len(backlog_result['recovered'])
                 if backlog_result.get('pending'):
                     reports_state['still_pending'] = len(backlog_result['pending'])
+                # 历史 postprocess 里的失败记录会一直挂着，哪怕后来补生成成功了。
+                # 以当前待补清单为准：清单空 = 欠的都已经补上，不该再显示旧警告。
+                try:
+                    import flow as flow_module
+                    live_pending = flow_module.pending_reports(config)
+                except Exception:
+                    live_pending = None
+                if live_pending is not None:
+                    reports_state['still_pending'] = len(live_pending)
+                    if not live_pending and not reports_state['failed']:
+                        reports_state['error'] = ''
+                    elif not live_pending and reports_state['failed']:
+                        # 有失败记录但都已补上：转成「已补齐」而不是继续报警。
+                        reports_state['recovered'] = reports_state.get('recovered') or len(post.get('reports_failed') or [])
+                        reports_state['failed'] = 0
+                        reports_state['error'] = ''
         state['growth'] = {'schedule': config['growth'].get('schedule', {}),
                            'status': latest.get('status', '尚未运行'), 'last_run': latest.get('finished_at', ''),
                            'memory_verified': latest.get('brain', {}).get('verified', False),

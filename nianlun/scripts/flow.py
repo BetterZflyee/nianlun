@@ -402,12 +402,18 @@ def _clear_report_backlog(config, project_ids):
         except OSError:pass
 
 
-def recover_reports(config, backlog, binary, request_dir, writeback, progress, limit=6):
+def recover_reports(config, backlog, binary, request_dir, writeback, progress, limit=None):
     """补生成待补清单里的报告，返回 (补成功, 仍失败)。
 
     单项目失败不中断其余项目——这是补救步骤，不能让一个坏项目拖住整批。
     """
     recovered=[];still=[]
+    # 上限默认按待补数量自适应，不再写死 6。
+    # 活跃项目有 7 个，写死 6 意味着「某轮全失败」时总有一个轮不到，
+    # 而每轮又会新增待补——净增 1 个，慢慢就追不上了。
+    # 下限 6（正常规模），上限 12（防止积压时单轮跑太久把生长拖超时）。
+    # 12 已经远大于实际活跃项目数（7），正常情况下一轮清空。
+    if limit is None:limit=min(12,max(6,len(backlog or {})))
     for pid,meta in list((backlog or {}).items())[:limit]:
         try:
             items,_failed=report_projects(config,[pid],meta.get('since'),meta.get('until'),binary,

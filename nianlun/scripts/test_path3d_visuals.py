@@ -70,5 +70,19 @@ class Path3DVisualTests(unittest.TestCase):
         self.assertIn('rotation.x=', src)
 
 
+    def test_shadow_map_type_not_deprecated(self):
+        """PCFSoftShadowMap(2) 在新版 Three.js 已移除。
+
+        库内部会自动降级成 PCFShadowMap(1) 并打警告：
+        `WebGLShadowMap: PCFSoftShadowMap has been removed. Using PCFShadowMap instead.`
+
+        功能没问题，但每次打开 3D 都刷一条警告，排查时会被干扰。直接用 1。
+        """
+        src = self.bundle()
+        self.assertNotIn('shadowMap.type=2', src,
+                         'PCFSoftShadowMap(2) 已废弃，会自动降级并打警告')
+        self.assertIn('shadowMap.type=1', src, '应直接使用 PCFShadowMap(1)')
+
+
 if __name__ == '__main__':
     unittest.main()

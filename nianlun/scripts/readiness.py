@@ -100,6 +100,30 @@ def c9():
     return slots[0]['key'][-20:]
 check('调度·槽位', c9)
 
+# 10 launchd 真的会触发吗
+def c10():
+    import plistlib
+    from pathlib import Path
+    plist = Path.home()/'Library/LaunchAgents/com.zhufei.nianlun.tick.plist'
+    if not plist.exists(): raise ValueError('tick plist 不存在')
+    with plist.open('rb') as fh:
+        data = plistlib.load(fh)
+    args = data.get('ProgramArguments') or []
+    if len(args) < 2: raise ValueError('ProgramArguments 不完整')
+    py, script = Path(args[0]), Path(args[1])
+    if not py.exists(): raise ValueError(f'python 不存在：{py}')
+    if not script.exists(): raise ValueError(f'host.py 不存在：{script}')
+    if 'StartCalendarInterval' not in data: raise ValueError('没配定时触发')
+    return f'每小时整点 · owner={args[args.index("--owner")+1]}'
+check('调度·launchd', c10)
+
+# 11 生长没被暂停
+def c11():
+    import run_control
+    if run_control.paused(cfg): raise ValueError('生长被暂停了（schedule-control.json）')
+    return '未暂停'
+check('调度·未暂停', c11)
+
 print("=== 明早生长就绪检查 ===\n")
 for name,val in ok:
     print(f"  ✓ {name:14s} {val}")

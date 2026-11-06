@@ -72,5 +72,24 @@ class MergeRevisionTests(unittest.TestCase):
         self.assertIn('只输出**需要修改的完整段落**', src)
 
 
+class UnknownSectionTests(unittest.TestCase):
+    """模型回了原文里没有的小节标题时，不能追加成新小节。
+
+    实测踩过：2 节的报告被合并成 3 节，因为代码在找不到对应小节时把片段
+    追加到了末尾。修订的语义是「改已有内容」，追加等于凭空加一节——
+    报告的章节结构就被破坏了。
+    """
+
+    def test_unknown_heading_keeps_previous_intact(self):
+        got = rb.merge_revision(PREV, '## 不存在的小节\n\n内容')
+        self.assertEqual(got, PREV, '认不出对哪段的修订就该原样保留')
+        self.assertEqual(got.count('\n## '), PREV.count('\n## '), '不能多出小节')
+
+    def test_two_section_document_not_inflated(self):
+        two = 'Lead: x\n\n## A · 推进\n\n内容A [R1]。\n\n## 风险\n\n内容B [R2]。\n'
+        got = rb.merge_revision(two, '## 进展\n\n新内容')
+        self.assertEqual(got.count('\n## '), 2, '两节的报告不能被撑成三节')
+
+
 if __name__ == '__main__':
     unittest.main()

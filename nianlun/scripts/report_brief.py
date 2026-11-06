@@ -288,12 +288,15 @@ def merge_revision(previous, revised):
             nxt = re.compile(r'^## ', re.M).search(prev, match.end())
             end = nxt.start() if nxt else len(prev)
             return prev[:match.start()] + body + ('\n\n' if nxt else '') + prev[end:]
-    # 没有小节标题：当作整段替换尾部（最常见是替换一个 visual 代码块）。
+    # 只有 visual 代码块：替换第一块。
     if '```visual' in body:
         blocks = list(re.finditer(r'```visual\n.*?\n```', prev, re.S))
         if blocks:
             return prev[:blocks[0].start()] + body + prev[blocks[0].end():]
-    return prev + '\n\n' + body
+    # 认不出这是对哪一段的修订：保留原稿，让下一轮再改。
+    # 直接追加会让报告多出重复小节（实测把 2 节变 3 节），
+    # 而修订的语义是「改已有内容」，不是「加新内容」。
+    return previous
 
 
 def compose(project,since,until,evidence,method,folder,binary,progress,cancelled):

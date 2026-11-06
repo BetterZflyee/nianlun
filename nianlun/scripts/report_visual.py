@@ -34,10 +34,12 @@ def enhance(html):
     # 布局重排会重建 section 标签，宽表面板的跨列标记必须在其之后补上。
     from report_blocks import widen_wide_panels, css_body as report_blocks_css_body
     html = widen_wide_panels(html)
-    if 'id="nianlun-path-3d"' in html:
-        return html
     if not re.search(r'<figure\b[^>]*class=["\'][^"\']*\bam-flow\b', html):
         return html
+    # 注意：这里不能因为「已经有 path-3d」就提前返回。旧的注入结果可能带着
+    # 过期摘要（例如上一版代码算错哈希、或 CSP 换了写法），提前返回会让那份页面
+    # 永远修不好——3D 一直是死的。下面本来就会先移除旧运行时再按当前版本重注入，
+    # 所以这里直接往下走既保证幂等、又能自愈。
     css = report_blocks_css_body((ASSETS / 'path3d.css').read_text(encoding='utf-8'))
     license_text = (ASSETS.parent / 'portal/vendor/three-LICENSE.txt').read_text(encoding='utf-8')
     script = '/* Three.js MIT license\n' + license_text + '\n*/\n' + (ASSETS / 'path3d.bundle.js').read_text(encoding='utf-8')

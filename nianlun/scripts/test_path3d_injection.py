@@ -84,5 +84,34 @@ class InjectionTests(unittest.TestCase):
         self.assertEqual(twice.count('<script id="nianlun-path-3d">'), 1)
 
 
+class SelfHealingTests(unittest.TestCase):
+    """已经注入过、但摘要过期的页面，必须能自愈。
+
+    上一版代码算错哈希时留下的报告，CSP 里没有运行时摘要，浏览器拒绝执行脚本，
+    3D 一直是死的。旧逻辑开头「已有 path-3d 就 return」会让这类页面永远修不好。
+    """
+
+    def stale_page(self):
+        html = page("default-src 'none'; script-src 'sha256-OLDWRONG='")
+        # 手工造一个「已注入但摘要对不上」的页面
+        return (html.replace('</head>',
+                '<script id="nianlun-path-3d">/* 过期运行时 */</script></head>'))
+
+    def test_stale_runtime_is_replaced_not_skipped(self):
+        out = report_visual.enhance(self.stale_page())
+        digest = injected_digest(out)
+        self.assertIsNotNone(digest)
+        self.assertIn("'sha256-" + digest + "'", out, '新旧摘要都该被换成当前版本')
+        self.assertNotIn('/* 过期运行时 */', out)
+
+    def test_no_duplicate_runtime(self):
+        out = report_visual.enhance(self.stale_page())
+        self.assertEqual(out.count('<script id="nianlun-path-3d">'), 1)
+
+    def test_repeated_enhance_is_stable(self):
+        once = report_visual.enhance(self.stale_page())
+        self.assertEqual(once, report_visual.enhance(once))
+
+
 if __name__ == '__main__':
     unittest.main()

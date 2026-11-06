@@ -71,7 +71,12 @@ def run(config, project_ids, choice, folder):
         target=deadline(project);goal=project.get('goal') or project.get('description')
         if not n.project_active(project):continue
         if not target or not goal:
-            pending.append(project['title']+'：需要项目目标和目标日期，才能倒排');continue
+            # 提示要能照着做：目标写 goal 字段，日期写 notes 里的「年轮目标日期：YYYY-MM-DD」。
+            # 只说「需要目标和日期」用户不知道填哪，7 个活跃项目就一直空着。
+            missing=[]
+            if not goal:missing.append('goal 字段（项目目标）')
+            if not target:missing.append('备注里的「年轮目标日期：YYYY-MM-DD」')
+            pending.append(project['title']+'：缺 '+'、'.join(missing)+'，补齐后才能倒排');continue
         facts=evidence(state,pid)
         # Managed nodes are outputs, not inputs. Human edits to managed nodes are checked before writes.
         prefix='[年轮倒排:'+n.digest({'base':config['base_id'],'project':pid})[:16]+':'

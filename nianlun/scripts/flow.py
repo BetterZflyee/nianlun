@@ -319,18 +319,9 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             backlog=pending_reports(config)
             if backlog:
                 progress('正在补生成上轮未完成的阶段汇报（'+str(len(backlog))+' 个）')
-                recovered=[];still=[]
-                for pid,meta in list(backlog.items())[:6]:
-                    try:
-                        items,_failed=report_projects(config,[pid],meta.get('since'),meta.get('until'),binary,
-                            request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
-                        if items:recovered.append(pid)
-                        else:still.append(pid)
-                    except Exception as exc:
-                        still.append(pid)
-                        progress('补生成仍失败，保留待补：'+str(exc)[:100])
+                recovered,still=recover_reports(config,backlog,binary,folder/'reports',
+                                                switches.get('auto_publish',False),progress)
                 post['backlog']={'recovered':recovered,'pending':still}
-                _clear_report_backlog(config,recovered)
                 # 补过的项目从本轮活跃列表里摘掉：否则紧接着的正常生成会对同一个
                 # 项目再跑一遍（同一目录、同样的输入），纯属重复消耗。
                 if recovered:
@@ -402,6 +393,25 @@ def _clear_report_backlog(config, project_ids):
     if changed:
         try:n.save(path,data)
         except OSError:pass
+
+
+def recover_reports(config, backlog, binary, request_dir, writeback, progress, limit=6):
+    """补生成待补清单里的报告，返回 (补成功, 仍失败)。
+
+    单项目失败不中断其余项目——这是补救步骤，不能让一个坏项目拖住整批。
+    """
+    recovered=[];still=[]
+    for pid,meta in list((backlog or {}).items())[:limit]:
+        try:
+            items,_failed=report_projects(config,[pid],meta.get('since'),meta.get('until'),binary,
+                request_dir=request_dir,writeback=writeback)
+            if items:recovered.append(pid)
+            else:still.append(pid)
+        except Exception as exc:
+            still.append(pid)
+            progress('补生成仍失败，保留待补：'+str(exc)[:100])
+    _clear_report_backlog(config,recovered)
+    return recovered,still
 
 
 def pending_reports(config):

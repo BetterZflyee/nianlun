@@ -60,27 +60,83 @@ class ReportBacklogTests(unittest.TestCase):
         flow._remember_report_backlog(self.config, ['p1'], 's', 'u', 'err')
         self.assertEqual(set(flow.pending_reports(self.config)), {'p1'})
 
-    def test_backlog_is_capped_when_recovering(self):
-        """补生成每轮最多 6 个，避免把一轮拖太长。"""
-        source = Path(flow.__file__).read_text(encoding='utf-8')
-        self.assertIn('list(backlog.items())[:6]', source)
-
-    def test_recovery_failure_keeps_item(self):
-        """补生成仍失败的项目要留在清单里，不能丢。"""
-        source = Path(flow.__file__).read_text(encoding='utf-8')
-        idx = source.index('正在补生成上轮未完成的阶段汇报')
-        block = source[idx:idx + 1200]
-        self.assertIn('still.append(pid)', block)
-        self.assertIn('_clear_report_backlog(config,recovered)', block,
-                      '只清理成功的，失败的必须保留')
-
 
     def test_recovered_projects_are_excluded_from_normal_run(self):
         """补过的项目不能再被正常生成跑一遍，那是同一目录的重复消耗。"""
         source = Path(flow.__file__).read_text(encoding='utf-8')
-        idx = source.index('正在补生成上轮未完成的阶段汇报')
-        block = source[idx:idx + 1600]
+        idx = source.index('recovered,still=recover_reports(')
+        block = source[idx:idx + 900]
         self.assertIn('active_project_ids=[x for x in active_project_ids if x not in recovered]', block)
+
+
+class RecoverReportsTests(unittest.TestCase):
+    """行为测试：真的驱动补生成流程，而不只是检查源码里有没有那行字。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.config = {'growth': {'state_dir': str(self.root)}, 'base_id': 'b', 'tables': {}}
+        self.calls = []
+        self.progress = []
+
+    def fake_report(self, succeed_for=('p1',), raise_for=()):
+        def inner(config, ids, since, until, binary, request_dir=None, writeback=False):
+            pid = ids[0]
+            self.calls.append({'pid': pid, 'since': since, 'until': until,
+                               'request_dir': str(request_dir), 'writeback': writeback})
+            if pid in raise_for:
+                raise RuntimeError('模型超时')
+            return ([{'project_id': pid}] if pid in succeed_for else []), []
+        return inner
+
+    def test_successful_recovery_is_removed_from_backlog(self):
+        flow._remember_report_backlog(self.config, ['p1'], '2026-10-01', '2026-10-07', 'err')
+        with patch.object(flow, 'report_projects', self.fake_report({'p1'})):
+            recovered, still = flow.recover_reports(
+                self.config, flow.pending_reports(self.config), None, self.root / 'reports',
+                False, self.progress.append)
+        self.assertEqual(recovered, ['p1'])
+        self.assertEqual(still, [])
+        self.assertEqual(flow.pending_reports(self.config), {})
+
+    def test_failed_recovery_stays_in_backlog(self):
+        flow._remember_report_backlog(self.config, ['p1'], '2026-10-01', '2026-10-07', 'err')
+        with patch.object(flow, 'report_projects', self.fake_report(set())):
+            recovered, still = flow.recover_reports(
+                self.config, flow.pending_reports(self.config), None, self.root / 'reports',
+                False, self.progress.append)
+        self.assertEqual(recovered, [])
+        self.assertEqual(still, ['p1'])
+        self.assertEqual(set(flow.pending_reports(self.config)), {'p1'})
+
+    def test_exception_does_not_abort_other_projects(self):
+        flow._remember_report_backlog(self.config, ['bad', 'good'], '2026-10-01', '2026-10-07', 'e')
+        with patch.object(flow, 'report_projects', self.fake_report({'good'}, raise_for={'bad'})):
+            recovered, still = flow.recover_reports(
+                self.config, flow.pending_reports(self.config), None, self.root / 'reports',
+                False, self.progress.append)
+        self.assertEqual(recovered, ['good'])
+        self.assertEqual(still, ['bad'])
+        self.assertTrue(any('补生成仍失败' in m for m in self.progress), '失败要有进度提示')
+
+    def test_passes_stored_date_range_to_report(self):
+        """补生成必须用当初失败时的日期区间，不能用今天的。"""
+        flow._remember_report_backlog(self.config, ['p1'], '2026-10-01', '2026-10-07', 'err')
+        with patch.object(flow, 'report_projects', self.fake_report({'p1'})):
+            flow.recover_reports(self.config, flow.pending_reports(self.config), None,
+                                 self.root / 'reports', False, self.progress.append)
+        self.assertEqual(self.calls[0]['since'], '2026-10-01')
+        self.assertEqual(self.calls[0]['until'], '2026-10-07')
+
+    def test_respects_limit(self):
+        ids = [f'p{i}' for i in range(10)]
+        for pid in ids:
+            flow._remember_report_backlog(self.config, [pid], 's', 'u', 'e')
+        with patch.object(flow, 'report_projects', self.fake_report(set(ids))):
+            flow.recover_reports(self.config, flow.pending_reports(self.config), None,
+                                 self.root / 'reports', False, self.progress.append)
+        self.assertEqual(len(self.calls), 6, '每轮最多补 6 个')
 
 
 if __name__ == '__main__':

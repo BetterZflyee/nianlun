@@ -238,7 +238,10 @@ def run(config, project_ids, choice, folder):
             fresh=n.fetch(config,gw.table())
             if not fresh['complete']:raise n.Error('执行前读取不完整')
             current_project=next((p for p in fresh['projects'] if p['id']==pid),{})
-            if deadline(current_project,state)!=target or (current_project.get('goal') or current_project.get('description'))!=goal:
+            # 必须用 fresh 而不是循环外的 state：state 是旧快照，
+            # 前几轮写入的新里程碑它看不到，推导出的日期会和 target 不等，
+            # 于是每一轮都误报「项目目标或日期已变化」。
+            if deadline(current_project,fresh)!=target or (current_project.get('goal') or current_project.get('description'))!=goal:
                 raise n.Error('倒排期间项目目标或日期已变化，请重新生成')
             current=[m for m in fresh['milestones'] if pid in m.get('project_ids',[])]
             managed=[m for m in current if marker in m.get(evidence_field,'')]

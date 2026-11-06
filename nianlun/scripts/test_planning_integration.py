@@ -101,5 +101,43 @@ class AntiDuplicationTests(unittest.TestCase):
                             '换表格后应重新计算，不能复用旧表的节点')
 
 
+class StaleStateTests(unittest.TestCase):
+    """倒排写节点后，用旧快照比较会误报「项目已变化」。
+
+    planning.run 的循环里：
+
+        fresh = n.fetch(...)          # 每次写入前重新读
+        if deadline(current_project, state) != target:   # state 是循环外的旧快照
+            raise n.Error('倒排期间项目目标或日期已变化')
+
+    state 看不到本循环前几轮刚写入的里程碑，推导出的日期和 target 不等，
+    于是第二个节点就会被误判成「项目变了」，整个倒排中断。
+
+    这条路径很难在真实运行里观察——它只在「倒排自己写入了更晚的节点」时
+    才触发，而那时日志只会显示一句「日期已变化」，看不出是自己写的。
+    """
+
+    def test_stale_snapshot_changes_derived_deadline(self):
+        """先证明这个陷阱真实存在：旧快照推导出的日期会变。"""
+        state = {'projects': [{'id': 'p1', 'notes': ''}],
+                 'milestones': [{'id': 'm1', 'date': '2026-12-25', 'status': '未开始',
+                                 'project_ids': ['p1']}]}
+        old = planning.deadline(state['projects'][0], state)
+        state['milestones'].append({'id': 'new', 'date': '2027-01-30', 'status': '未开始',
+                                    'project_ids': ['p1']})
+        new = planning.deadline(state['projects'][0], state)
+        self.assertNotEqual(old, new,
+                            '如果相等，这个陷阱就不存在，测试可以删掉')
+
+    def test_run_uses_fresh_snapshot_for_comparison(self):
+        """run() 必须用 fresh 比较，不能用循环外的 state。"""
+        import inspect
+        src = inspect.getsource(planning.run)
+        self.assertIn('deadline(current_project,fresh)', src,
+                      '要用 fresh 快照比较，否则倒排写第二个节点就会误报「已变化」')
+        self.assertNotIn('deadline(current_project,state)', src,
+                         '不能再用循环外的旧 state 比较')
+
+
 if __name__ == '__main__':
     unittest.main()

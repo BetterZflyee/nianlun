@@ -86,9 +86,16 @@ class ReportBatchIsolationTests(unittest.TestCase):
         self.assertIn('len(project_ids)==1', after)
 
     def test_returns_results_and_failures(self):
+        """按函数真实边界取源码，不用固定长度截取。
+
+        原来写的是 `source[idx:idx+6000]`——函数一变长就被截断，报「找不到
+        return results,failures」，看着像功能坏了，其实只是截取范围不够。
+        """
         source = Path(flow.__file__).read_text(encoding='utf-8')
         idx = source.index('def report_projects(')
-        body = source[idx:idx + 6000]
+        rest = source[idx + 1:]
+        nxt = rest.find('\ndef ')
+        body = source[idx: idx + 1 + nxt] if nxt > 0 else rest
         self.assertIn('return results,failures', body)
 
     def test_stale_report_always_raises(self):

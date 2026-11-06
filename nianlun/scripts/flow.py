@@ -505,7 +505,18 @@ def report_projects(config,project_ids,since,until,binary,progress=lambda messag
         progress('正在检查报告页面生成环境')
         report_style.preflight(method)
         source_index=report_brief.sources(facts,history.get('pages',[]))
-        report_brief.compose(project,since,until,source_index,method,folder,binary,progress,cancelled)
+        # 成稿也要包在隔离里。原来 compose 在 try 之外，一个项目正文不合格
+        # （实测 2026-11-07 05:12「须以 Lead: 核心结论开头」）会直接抛出，
+        # 循环终止，**其余 6 个项目一份报告都没有**。
+        try:
+            report_brief.compose(project,since,until,source_index,method,folder,binary,progress,cancelled)
+        except Exception as exc:
+            if len(project_ids)==1:
+                raise
+            failures.append({'project_id':pid,'project_title':project['title'],
+                             'message':str(exc)[:400]})
+            progress('《'+project['title']+'》报告正文未通过检查，继续下一个：'+str(exc)[:100])
+            continue
         before_publish()
         if cancelled():
             from deepseek_report import Cancelled

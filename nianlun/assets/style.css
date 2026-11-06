@@ -7,3 +7,4 @@
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 
 .growth-panel{display:flex;justify-content:space-between;gap:24px;margin:24px 0;background:#f5f7ef}.growth-panel h2{margin:6px 0 12px}.growth-panel p{font-size:12px;line-height:1.8;color:#6d7568}.growth-health{min-width:220px}@media(max-width:700px){.growth-panel{display:block}.growth-health{margin-top:20px}}
+.fresh-tag{font-size:9px;color:#9a8a6a;background:#faf6ea;border:1px solid #e9e0cb;border-radius:4px;padding:1px 6px;margin-left:auto;margin-right:8px}

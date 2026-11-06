@@ -15,6 +15,14 @@ CITE = re.compile(r'\[([PRMSK]\d+)\]')
 STATES = {'done': ('已完成', '#2f6350'), 'active': ('推进中', '#486d88'),
           'blocked': ('受阻', '#bc4941'), 'planned': ('计划', '#897c54'), 'unknown': ('待核实', '#788579')}
 
+def _state_error(field, got):
+    """状态报错要列出合法值。
+
+    只说「不合法」，模型只能猜——实测有草稿把 state 写成「已完成」而不是
+    done，两轮修订都改不动，整份报告作废。
+    """
+    return ValueError(f'{field}只能是 ' + '/'.join(STATES) + f'，收到：{got!r}')
+
 
 def css_body(css):
     """Strip document-level <style> wrappers before embedding into a <style> element.
@@ -68,7 +76,9 @@ def validate(config, evidence=None):
         if evidence is not None and set(refs) - {x['key'] for x in evidence}:
             raise ValueError('图形包含不存在的依据编号')
     def item(row, allowed, state_optional=False, require_source=True):
-        if not isinstance(row, dict) or set(row) - allowed: raise ValueError('图形条目字段不合法')
+        if not isinstance(row, dict) or set(row) - allowed:
+            raise ValueError('状态图条目只允许 ' + '/'.join(sorted(allowed)) +
+                             '，多出：' + '、'.join(sorted(set(row) - allowed)))
         text(row.get('label'), 26, 'label'); text(row.get('detail'), 100, 'detail')
         if require_source: source(row.get('source'))
         elif row.get('source'): source(row.get('source'))
@@ -130,17 +140,18 @@ def validate(config, evidence=None):
             for value in (row.get('marks') or []):
                 if isinstance(value, str): row.setdefault('points', []).append({'date': value, 'label': '节点'})
             text(row.get('label'), 26, 'label'); source(row.get('source'))
-            if row.get('state') not in STATES: raise ValueError('甘特行状态不合法')
+            if row.get('state') not in STATES: raise _state_error('甘特行状态', row.get('state'))
             if row.get('note'): text(row['note'], 120, '行补充说明')
             segs = row.get('segments') or []
             if not isinstance(segs, list) or len(segs) > 6: raise ValueError('每行分段须为 0 至 6 段')
             for seg in segs:
                 if not isinstance(seg, dict) or set(seg) - {'from', 'to', 'label', 'state', 'kind', 'marks'}:
-                    raise ValueError('分段字段不合法')
+                    _extra = set(seg) - {'from', 'to', 'label', 'state', 'kind', 'marks'} if isinstance(seg, dict) else set()
+                    raise ValueError('分段只允许 from/to/label/state/kind/marks，多出：' + '、'.join(sorted(_extra)))
                 a, b = day(seg.get('from'), '分段起点'), day(seg.get('to'), '分段终点')
                 if b < a: raise ValueError('分段终点早于起点')
                 text(seg.get('label'), 12, '分段说明')
-                if seg.get('state') and seg['state'] not in STATES: raise ValueError('分段状态不合法')
+                if seg.get('state') and seg['state'] not in STATES: raise _state_error('分段状态', seg.get('state'))
                 if seg.get('kind') not in (None, 'actual', 'plan'): raise ValueError('分段类型只能为 actual 或 plan')
                 for mk in (seg.get('marks') or []):
                     day(mk, 'marks')
@@ -148,12 +159,13 @@ def validate(config, evidence=None):
             if not isinstance(pts, list) or len(pts) > 6: raise ValueError('每行节点须为 0 至 6 个')
             for pt in pts:
                 if not isinstance(pt, dict) or set(pt) - {'date', 'label', 'state'}:
-                    raise ValueError('节点字段不合法')
+                    _extra = set(pt) - {'date', 'label', 'state'} if isinstance(pt, dict) else set()
+                    raise ValueError('节点只允许 date/label/state，多出：' + '、'.join(sorted(_extra)))
                 # 14 字装不下一句正常的节点说明（如「WA密钥错误已修复、培训安排晚19:00」），
                 # 模型被迫压缩成电报体，两轮修订都过不了。渲染时标签会自动换行，
                 # 放宽到 24 字与其它 label 限制对齐。
                 day(pt.get('date'), '节点日期'); text(pt.get('label'), 24, '节点说明')
-                if pt.get('state') and pt['state'] not in STATES: raise ValueError('节点状态不合法')
+                if pt.get('state') and pt['state'] not in STATES: raise _state_error('节点状态', pt.get('state'))
     elif kind == 'graph':
         rows, links = config.get('nodes'), config.get('links')
         if not isinstance(rows, list) or not 2 <= len(rows) <= 9: raise ValueError('关系图须为 2 至 9 个节点')
@@ -161,7 +173,7 @@ def validate(config, evidence=None):
         ids = set(); layers = {}
         for row in rows:
             item(row, {'id', 'label', 'detail', 'state', 'layer', 'source'}, require_source=False)
-            if not isinstance(row.get('id'), str) or not re.fullmatch(r'[a-zA-Z][\w-]{0,20}', row['id']): raise ValueError('节点 id 不合法')
+            if not isinstance(row.get('id'), str) or not re.fullmatch(r'[a-zA-Z][\w-]{0,20}', row['id']): raise ValueError('节点 id 需为 1 至 24 位小写字母/数字/下划线，且不重复；收到：' + repr(row.get('id')))
             if row['id'] in ids: raise ValueError('节点 id 重复')
             ids.add(row['id'])
             layer = row.get('layer')

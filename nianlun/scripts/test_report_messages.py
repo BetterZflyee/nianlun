@@ -71,5 +71,38 @@ class RowMessageTests(unittest.TestCase):
         self.assertIn('bogus', str(ctx.exception))
 
 
+class StateMessageTests(unittest.TestCase):
+    """状态报错要列出合法值。
+
+    模型写「已完成」而不是 done 是常见错法。只说「状态不合法」，
+    模型不知道有哪些选项，只能瞎猜——实测两轮修订都改不动。
+    """
+
+    def test_row_state_lists_valid_values(self):
+        row = {'label': 'X', 'state': '已完成', 'stage': 's', 'points': [], 'source': '[R1]'}
+        with self.assertRaises(ValueError) as ctx:
+            render(gantt(rows=[row]))
+        msg = str(ctx.exception)
+        for v in ('done', 'active', 'blocked', 'planned', 'unknown'):
+            self.assertIn(v, msg, f'列出合法值时要包含 {v}')
+        self.assertIn('已完成', msg, '要回显模型写的值，便于对照')
+
+    def test_point_state_lists_valid_values(self):
+        row = {'label': 'X', 'state': 'done', 'stage': 's',
+               'points': [{'date': '2026-10-26', 'label': 'n', 'state': '完成'}], 'source': '[R1]'}
+        with self.assertRaises(ValueError) as ctx:
+            render(gantt(rows=[row]))
+        self.assertIn('done', str(ctx.exception))
+        self.assertIn('完成', str(ctx.exception))
+
+    def test_status_card_extra_field_named(self):
+        cfg = {'type': 'status', 'title': 'T', 'caption': 'c',
+               'items': [{'label': 'A', 'detail': 'd', 'state': 'active',
+                          'source': '[R1]', 'extra': 1}]}
+        with self.assertRaises(ValueError) as ctx:
+            render(cfg)
+        self.assertIn('extra', str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

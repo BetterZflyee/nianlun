@@ -313,6 +313,25 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                 post['memory_error']={'message':str(exc)[:500],'at':n.stamp(config)}
                 progress('项目记忆未更新，主体写入已保留：'+str(exc)[:120])
             n.save(post_path,post)
+        # 先补上一轮没生成的报告。报告失败时整轮仍是 complete，槽位不会再跑，
+        # 那些项目就永远没有报告了——实测最近 4 轮报告全失败，全靠人工补。
+        if switches.get('continuous_reports') and switches.get('reports') and 'backlog' not in post:
+            backlog=pending_reports(config)
+            if backlog:
+                progress('正在补生成上轮未完成的阶段汇报（'+str(len(backlog))+' 个）')
+                recovered=[];still=[]
+                for pid,meta in list(backlog.items())[:6]:
+                    try:
+                        items,_failed=report_projects(config,[pid],meta.get('since'),meta.get('until'),binary,
+                            request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+                        if items:recovered.append(pid)
+                        else:still.append(pid)
+                    except Exception as exc:
+                        still.append(pid)
+                        progress('补生成仍失败，保留待补：'+str(exc)[:100])
+                post['backlog']={'recovered':recovered,'pending':still}
+                _clear_report_backlog(config,recovered)
+                n.save(post_path,post)
         if switches.get('continuous_reports') and switches.get('reports') and active_project_ids and 'reports' not in post:
             progress('正在根据最新进度和里程碑自动生成阶段汇报')
             end=datetime.fromisoformat(bundle['until']).date()
@@ -325,6 +344,11 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             except Exception as exc:
                 post['reports_error']={'message':str(exc)[:500],'at':n.stamp(config)}
                 progress('阶段汇报未生成，主体写入已保留：'+str(exc)[:120])
+                # 记一份待补清单：报告失败时整轮仍是 complete，槽位不会再跑，
+                # 这些项目就永远没有报告了。实测最近 4 轮报告全失败，全是这类情况。
+                _remember_report_backlog(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),str(exc))
+            if post.get('reports'):
+                _clear_report_backlog(config,active_project_ids)
             n.save(post_path,post)
         progress('正在归档项目记忆、推送本人摘要并更新工作台')
         finished=g.finish(config,folder,decision_file)
@@ -334,6 +358,47 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             'pending':decision.get('pending',[])+post.get('planning',{}).get('pending',[]),'actions':len(receipt.get('results',{})),
             'postprocess':post,
             'coverage':bundle['coverage'],'run_directory':str(folder),'verified':True}
+
+
+def _report_backlog_path(config):
+    return g.root(config)/'report-backlog.json'
+
+
+def _remember_report_backlog(config, project_ids, since, until, message):
+    """把报告失败的项目记进待补清单，供下一轮生长开头补生成。"""
+    path=_report_backlog_path(config)
+    data=n.load(path) if path.exists() else {'items':{}}
+    items=data.setdefault('items',{})
+    for pid in project_ids or []:
+        items[pid]={'since':since,'until':until,'error':str(message)[:200],'at':n.stamp(config)}
+    try:
+        n.save(path,data)
+    except OSError:
+        pass
+
+
+def _clear_report_backlog(config, project_ids):
+    path=_report_backlog_path(config)
+    if not path.exists():return
+    try:
+        data=n.load(path)
+    except (OSError,ValueError):
+        return
+    items=data.get('items') or {}
+    changed=False
+    for pid in project_ids or []:
+        if items.pop(pid,None) is not None:changed=True
+    if changed:
+        try:n.save(path,data)
+        except OSError:pass
+
+
+def pending_reports(config):
+    """待补生成的报告清单（供调度器与工作台展示）。"""
+    path=_report_backlog_path(config)
+    if not path.exists():return {}
+    try:return (n.load(path).get('items') or {})
+    except (OSError,ValueError):return {}
 
 
 def report_projects(config,project_ids,since,until,binary,progress=lambda message:None,request_dir=None,legacy_handoff=None,report_skill=None,cancelled=lambda:False,before_publish=lambda:None,writeback=True):

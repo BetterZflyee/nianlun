@@ -404,33 +404,59 @@ def gantt_html(config, uid):
 
     # 日期刻度：按跨度自动选密度，避免拥挤
     tick = 1
-    # 每格至少要有 ~34px 才放得下「10/6」这类标签；按 390 视口（轨道约 340px）反推
-    for step in (1, 2, 3, 7, 14):
-        if total / step <= 12:
-            tick = step
-            break
-    else:
-        tick = max(1, total // 14)
+    # 每格至少要有 ~44px 才放得下「10/22」这类标签（含左右留白）。
+    # 原来只限制「标签总数 <= 12」，24 天跨度会选 tick=2 排出 12 个标签，
+    # 在 664px 轨道上间距只有 8.7%，而标签本身约 34px——彼此叠住。
+    # 改成按像素预算反推：轨道宽度 / 每格最小宽度 = 最多能放几格。
+    TRACK_MIN_PX = 664.0      # 桌面基准轨道宽（卡片内容宽减名字列）
+    SLOT_MIN_PX = 64.0        # 单个日期标签占位（文字 34px + 左右空隙 30px）
+    # 上限取 floor 而不是 round：12.7 要按 12 算，按 12 排出来仍会挤。
+    max_labels = max(3, int(TRACK_MIN_PX // SLOT_MIN_PX))   # 664/64 = 10
+    # 步长表要覆盖更大跨度：原来最大只到 30，60 天会退回 tick=7 排出 9 个标签，
+    # 间距只剩 8.5%。补 45 一档，让长跨度也能拉开。
+    # 直接按「每格占比」选步长，而不是套整数档位。
+    # 档位法会在边界上卡住：31 天时 31/3=10.3 超过上限 10，回退成 31//10=3，
+    # 结果间距仍是 3 天（9.7%）——和没改一样。
+    # 每个标签至少占 14% 轨道宽（约 93px，含两侧留白）。
+    # 月初标签会额外插入，实测 12% 时 60 天跨度仍会挤到 10.2%，抬到 14%。
+    min_slot_pct = 14.0
+    tick = 1
+    while tick < total and (tick / total * 100.0) < min_slot_pct:
+        tick += 1
 
     # 先排候选标签，再做避让：月初标签优先，与相邻标签过近时让掉间距不足的那个，
     # 否则 9/30 与 10/1 会挨在一起显示成「300/1」
     cand = []
+    month_positions = []
     cursor, idx = first, 0
     while cursor <= last:
-        month_start = (cursor.day == 1 or idx == 0)
-        if month_start:
+        if cursor.day == 1 or idx == 0:
             cand.append((cursor, f'{cursor.month}/{cursor.day}', 2, idx))
-        elif idx % tick == 0:
-            cand.append((cursor, str(cursor.day), 1, idx))
+            month_positions.append(pct(cursor))
         cursor += datetime.timedelta(days=1)
         idx += 1
-    # 贪心：按位置从左到右，与前一个保留标签距离 < 6% 时，优先级低的让位
+    # tick 标签要主动避开月初标签：月初是额外插入的，如果只靠后面的贪心避让，
+    # 会出现「11/1 @40%」和「4 @50%」只差 10% 的情况（贪心留下的是先到的那个）。
+    gap_pct = max(6.0, 34.0 / 664.0 * 100.0 * 1.45)
+    cursor, idx = first, 0
+    while cursor <= last:
+        pos = pct(cursor)
+        if idx % tick == 0 and cursor.day != 1 and idx != 0:
+            if all(abs(pos - mp) >= gap_pct for mp in month_positions):
+                cand.append((cursor, str(cursor.day), 1, idx))
+        cursor += datetime.timedelta(days=1)
+        idx += 1
+    # 贪心避让：按位置从左到右，间距不足时优先级低的让位。
+    # 阈值不能写死百分比——「10/22」约 30px 宽，在 664px 轨道上是 4.5%，
+    # 在 300px 窄轨道上是 10%。原来固定 6%，宽屏下该让的没让，标签就叠在一起了。
+    # 这里按最宽标签（月/日，约 5 字符 32px）折算成百分比，并以 3% 为地板。
+    # gap_pct 已在上面按月份避让需要算过，这里直接用。
     kept = []   # (pos, pri, idx, lbl)
     for d, lbl, pri, i in sorted(cand, key=lambda x: pct(x[0])):
         pos = pct(d)
         if kept:
             prev_pos, prev_pri = kept[-1][0], kept[-1][1]
-            if pos - prev_pos < 6.0:
+            if pos - prev_pos < gap_pct:
                 if pri <= prev_pri:
                     continue
                 kept.pop()          # 月初更重要，替换掉前一个刻度

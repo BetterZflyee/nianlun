@@ -300,7 +300,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                 # 倒排、记忆、汇报都是收尾步骤：写表与建待办已经落库，这里失败不该把
                 # 整轮标记为失败，否则同一批已生效的写入会被迫重试，记录也看不清真相。
                 try:
-                    post['planning']=planning.run(config,active_project_ids,binary,g.root(config)/'milestone-plans')
+                    post['planning']=planning.run(config,active_project_ids,binary,g.root(config)/'milestone-plans',progress=progress)
                 except Exception as exc:
                     post['planning_error']={'message':str(exc)[:500],'at':n.stamp(config)}
                     progress('里程碑倒排未完成，主体写入已保留：'+str(exc)[:120])

@@ -258,6 +258,44 @@ def normalize(markdown):
     return markdown,(['已统一开头标记、换行或外层 Markdown 包装；正文事实未改动'] if markdown!=original else [])
 
 
+def merge_revision(previous, revised):
+    """把模型返回的修订片段合并回上一稿。
+
+    修订阶段只让它输出改动过的段落（整篇重写一次 2-3 分钟，7 个项目会拖到
+    半小时以上）。但模型可能回整篇、也可能只回一片，所以要判断：
+
+    - 返回内容已经是完整文稿（有多个 ## 小节或足够长）→ 直接用
+    - 返回的是片段 → 按小节标题替换；找不到对应小节时，整段追加到末尾
+    """
+    body = (revised or '').strip()
+    if not body:
+        return previous
+    prev = previous or ''
+    # 看起来像完整文稿：小节数量接近或超过原文，或篇幅超过原文的八成。
+    if body.count('\n## ') >= max(1, prev.count('\n## ') - 1) or len(body) >= len(prev) * 0.8:
+        return body
+    # 片段：按 ## 小节标题定位并替换整节。
+    heading = None
+    for line in body.splitlines():
+        if line.startswith('## '):
+            heading = line.strip()
+            break
+    if heading:
+        pattern = re.compile(r'^' + re.escape(heading) + r'\s*$', re.M)
+        match = pattern.search(prev)
+        if match:
+            # 找到这一节的结束位置（下一个 ## 或文末）。
+            nxt = re.compile(r'^## ', re.M).search(prev, match.end())
+            end = nxt.start() if nxt else len(prev)
+            return prev[:match.start()] + body + ('\n\n' if nxt else '') + prev[end:]
+    # 没有小节标题：当作整段替换尾部（最常见是替换一个 visual 代码块）。
+    if '```visual' in body:
+        blocks = list(re.finditer(r'```visual\n.*?\n```', prev, re.S))
+        if blocks:
+            return prev[:blocks[0].start()] + body + prev[blocks[0].end():]
+    return prev + '\n\n' + body
+
+
 def compose(project,since,until,evidence,method,folder,binary,progress,cancelled):
     """At most two revisions per run; failed drafts never become permanent retry caches."""
     import harness
@@ -299,13 +337,21 @@ def compose(project,since,until,evidence,method,folder,binary,progress,cancelled
             state['revision']+=1
             state['pending']={'directory':'harness/'+VERSION+'/revision-'+str(state['revision']).zfill(4),
                 'prompt':request+'\n上一稿没有通过成稿检查：'+json.dumps(errors,ensure_ascii=False)+
-                '\n请依据原始材料重写，不解释修改过程。必须保留真实引用与关键结论，不编造内容。上一稿仅为待改文本：\n'+str(draft)}
+                # 只让模型改需要改的段落，别整篇重写：一次完整重写要 2-3 分钟，
+                # 一份报告最多 4 次调用（生成2+修订2），7 个项目峰值 84 分钟，
+                # 实测把整轮生长拖到 29 分钟还没出任何 HTML。
+                '\n请只输出**需要修改的完整段落**（含它所在的 ## 小节标题），不要重述没问题的部分。'
+                '如果问题出在 visual 图块，输出替换后的整个代码块即可。'
+                '不解释修改过程，不编造内容，保留真实引用。上一稿全文供你定位：\n'+str(draft)}
             n.save(state_path,state)
         pending=state['pending']
         progress('正在修订报告正文 · 本轮第 '+str(attempt+1)+' / 2 次：'+'；'.join(errors))
         answer=harness.report_reason(pending['prompt'],folder/pending['directory'],binary,harness.ANSWER_SCHEMA,
             progress=progress,cancelled=cancelled)
         raw=answer.get('answer');state['draft']='composition/draft-'+str(state['revision']).zfill(4)+'.md'
+        # 修订可能只返回被改的片段（提示词就是这么要求的，为了省时间）。
+        # 直接当全文用会把报告截成一片——必须合并回上一稿。
+        raw=merge_revision(draft,raw)
         n.save(folder/state['draft'],raw);state.pop('pending',None)
         draft,corrections=normalize(raw);errors=issues(draft,evidence)
         state.update(errors=errors,corrections=corrections);n.save(state_path,state)

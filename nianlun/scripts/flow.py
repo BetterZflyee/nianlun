@@ -113,6 +113,12 @@ def _build_prompt(base, evidence, memories):
 
 
 def prompt_evidence(bundle):
+    # 必须深拷贝：后续 trim_evidence 会原地改写 tables/sources 来压缩体积，
+    # 浅拷贝时 sources 等列表仍与原 bundle 共享引用，裁剪会把原证据一起改掉，
+    # 于是 plan 里记下的 evidence_hash 变成了被裁剪后的哈希；apply 再从磁盘
+    # 加载干净证据重新校验，两者必然不等，报「计划内容变更，请重新生成」。
+    import copy as _copy
+    bundle=_copy.deepcopy(bundle)
     result={k:v for k,v in bundle.items() if k not in ('tables','todos')}
     result['tables']={role:[{k:v for k,v in row.items() if k!='raw_cells'} for row in bundle['tables'][role]] for role in n.ROLES}
     result['todos']=[{k:todo.get(k) for k in ('taskId','subject','isDone','dueTime','priority')} for todo in bundle['todos']]

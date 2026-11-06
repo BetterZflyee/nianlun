@@ -21,6 +21,29 @@
           edgeSymbol:['none','arrow'],edgeSymbolSize:7,edgeLabel:{show:true,formatter:p=>p.data.name,fontSize:11,color:ink},
           lineStyle:{width:2,opacity:.65,color:'#6f947e',curveness:.05}}]};
     }
+    if(c.type==='gantt') {
+      // 甘特的字段是 rows/points/start/end，跟 bar/line 的 categories/series 完全不同。
+      // 原来它落到下面的通用分支去读 c.categories（undefined），ECharts 内部抛
+      // 「Cannot read properties of undefined (reading 'get')」，catch 把按钮改成
+      // 「使用静态图与数据」并 disabled——点一次，交互图表功能就永久废了。
+      const rows=(c.rows||[]);
+      const names=rows.map(r=>r.label);
+      const startMs=c.start?new Date(c.start).getTime():Date.now();
+      const endMs=c.end?new Date(c.end).getTime():startMs+30*864e5;
+      const dayN=Math.max(1,Math.round((endMs-startMs)/864e5));
+      const cats=Array.from({length:Math.min(dayN+1,120)},(_,i)=>{const d=new Date(startMs+i*864e5);return (d.getMonth()+1)+'-'+d.getDate();});
+      const pts=[];
+      rows.forEach((r,yi)=>{(r.points||[]).forEach(p=>{
+        const d=new Date(p.date); const xi=cats.indexOf((d.getMonth()+1)+'-'+d.getDate());
+        if(xi>=0) pts.push({value:[xi,yi],name:p.label||''});
+      });});
+      return {...base,grid:{left:16,right:24,top:42,bottom:60,containLabel:true},
+        tooltip:{...base.tooltip,trigger:'axis'},
+        xAxis:{type:'category',data:cats,axisLabel:{color:ink}},
+        yAxis:{type:'category',data:names,axisLabel:{color:ink,formatter:v=>wrap(v,10)}},
+        series:[{type:'scatter',name:'节点',data:pts,symbolSize:9,itemStyle:{color:'#2f6350'},
+          label:{show:true,position:'right',fontSize:11,color:ink,formatter:p=>p.data.name}}]};
+    }
     return {...base,legend:{bottom:0,textStyle:{color:ink}},grid:{left:16,right:24,top:42,bottom:60,containLabel:true},
       tooltip:{...base.tooltip,trigger:'axis'},xAxis:{type:'category',data:c.categories,axisLabel:{color:ink,formatter:s=>wrap(s,8)}},
       yAxis:{type:'value',name:c.unit,axisLabel:{color:ink},splitLine:{lineStyle:{color:'#9bb09d33'}}},

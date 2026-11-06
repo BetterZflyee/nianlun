@@ -361,11 +361,16 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                 'pending':decision.get('pending',[])+post.get('planning',{}).get('pending',[]),'actions':len(receipt.get('results',{})),
                 'postprocess':post,
                 'coverage':bundle['coverage'],'run_directory':str(folder),'verified':True}
-    except Exception:
+    except BaseException:
         # grow 在 finish 之前就可能失败（采集、记忆、倒排、报告、工作台任一环节）。
         # active.json 是「有未完成任务」的标记，collect 见到它就拒绝启动新一轮；
         # 原来只有 finish 和外层 scheduler 会清，中间步骤抛错时标记就永久残留，
         # 之后每小时 tick 都以为有任务在跑，系统静默空转。
+        #
+        # 用 BaseException 而不是 Exception：Ctrl-C（KeyboardInterrupt）和
+        # host.py 把 SIGTERM 转成的 KeyboardInterrupt 都不是 Exception 的子类，
+        # 抓不到就会带着 active.json 一起退出。实测 2026-11-07 05:41 手动结束
+        # 进程后标记残留，下一轮 tick 直接卡住。
         (g.root(config)/'active.json').unlink(missing_ok=True)
         raise
 

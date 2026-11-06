@@ -137,4 +137,22 @@ def main():
         print(json.dumps({'status':'failed','error':str(exc)},ensure_ascii=False));return 1
 
 
-if __name__=='__main__':sys.exit(main())
+def _terminate(signum,frame):
+    """把 SIGTERM / SIGHUP 转成可捕获的异常，让 finally 有机会清理。
+
+    active.json 是「有未完成任务」的标记，collect 见到它就拒绝启动新一轮。
+    它由 growth.finish() 的 try/finally 清理——但**默认的 SIGTERM 直接杀进程，
+    finally 不执行**。实测 2026-11-07 05:41 手动结束后 active.json 残留，
+    下一轮 tick 就会卡在「已有年轮操作正在运行」。
+
+    server.py 早有这个模式，host.py 一直没有。
+    """
+    raise KeyboardInterrupt
+
+
+if __name__=='__main__':
+    import signal as _signal
+    for _sig in (_signal.SIGTERM,_signal.SIGHUP):
+        try:_signal.signal(_sig,_terminate)
+        except (OSError,ValueError):pass
+    sys.exit(main())

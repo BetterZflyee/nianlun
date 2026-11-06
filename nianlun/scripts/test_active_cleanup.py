@@ -90,8 +90,10 @@ class GrowFailureCleanupTests(unittest.TestCase):
         import flow
         src = inspect.getsource(flow.grow)
         self.assertIn('try:', src)
-        self.assertIn('except Exception:', src)
-        after = src.split('except Exception:')[1]
+        # SIGTERM 转出来的 KeyboardInterrupt 不是 Exception 子类，
+        # 所以必须收在 BaseException 上（见 SignalCleanupTests）。
+        self.assertIn('except BaseException:', src)
+        after = src.split('except BaseException:')[1]
         self.assertIn("active.json", after, '失败路径要清理标记')
         self.assertIn('raise', after, '清理后要继续抛，不能吞掉错误')
 
@@ -124,9 +126,46 @@ class GrowFailureCleanupTests(unittest.TestCase):
         src = inspect.getsource(flow.grow)
         lines = src.split('\n')
         ret = [i for i, l in enumerate(lines) if 'return {' in l]
-        exc = [i for i, l in enumerate(lines) if 'except Exception:' in l]
+        exc = [i for i, l in enumerate(lines) if 'except BaseException:' in l]
         self.assertTrue(ret and exc)
         self.assertLess(ret[-1], exc[0], 'return 必须在 try 内、except 之前')
+
+
+class SignalCleanupTests(unittest.TestCase):
+    """SIGTERM 也必须触发 active.json 清理。
+
+    实测（2026-11-07 05:41）：手动 kill 掉卡住的生长进程后，
+    `~/.local/state/nianlun/active.json` **残留**，下一轮 tick 会直接卡在
+    「已有年轮操作正在运行」。
+
+    两道缺口：
+    1. `host.py` 没有 SIGTERM handler——默认行为是直接杀进程，`finally` 不执行
+    2. `flow.grow` 写的是 `except Exception`——而 handler 转出来的
+       `KeyboardInterrupt` 不是 Exception 的子类，照样抓不到
+    """
+
+    def test_host_registers_sigterm_handler(self):
+        import inspect
+        import host
+        src = inspect.getsource(host)
+        self.assertIn('signal.SIGTERM', src, 'host.py 要注册 SIGTERM 处理')
+        self.assertIn('SIGHUP', src, '挂断（关终端）也要清理')
+
+    def test_grow_catches_base_exception(self):
+        import inspect
+        import flow
+        src = inspect.getsource(flow.grow)
+        self.assertIn('except BaseException', src,
+                      'KeyboardInterrupt 不是 Exception，必须用 BaseException')
+
+    def test_grow_still_reraises(self):
+        """清理之后必须继续抛，不能把中断吞掉。"""
+        import inspect
+        import flow
+        src = inspect.getsource(flow.grow)
+        idx = src.find('except BaseException')
+        after = src[idx: idx + 700]
+        self.assertIn('raise', after)
 
 
 if __name__ == '__main__':

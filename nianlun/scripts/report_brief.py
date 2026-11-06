@@ -149,15 +149,37 @@ def issues(markdown,evidence):
     # 甘特必须覆盖 evidence 里在管的全部场地：模型很容易只挑「有近期记录的」，
     # 把零记录的新场地（如杭州城南571WF）整个漏掉；也可能编出材料里没有的场地
     site_titles = [x.get('title','') for x in evidence if x.get('kind')=='sites']
+    def flat(value):
+        # 场地名在表里用半角括号、模型常写全角括号，还爱加「（靠离卡）」这类后缀。
+        # 不做归一化就会把已经画全的甘特判成漏项，白改两轮还是判不过。
+        value = str(value or '')
+        for old, newch in (('（','('),('）',')'),('【','['),('】',']')):
+            value = value.replace(old, newch)
+        return re.sub(r'\s+', '', value)
     for block, cfg in blocks:
         if cfg.get('type') != 'gantt':
             continue
+        rows_flat = flat(' '.join(r.get('label','') for r in cfg.get('rows') or []))
         rows_txt = ' '.join(r.get('label','') for r in cfg.get('rows') or [])
-        missing = [t for t in site_titles if t and t not in rows_txt
-                   and t.replace('转运中心','').replace('转运枢纽','').replace('中心','') not in rows_txt]
+        def covered(title):
+            if not title: return True
+            token = flat(title)
+            if token and token in rows_flat: return True
+            # 场地表里的名字常带「（靠离卡）」「（自动解封）」这类尾部补充，
+            # 模型画甘特时往往不写；先剥尾部括号再比，比硬要求逐字一致合理。
+            base = re.sub(r'\([^()]*\)$', '', token)
+            if base and base in rows_flat: return True
+            core = base or token
+            for suffix in ('转运中心','转运枢纽','陆运转笼中心','中心'):
+                core = core.replace(suffix, '')
+            return bool(core) and core in rows_flat
+        missing = [t for t in site_titles if not covered(t)]
         if missing:
+            # 只说「漏了哪几个」不够：模型可能分不清哪些是该覆盖的全集，改一轮又漏别处。
+            # 把完整清单直接给它，并明确要求逐一成行。
             errors.append('甘特漏了在管场地：' + '、'.join(missing[:6]) +
-                          '。每个场地必须单独占一行（同城不同场地也不能合并）')
+                          '。本项目在管场地共 ' + str(len(site_titles)) + ' 个，甘特必须每行一个全部列出：'
+                          + '、'.join(site_titles) + '（同城不同场地也不能合并）')
     # 甘特的分段必须带 marks（该区间内真正有记录的日期），否则读者无法判断长条中间是否空档
     for block, cfg in blocks:
         if cfg.get('type') != 'gantt':

@@ -166,7 +166,10 @@ export function createRelationView({
       chart = null;
       scroll.hidden = true;
       directory.open = true;
+      // 捕获到 error 却不用它，等于把故障扔了。降到列表是合理的，但要留痕。
+      console.warn("[nianlun] 关系图渲染失败，已降级为节点列表：", error);
       note.textContent = "图表暂未能显示，可在节点列表中继续查看详情。";
+      note.title = String((error && error.message) || error);
       note.hidden = false;
     }
   }

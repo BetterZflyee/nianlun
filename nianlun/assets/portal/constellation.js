@@ -328,10 +328,13 @@ export function mount(host, options) {
         worker.terminate();
         worker = null;
       };
-      worker.onerror = () => {
+      worker.onerror = (ev) => {
         worker?.terminate();
         worker = null;
+        // 布局 worker 挂掉会静默退到轻量布局，不记录就永远不知道开发生成器出了问题。
+        console.warn("[nianlun] 星系布局 worker 出错，已降级：", ev?.message || ev);
         status.textContent = "使用轻量星系布局";
+        status.title = String(ev?.message || "布局计算失败");
       };
       worker.postMessage({
         nodes: nodes.map(({ id, group }) => ({ id, group })),

@@ -97,7 +97,10 @@ function insightPanel({
     } catch (e) {
       if (dead) return;
       fallback = true;
+      // 降级本身是对的，但错误不能就这么消失——否则「图表不显示」永远查不出原因。
+      console.warn("[nianlun] 三维视图加载失败，已降级为列表：", e);
       caption.textContent = "三维视图暂不可用，下方列表仍可操作";
+      caption.title = String((e && e.message) || e);
       drawFallback();
     }
   });

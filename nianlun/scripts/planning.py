@@ -321,8 +321,16 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
             owned=n.load(ownership) if ownership.exists() else None
             if row and node['key'] not in receipt['steps'] and (not owned or row['raw_cells']!=owned['cells']):
                 kept.append(row['title']+'（人工修改已保留）');continue
-            if row and node['key'] not in receipt['steps'] and (not before or row['raw_cells']!=before['raw_cells']):
-                raise n.Error('里程碑在倒排期间被修改，未覆盖人工修改')
+            # before 来自 plan.json 里裁剪过的 existing——它只留了 id/title/date/status/
+            # notes/description 六个字段（为了压 prompt），**没有 raw_cells**。
+            # 直接取 raw_cells 会 KeyError（实测 2026-11-07 07:26 那轮就是这么挂的）。
+            # 这里改为按保留字段逐个比对：只要这些字段没变，就认为没被人工改过。
+            if row and node['key'] not in receipt['steps'] and before is not None:
+                # n.equivalent 等价时返回 True、不等返回 None——用 `is not True` 明确写出来，
+                # 避免依赖 `not None == True` 这种隐式行为。
+                changed_fields = [k for k in before if k != 'id' and n.equivalent(row.get(k), before[k]) is not True]
+                if changed_fields:
+                    raise n.Error('里程碑在倒排期间被修改，未覆盖人工修改：'+'、'.join(changed_fields))
             values={'title':node['title'],'date':node['date'],'project_ids':[pid]}
             if not row:values['status']=initial
             content=node['description']+'\nAI 倒排计划，尚非完成事实。\n目标日期：'+target.isoformat()

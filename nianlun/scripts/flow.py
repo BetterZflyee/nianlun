@@ -278,7 +278,14 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
         if switches.get('continuous_reports') and switches.get('reports') and active_project_ids and 'reports' not in post:
             progress('正在根据最新进度和里程碑自动生成阶段汇报')
             end=datetime.fromisoformat(bundle['until']).date()
-            post['reports']=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+            # 汇报是收尾步骤，不是主流程：前面的写表、建待办、倒排里程碑都已经落库。
+            # 这里因模型超时或网络抖动失败时，不该把整轮标记为失败——那会迫使同一批
+            # 已生效的写入重试，而且执行记录也看不出「主体成功、汇报未出」。
+            try:
+                post['reports']=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+            except Exception as exc:
+                post['reports_error']={'message':str(exc)[:500],'at':n.stamp(config)}
+                progress('阶段汇报未生成，主体写入已保留：'+str(exc)[:120])
             n.save(post_path,post)
         progress('正在归档项目记忆、推送本人摘要并更新工作台')
         finished=g.finish(config,folder,decision_file)

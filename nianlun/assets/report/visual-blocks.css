@@ -561,3 +561,19 @@
 /* 节点标签只留日期后可以贴紧节点，不再需要限宽 */
 .gt-pt-lbl{padding:0 5px;margin-left:12px}
 .gt-pt-lbl--left{margin-left:0;margin-right:12px}
+
+/* 窄屏甘特：名字列固定 236px，手机屏放不下，「791XE 南昌（华东）陆运转笼中心（靠离卡）」
+   这类长场地名会被挤成三行还溢出。窄屏收窄名字列、缩小字号、单行省略。 */
+@media(max-width:760px){
+  /* 窄屏甘特名字列：三种方案实测对比——
+     ①单行省略 → 「79...」「02...」信息全丢，最差；
+     ②完全放开换行 → 「791XE 南昌（华东）陆运转笼中心」被拆成一行一个字，像竖排，难读；
+     ③两行截断（本方案）→ 能看出「791XE 南昌（华…」是哪个场地，行高也够。
+     选③。 */
+  .rv-gantt{--name-col:118px;--g-row:56px;--g-bar:15px}
+  .rv-gantt .gt-name{font-size:10px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+}
+@media(max-width:520px){
+  .rv-gantt{--name-col:106px;--g-row:58px}
+  .rv-gantt .gt-name{font-size:9.5px}
+}

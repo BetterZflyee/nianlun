@@ -281,10 +281,15 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
         initial=next((s for s in ('计划中','待启动','待核') if s in options),None)
         if not initial:raise n.Error('里程碑状态缺少计划中、待启动或待核选项')
         kept=[];changed=[]
+        # 表快照只在「上一轮写完之后」重取一次，不要每个节点都拉全表。
+        # 实测一次 aitable record query 要 10 秒以上，8 个节点 × 7 个项目
+        # 就是 9 分钟白等——而循环里每个节点都重拉一次，值只在于「看见自己
+        # 上一轮写进去的行」。写操作本身（table_step）会自己重读校验，
+        # 所以这里用一个「写后失效」的缓存就够。
+        fresh=n.fetch(config,gw.table())
+        if not fresh['complete']:raise n.Error('执行前读取不完整')
         for node in plan['nodes']:
             marker=prefix+node['key']+']'
-            fresh=n.fetch(config,gw.table())
-            if not fresh['complete']:raise n.Error('执行前读取不完整')
             current_project=next((p for p in fresh['projects'] if p['id']==pid),{})
             # 必须用 fresh 而不是循环外的 state：state 是旧快照，
             # 前几轮写入的新里程碑它看不到，推导出的日期会和 target 不等，
@@ -316,7 +321,9 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
             if row and node['key'] not in receipt['steps'] and all(n.equivalent(row['raw_cells'].get(k),v) for k,v in cells.items()):
                 kept.append(row['title']);continue
             result=work.table_step(config,gw,'milestones',cells,row['id'] if row else None,node['key'],receipt_path,receipt)
-            verified=next(m for m in n.fetch(config,gw.table())['milestones'] if m['id']==result['record_id'])
+            fresh=n.fetch(config,gw.table())
+            if not fresh['complete']:raise n.Error('写入后读取不完整')
+            verified=next(m for m in fresh['milestones'] if m['id']==result['record_id'])
             n.save(ownership,{'cells':verified['raw_cells'],'record_id':verified['id']})
             changed.append(result['record_id'])
         result={'project_id':pid,'changed':changed,'preserved':kept,'verified':True,'rationale':plan['rationale']}

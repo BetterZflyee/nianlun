@@ -139,5 +139,32 @@ class RecoverReportsTests(unittest.TestCase):
         self.assertEqual(len(self.calls), 6, '每轮最多补 6 个')
 
 
+class PartialFailureTests(unittest.TestCase):
+    """单个项目失败不抛异常（report_projects 内部隔离），必须自己记进待补。
+
+    否则那些项目被静默丢掉——整轮仍 complete，槽位不再跑，明早也不会补。
+    """
+
+    def test_failed_projects_are_recorded(self):
+        source = Path(flow.__file__).read_text(encoding='utf-8')
+        idx = source.index('单个项目失败不会抛异常')
+        block = source[idx:idx + 900]
+        self.assertIn('failed_ids=', block)
+        self.assertIn('_remember_report_backlog(config,failed_ids', block)
+
+    def test_only_successful_projects_are_cleared(self):
+        """只有真出了报告的项目才从待补里移除，不能因为部分成功就全清。"""
+        source = Path(flow.__file__).read_text(encoding='utf-8')
+        idx = source.index('单个项目失败不会抛异常')
+        block = source[idx:idx + 900]
+        self.assertIn('done_ids=', block)
+        self.assertIn('_clear_report_backlog(config,done_ids)', block)
+
+    def test_clear_uses_reported_ids_not_all_active(self):
+        """清理必须用远处返回的 project_id，不能用整个活跃列表。"""
+        source = Path(flow.__file__).read_text(encoding='utf-8')
+        self.assertNotIn('_clear_report_backlog(config,active_project_ids)', source)
+
+
 if __name__ == '__main__':
     unittest.main()

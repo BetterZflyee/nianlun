@@ -333,17 +333,24 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
             # 汇报是收尾步骤，不是主流程：前面的写表、建待办、倒排里程碑都已经落库。
             # 这里因模型超时或网络抖动失败时，不该把整轮标记为失败——那会迫使同一批
             # 已生效的写入重试，而且执行记录也看不出「主体成功、汇报未出」。
+            window_since=(end-timedelta(days=6)).isoformat()
+            window_until=end.isoformat()
             try:
-                post['reports'],reports_failed=report_projects(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
+                post['reports'],reports_failed=report_projects(config,active_project_ids,window_since,window_until,binary,request_dir=folder/'reports',writeback=switches.get('auto_publish',False))
                 if reports_failed:post['reports_failed']=reports_failed
+                # 单个项目失败不会抛异常（report_projects 内部已经隔离），所以这里
+                # 必须自己把失败项目记进待补——否则它们被静默丢掉，明早也不会补。
+                failed_ids=[x.get('project_id') for x in (reports_failed or []) if x.get('project_id')]
+                if failed_ids:
+                    _remember_report_backlog(config,failed_ids,window_since,window_until,
+                                             '；'.join(str(x.get('message'))[:80] for x in reports_failed[:3]))
+                done_ids=[x.get('project_id') for x in (post.get('reports') or []) if x.get('project_id')]
+                if done_ids:_clear_report_backlog(config,done_ids)
             except Exception as exc:
                 post['reports_error']={'message':str(exc)[:500],'at':n.stamp(config)}
                 progress('阶段汇报未生成，主体写入已保留：'+str(exc)[:120])
-                # 记一份待补清单：报告失败时整轮仍是 complete，槽位不会再跑，
-                # 这些项目就永远没有报告了。实测最近 4 轮报告全失败，全是这类情况。
-                _remember_report_backlog(config,active_project_ids,(end-timedelta(days=6)).isoformat(),end.isoformat(),str(exc))
-            if post.get('reports'):
-                _clear_report_backlog(config,active_project_ids)
+                # 整批失败（读表不完整、身份变化等）：这一批全部记进待补。
+                _remember_report_backlog(config,active_project_ids,window_since,window_until,str(exc))
             n.save(post_path,post)
         progress('正在归档项目记忆、推送本人摘要并更新工作台')
         finished=g.finish(config,folder,decision_file)

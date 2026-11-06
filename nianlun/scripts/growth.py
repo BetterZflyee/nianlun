@@ -741,6 +741,17 @@ def execution_text(counts):
 
 
 def finish(config,folder,decision_file):
+    # active.json 是「有未完成任务」的标记，collect 看到它就拒绝启动新一轮。
+    # 原来只在函数正常走完时删除；而模型返回空、组织身份变化、动作未验证
+    # 都会在中途抛错，标记就永久残留，之后每轮都卡在「已有未完成的生长任务」。
+    # 实测 2026-11-07 03:08 那轮就是这么卡住的。
+    try:
+        return _finish(config,folder,decision_file)
+    finally:
+        (root(config)/'active.json').unlink(missing_ok=True)
+
+
+def _finish(config,folder,decision_file):
     folder=Path(folder).expanduser().resolve();b=n.load(folder/'evidence.json');d=n.load(decision_file)
     validate(config,b,d)
     receipt=n.load(folder/'receipt.json') if (folder/'receipt.json').exists() else {}
@@ -823,7 +834,6 @@ def finish(config,folder,decision_file):
     status['notify']=notify
     status.update(status='partial' if partial else 'complete',finished_at=n.stamp(config));n.save(status_path,status)
     n.build_home(n.fetch(config,gw.table()),config['growth']['home_output'],config)
-    (root(config)/'active.json').unlink(missing_ok=True)
     return status
 
 

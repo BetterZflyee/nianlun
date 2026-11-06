@@ -549,10 +549,30 @@ def build_home(state, output, config=None):
         import run_control
         from setup import default_home
         snapshot_status=run_control.status(config,default_home(),None)
+        # 收尾各步的失败要能在页面上看见：报告生成失败时整轮仍是 complete，
+        # 只翻磁盘才发现，用户会以为报告已经出了。
+        reports_state = {'done': 0, 'failed': 0, 'error': ''}
+        if receipts:
+            post_path = receipts[0].parent / 'postprocess.json'
+            if post_path.exists():
+                try:
+                    post = load(post_path)
+                except (OSError, ValueError):
+                    post = {}
+                reports_state['done'] = len(post.get('reports') or [])
+                failed_items = post.get('reports_failed') or []
+                reports_state['failed'] = len(failed_items)
+                if reports_state['done'] or reports_state['failed']:
+                    reports_state['error'] = '；'.join(
+                        str(x.get('message') or '')[:120] for x in failed_items[:2])
+                for key in ('reports_error', 'planning_error', 'memory_error'):
+                    if post.get(key):
+                        reports_state['error'] = reports_state['error'] or str(post[key].get('message') or '')[:200]
         state['growth'] = {'schedule': config['growth'].get('schedule', {}),
                            'status': latest.get('status', '尚未运行'), 'last_run': latest.get('finished_at', ''),
                            'memory_verified': latest.get('brain', {}).get('verified', False),
                            'digest_status': latest.get('digest', {}).get('status', '尚未推送'),
+                           'reports': reports_state,
                            'switches': config['growth'].get('switches', {}),
                            'scheduler': snapshot_status}
     template = (SKILL / 'assets/home.html').read_text(encoding='utf-8')

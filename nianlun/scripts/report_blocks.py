@@ -844,7 +844,14 @@ def enhance(html):
     else:
         html=html.replace('</head>',style+'</head>',1)
     html=widen_wide_panels(html)
-    if not re.search(r'data-recap-visual="(?:graph|bar|line)"',html):return html
+    # 白名单要和 enhance 里真正能渲染的类型一致。原来只有 graph/bar/line，
+    # 甘特图因此永远不注入交互运行时——页面上连「交互图表」按钮都不会出现，
+    # 我之前在 visual-blocks.js 里补的 gantt 分支等于白写。
+    # 白名单只放真正需要交互运行时的类型：
+    #   graph/bar/line/gantt 会输出 rv-spec + rv-interactive
+    #   status 和 matrix 走各自的独立分支，不输出这两个容器，
+    #   放进白名单只会白白多注入 650KB 运行时。
+    if not re.search(r'data-recap-visual="(?:graph|bar|line|gantt)"',html):return html
     script=(ASSETS/'charts.bundle.js').read_text(encoding='utf-8')+'\n'+(ASSETS/'visual-blocks.js').read_text(encoding='utf-8')
     runtime='<script id="rv-visual-runtime">'+script+'</script>'
     # 幂等：再次增强同一份已渲染页面时先移除上一轮注入的运行时，否则脚本会层层叠加。

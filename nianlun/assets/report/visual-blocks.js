@@ -44,6 +44,19 @@
         series:[{type:'scatter',name:'节点',data:pts,symbolSize:9,itemStyle:{color:'#2f6350'},
           label:{show:true,position:'right',fontSize:11,color:ink,formatter:p=>p.data.name}}]};
     }
+    if(c.type==='matrix') {
+      // 矩阵的字段是 stages/items，也没有 categories/series。不单独处理就会
+      // 落到下面的柱状/折线兜底去读 c.series（undefined）而抛异常。
+      const stages=c.stages||[];
+      const items=c.items||[];
+      const counts=stages.map(st=>items.filter(i=>i.stage===st).length);
+      return {...base,legend:{bottom:0,textStyle:{color:ink}},grid:{left:16,right:24,top:42,bottom:60,containLabel:true},
+        tooltip:{...base.tooltip,trigger:'axis'},
+        xAxis:{type:'category',data:stages,axisLabel:{color:ink,formatter:v=>wrap(v,8)}},
+        yAxis:{type:'value',name:'事项数',axisLabel:{color:ink},splitLine:{lineStyle:{color:'#9bb09d33'}}},
+        series:[{type:'bar',data:counts,barMaxWidth:44,itemStyle:{color:'#2f6350'},
+          label:{show:true,position:'top',color:ink}}]};
+    }
     return {...base,legend:{bottom:0,textStyle:{color:ink}},grid:{left:16,right:24,top:42,bottom:60,containLabel:true},
       tooltip:{...base.tooltip,trigger:'axis'},xAxis:{type:'category',data:c.categories,axisLabel:{color:ink,formatter:s=>wrap(s,8)}},
       yAxis:{type:'value',name:c.unit,axisLabel:{color:ink},splitLine:{lineStyle:{color:'#9bb09d33'}}},

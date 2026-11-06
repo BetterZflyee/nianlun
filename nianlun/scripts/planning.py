@@ -25,13 +25,30 @@ def evidence(state, project_id):
         if row['id']==project_id or project_id in row.get('project_ids',[])] for role in n.ROLES}
 
 
-def deadline(project):
+def deadline(project,state=None):
+    """项目目标日期。
+
+    来源优先级：deadline 字段 → 备注里的「年轮目标日期：YYYY-MM-DD」→
+    该项目的未完成里程碑里最晚的那个日期。
+    最后这条是兜底：实表里 7 个活跃项目的 goal 和 notes 全空，但每个项目都有
+    里程碑且带日期（最晚的 2026-12-18 到 2027-01-30）。只因为没人手工写那个
+    隐式备注就让倒排能力一直闲着，不合理。
+    """
     value=project.get('deadline')
     if not value:
         match=re.search(r'年轮目标日期[：:]\s*(\d{4}-\d{2}-\d{2})',project.get('notes',''))
         value=match[1] if match else None
     try:return date.fromisoformat(value)
-    except (TypeError,ValueError):return None
+    except (TypeError,ValueError):pass
+    if state:
+        dates=[]
+        for m in state.get('milestones') or []:
+            if project['id'] not in m.get('project_ids',[]):continue
+            if m.get('status') in ('已达成','已完成','已取消'):continue
+            try:dates.append(date.fromisoformat(m.get('date') or ''))
+            except (TypeError,ValueError):continue
+        if dates:return max(dates)
+    return None
 
 
 def validate(answer, target):
@@ -68,7 +85,7 @@ def run(config, project_ids, choice, folder):
     for pid in project_ids:
         project=next((p for p in state['projects'] if p['id']==pid),None)
         if not project:raise n.Error('项目不存在')
-        target=deadline(project);goal=project.get('goal') or project.get('description')
+        target=deadline(project,state);goal=project.get('goal') or project.get('description')
         if not n.project_active(project):continue
         if not target or not goal:
             # 提示要能照着做：目标写 goal 字段，日期写 notes 里的「年轮目标日期：YYYY-MM-DD」。
@@ -121,7 +138,7 @@ def run(config, project_ids, choice, folder):
             fresh=n.fetch(config,gw.table())
             if not fresh['complete']:raise n.Error('执行前读取不完整')
             current_project=next((p for p in fresh['projects'] if p['id']==pid),{})
-            if deadline(current_project)!=target or (current_project.get('goal') or current_project.get('description'))!=goal:
+            if deadline(current_project,state)!=target or (current_project.get('goal') or current_project.get('description'))!=goal:
                 raise n.Error('倒排期间项目目标或日期已变化，请重新生成')
             current=[m for m in fresh['milestones'] if pid in m.get('project_ids',[])]
             managed=[m for m in current if marker in m.get(evidence_field,'')]

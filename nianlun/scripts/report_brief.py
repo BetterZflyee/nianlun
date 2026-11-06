@@ -226,8 +226,18 @@ def compose(project,since,until,evidence,method,folder,binary,progress,cancelled
         progress('正在提炼本期关键变化、卡点与下一步')
         frozen=folder/'harness/direct-input.json'
         original=n.load(frozen).get('prompt',request) if frozen.exists() else request
-        answer=harness.report_reason(original,folder/'harness',binary,harness.ANSWER_SCHEMA,progress=progress,cancelled=cancelled)
-        raw=answer.get('answer')
+        # 首次成稿也要判空重试：模型偶尔不按 ANSWER_SCHEMA 返回 answer，
+        # 直接取 raw 会拿到 None，然后整篇报告以空稿崩掉，白跑一次完整生成。
+        raw=None
+        for attempt in range(2):
+            answer=harness.report_reason(original,folder/('harness' if not attempt else 'harness-retry'),
+                binary,harness.ANSWER_SCHEMA,progress=progress,cancelled=cancelled)
+            raw=answer.get('answer')
+            if isinstance(raw,str) and raw.strip():break
+            check()
+            progress('上一稿没有返回正文，正在重新生成 · 第 '+str(attempt+1)+' / 2 次')
+        if not isinstance(raw,str) or not raw.strip():
+            raise n.Error('报告正文未能生成：模型连续两次没有返回正文。原稿目录已保留，重试会重新生成，不会重复使用空稿。')
         state['draft']='composition/draft-0000.md';n.save(folder/state['draft'],raw)
     draft,corrections=normalize(raw)
     errors=issues(draft,evidence)

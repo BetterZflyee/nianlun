@@ -18,7 +18,10 @@ SCHEMA={'type':'object','properties':{
         # 当成节点 key 写进 depends_on，然后校验失败。实测 05:00 那轮重试 3 次都这样。
         'key':{'type':'string','pattern':'^[a-z][a-z0-9-]{1,40}$'},'title':{'type':'string'},'description':{'type':'string'},
         'days_before_deadline':{'type':'integer','minimum':0,'maximum':3650},
-        'depends_on':{'type':'array','items':{'type':'string'}}},
+        # depends_on 的每一项也必须有格式约束。原来只写 type:string，
+        # 模型会把记录 ID 塞进依赖里（实测 05:00 那轮 xz0RA3Xnuf），
+        # 而顶层 key 的 pattern 管不到这里。
+        'depends_on':{'type':'array','items':{'type':'string','pattern':'^[a-z][a-z0-9-]{1,40}$'}}},
         'required':['key','title','description','days_before_deadline','depends_on'],'additionalProperties':False}},
     'rationale':{'type':'string'}},'required':['nodes','rationale'],'additionalProperties':False}
 
@@ -178,6 +181,15 @@ def validate(answer, target):
         if any(not isinstance(node.get(k),str) or not node[k].strip() or len(node[k])>3000 for k in ('title','description')):raise n.Error('倒排节点缺少名称或交付物')
         if node['title'] in titles:raise n.Error('倒排节点名称重复')
         if not isinstance(node.get('depends_on'),list):raise n.Error('节点依赖格式错误')
+        # 依赖项也要查格式，而且要**先于**「key 是否存在」检查：
+        # 记录 ID（如 xz0RA3Xnuf）混进依赖时，如果先报「不存在这个 key」，
+        # 模型会以为只要把 ID 换成别的值就行，而真正的问题是它根本不该写 ID。
+        for dep in node['depends_on']:
+            if not isinstance(dep,str) or not re.fullmatch(r'[a-z][a-z0-9-]{1,40}',dep):
+                raise n.Error(
+                    f'节点「{key}」的依赖里写了「{dep}」，这不是节点编号。'
+                    '依赖只能填本稿 nodes 里出现过的 key（小写字母开头，形如 dafangche-logic-validation），'
+                    '不是表格里的记录 ID 或里程碑 ID')
         keys.add(key);titles.add(node['title'])
         result.append({**node,'date':(target-timedelta(days=offset)).isoformat()})
     bykey={x['key']:x for x in result}

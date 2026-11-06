@@ -314,8 +314,14 @@ def fetch(config, client, check_schema=True):
         for row in data[role]:
             for key, target in (('project_ids', 'projects'), ('site_ids', 'sites'), ('milestone_ids', 'milestones')):
                 ids = {p['id'] for p in data[target]}
-                if any(id not in ids for id in row.get(key, [])):
-                    data['warnings'].append(f'{role}/{row["id"]} 的 {key} 存在悬空关联')
+                missing = [id for id in row.get(key, []) if id not in ids]
+                if missing:
+                    # 只说「有悬空关联」帮不了任何人——要给出具体 id 和标题，
+                    # 才能直接去表里删掉那个引用。
+                    title = row.get('title') or row.get('name') or ''
+                    data['warnings'].append(
+                        f'{role}/{row["id"]}《{title[:24]}》的 {key} 指向已不存在的 {"/".join(missing)}，'
+                        f'到表里删掉该单元格里的这个引用即可')
     return data
 
 

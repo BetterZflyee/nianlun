@@ -257,7 +257,11 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         progress('宿主上下文不足，证据预算降至 %d 字符后重试' % budget)
                         continue
                     try:
-                        decision={k:v for k,v in answer.items() if k!='actions_json'};decision['actions']=json.loads(answer['actions_json'])
+                        decision={k:v for k,v in answer.items() if k!='actions_json'}
+                        # 动作里的 quote 是原文摘录，模型可能直接带裸换行或裸引号，
+                        # 与报告正文是同一类编码问题，走同一套修复。
+                        from harness import repair_json_text
+                        decision['actions']=json.loads(repair_json_text(answer['actions_json']))
                     except (KeyError,ValueError,TypeError):
                         current_prompt=prompt+'\n\n上一稿的 actions_json 不是可解析的 JSON 数组。请只返回符合给定 JSON Schema 的完整 JSON。'
                         continue

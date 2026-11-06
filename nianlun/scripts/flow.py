@@ -367,7 +367,14 @@ def _report_backlog_path(config):
 def _remember_report_backlog(config, project_ids, since, until, message):
     """把报告失败的项目记进待补清单，供下一轮生长开头补生成。"""
     path=_report_backlog_path(config)
-    data=n.load(path) if path.exists() else {'items':{}}
+    data={'items':{}}
+    if path.exists():
+        # 清单文件损坏时不能让记录动作本身把一轮生长弄挂——它只是补救措施。
+        try:
+            loaded=n.load(path)
+            if isinstance(loaded,dict):data=loaded
+        except (OSError,ValueError):
+            data={'items':{}}
     items=data.setdefault('items',{})
     for pid in project_ids or []:
         items[pid]={'since':since,'until':until,'error':str(message)[:200],'at':n.stamp(config)}

@@ -44,6 +44,22 @@ class ReportBacklogTests(unittest.TestCase):
         path.write_text('not json', encoding='utf-8')
         self.assertEqual(flow.pending_reports(self.config), {})
 
+    def test_corrupt_backlog_does_not_block_recording(self):
+        """清单损坏时，记录动作本身也不能抛错——它只是补救措施。"""
+        path = flow._report_backlog_path(self.config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{invalid', encoding='utf-8')
+        flow._remember_report_backlog(self.config, ['p1'], 's', 'u', 'err')
+        self.assertEqual(set(flow.pending_reports(self.config)), {'p1'})
+
+    def test_non_dict_backlog_is_tolerated(self):
+        """文件里是合法 JSON 但不是对象时，也要能恢复。"""
+        path = flow._report_backlog_path(self.config)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('[1,2,3]', encoding='utf-8')
+        flow._remember_report_backlog(self.config, ['p1'], 's', 'u', 'err')
+        self.assertEqual(set(flow.pending_reports(self.config)), {'p1'})
+
     def test_backlog_is_capped_when_recovering(self):
         """补生成每轮最多 6 个，避免把一轮拖太长。"""
         source = Path(flow.__file__).read_text(encoding='utf-8')

@@ -104,5 +104,43 @@ class StateMessageTests(unittest.TestCase):
         self.assertIn('extra', str(ctx.exception))
 
 
+class MilestoneCountTests(unittest.TestCase):
+    """超量时报错要给出选择策略，不能只说「最多 24 个」。
+
+    实际数据：车辆靠离卡有 32 个里程碑，甘特图上放不下。模型被拦下后如果
+    只看到「须为 0 至 24 个」，它只能随便删 8 个——很可能把验收节点删掉，
+    留下例行周会。
+    """
+
+    def too_many(self):
+        marks = [{'date': '2026-11-{:02d}'.format(i % 28 + 1),
+                  'label': f'节点{i}', 'source': '[R1]'} for i in range(30)]
+        return gantt(milestones=marks)
+
+    def test_reports_actual_count(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many())
+        self.assertIn('30', str(ctx.exception), '要说出实际收到几个，便于模型自己删')
+
+    def test_tells_what_to_keep(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many())
+        msg = str(ctx.exception)
+        for word in ('验收', '保留'):
+            self.assertIn(word, msg, f'要提示保留哪类节点，缺了「{word}」')
+
+    def test_tells_what_to_drop(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many())
+        self.assertIn('省略', str(ctx.exception), '要提示可以省略哪类')
+
+    def test_limit_is_named_constant(self):
+        """上限抽成常量，和报错文案用同一个值，避免改一处忘另一处。"""
+        self.assertEqual(report_blocks.MARK_LIMIT, 24)
+        with self.assertRaises(ValueError) as ctx:
+            render(self.too_many())
+        self.assertIn(str(report_blocks.MARK_LIMIT), str(ctx.exception))
+
+
 if __name__ == '__main__':
     unittest.main()

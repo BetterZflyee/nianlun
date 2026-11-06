@@ -15,6 +15,9 @@ CITE = re.compile(r'\[([PRMSK]\d+)\]')
 STATES = {'done': ('已完成', '#2f6350'), 'active': ('推进中', '#486d88'),
           'blocked': ('受阻', '#bc4941'), 'planned': ('计划', '#897c54'), 'unknown': ('待核实', '#788579')}
 
+# 甘特图能放下的日期标签数。再多会叠在一起看不清。
+MARK_LIMIT = 24
+
 def _state_error(field, got):
     """状态报错要列出合法值。
 
@@ -118,7 +121,14 @@ def validate(config, evidence=None):
             if last <= first: raise ValueError('gantt 的 end 须晚于 start')
         if config.get('today'): day(config['today'], 'today')
         marks = config.get('milestones') or []
-        if not isinstance(marks, list) or len(marks) > 24: raise ValueError('里程碑须为 0 至 24 个')
+        # 上限不是为了限制表达，是图上放不下——32 个日期标签会叠成一团。
+        # 但报错要告诉模型「怎么选」，否则它只能随便删几个，把关键节点删掉。
+        if not isinstance(marks, list) or len(marks) > MARK_LIMIT:
+            got = len(marks) if isinstance(marks, list) else '?'
+            raise ValueError(
+                f'里程碑须为 0 至 {MARK_LIMIT} 个（收到 {got} 个）。'
+                '超出时保留：验收/上线/延期等关键节点、最近 30 天的进展，'
+                '省略常规周会与例行同步；不要把整段历史都画上去')
         for m in marks:
             if not isinstance(m, dict) or set(m) - {'date', 'label', 'source'}:
                 # 要点名多出来的是哪个字段。只说「字段不合法」，模型只能乱猜，

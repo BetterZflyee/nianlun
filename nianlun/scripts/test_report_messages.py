@@ -183,5 +183,51 @@ class GraphLayerTests(unittest.TestCase):
         self.assertEqual(report_blocks.LAYER_LIMIT, 3)
 
 
+class VisualFieldTests(unittest.TestCase):
+    """图块字段报错要点名「第几张图」「多出什么」「该写在哪」。
+
+    实测 2026-11-07 04:09 那轮报告连写三稿都失败：模型把 source 写在了
+    status 块的外层，而它属于每个 item 内部。报错只说「包含不支持的字段」，
+    模型要么瞎改、要么把 source 删掉——引用依据就丢了。
+    """
+
+    def block(self, extra=None):
+        item = {'label': '验收完成', 'state': 'done', 'detail': 'x', 'source': '[R1]'}
+        cfg = {'type': 'status', 'title': 'T', 'caption': 'c', 'items': [item]}
+        if extra:
+            cfg.update(extra)
+        return cfg
+
+    def test_names_the_block_index(self):
+        """一稿常有 2-6 张图，要说是第几张。"""
+        import json
+        import render_report
+        good = self.block()
+        bad = self.block({'source': '[R1]'})
+        md = ('Lead: t\n\n```visual\n' + json.dumps(good, ensure_ascii=False) + '\n```\n\n'
+              '```visual\n' + json.dumps(bad, ensure_ascii=False) + '\n```\n\n## 风险\nx[R1]\n')
+        with self.assertRaises(ValueError) as ctx:
+            render_report.brief_html(md, 'T', '2026-10-30', '2026-11-06')
+        self.assertIn('第 2 张图', str(ctx.exception), '要指出是第几张图')
+
+    def test_names_the_extra_field(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block({'source': '[R1]'}))
+        self.assertIn('source', str(ctx.exception), '要点名多出的字段')
+
+    def test_says_where_the_field_belongs(self):
+        """source 属每项内部，不是外层。说清楚才不会让模型把依据删掉。"""
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block({'source': '[R1]'}))
+        self.assertIn('每一项内部', str(ctx.exception), '要说明该字段应写在哪里')
+
+    def test_lists_allowed_fields(self):
+        with self.assertRaises(ValueError) as ctx:
+            render(self.block({'source': '[R1]'}))
+        msg = str(ctx.exception)
+        for field in ('items', 'title', 'caption'):
+            self.assertIn(field, msg, f'要列出该类型允许的字段，缺了 {field}')
+
+
 if __name__ == '__main__':
     unittest.main()

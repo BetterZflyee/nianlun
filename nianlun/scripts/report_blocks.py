@@ -68,7 +68,22 @@ def validate(config, evidence=None):
         if key in aliases:
             kind=aliases[key]; config=dict(config); config['type']=kind
     if kind not in fields: raise ValueError('visual 类型只能为 status、graph、matrix、gantt、bar、line')
-    if set(config) - common - fields[kind]: raise ValueError('visual 包含不支持的字段')
+    # 报错要点名「多出哪个字段」并列出该类型允许的字段。只说「包含不支持的字段」，
+    # 模型只能猜——实测 2026-11-07 04:09 那轮报告连写三稿都卡在这里，每稿都失败。
+    extra = set(config) - common - fields[kind]
+    if extra:
+        allowed = '、'.join(sorted(common | fields[kind]))
+        hint = ''
+        # source/state 这类字段常被写到外层，而它们属于每一项内部。
+        # 不点明的话，模型只会把字段删掉——引用依据就丢了。
+        misplaced = {x for x in extra if x in ('source', 'state', 'label', 'detail', 'next',
+                                               'note', 'points', 'segments', 'stage', 'marks')}
+        if misplaced:
+            hint = ('；' + '、'.join(sorted(misplaced)) +
+                    ' 是每一项内部的字段，应写在 items/rows/nodes 的条目里，不是图的外层')
+        raise ValueError(
+            f'{kind} 图多出字段：' + '、'.join(sorted(extra)) +
+            f'。该类型允许：{allowed}{hint}')
     text(config.get('title'), 60, 'title'); text(config.get('caption'), 180, 'caption')
     def source(value):
         # 依据是可选的：里程碑/计划项本身没有出处（未来计划无从引用），
@@ -226,8 +241,12 @@ def validate(config, evidence=None):
 def parse(markdown, evidence=None):
     blocks = []
     def replace(match):
+        # 报错要带上「第几张图」：一份汇报常有 2-6 个 visual 块，只说「包含不支持的
+        # 字段」，模型不知道该改哪一个，只能整篇重写。
+        nth = len(blocks) + 1
         try: config = validate(json.loads(match[1]), evidence)
-        except (ValueError, TypeError, KeyError) as exc: raise ValueError('可视化格式：' + str(exc)) from exc
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f'第 {nth} 张图格式有误：' + str(exc)) from exc
         token = 'NLVISUAL' + hashlib.sha256(match[0].encode()).hexdigest()[:20].upper() + str(len(blocks))
         blocks.append((token, config))
         if len(blocks) > 6: raise ValueError('精简汇报最多 6 张图')

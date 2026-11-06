@@ -147,4 +147,37 @@ class FinishTests(unittest.TestCase):
         (self.p/'finish.json').unlink();second=self.finish();self.assertFalse(second['notify'])
 
 
+class LookbackCeilingTests(unittest.TestCase):
+    """积压很久时单轮窗口要有上限，否则每轮都撑爆上下文、水印永不前进。"""
+
+    def end(self):
+        from datetime import datetime
+        return datetime.fromisoformat('2026-11-06T10:00:00+08:00')
+
+    def test_long_backlog_is_capped_to_the_ceiling(self):
+        from datetime import timedelta
+        cp = {'channels': {'growth': {'until': '2026-10-28T13:00:00+08:00'}}}
+        start = s.window({}, cp, 'growth', self.end())
+        self.assertGreaterEqual(start, self.end() - timedelta(days=7))
+
+    def test_normal_increment_is_untouched(self):
+        from datetime import timedelta
+        cp = {'channels': {'growth': {'until': '2026-11-06T09:00:00+08:00'}}}
+        start = s.window({}, cp, 'growth', self.end())
+        self.assertGreater(start, self.end() - timedelta(days=2))
+
+    def test_explicit_retry_since_is_never_capped(self):
+        """升级迁移或人工指定的重试起点是明确意图，不能被上限截断。"""
+        from datetime import datetime
+        earlier = datetime.fromisoformat('2026-10-08T12:00:00+08:00')
+        start = s.window({}, {'retry_since': earlier.isoformat()}, 'growth', self.end())
+        self.assertEqual(start, earlier)
+
+    def test_ceiling_is_configurable(self):
+        from datetime import timedelta
+        cp = {'channels': {'growth': {'until': '2026-10-01T13:00:00+08:00'}}}
+        start = s.window({'max_lookback_days': 2}, cp, 'growth', self.end())
+        self.assertGreaterEqual(start, self.end() - timedelta(days=2))
+
+
 if __name__=='__main__':unittest.main()

@@ -41,6 +41,14 @@ def window(settings, checkpoint, channel, end, explicit=None):
     # Revisit both today's and yesterday's meetings on every run, even after a missed morning wake.
     if channel in ('minutes','lark_minutes'):
         start=min(start,end-timedelta(hours=settings.get('minutes_lookback_hours',48)))
+    # 积压很久（调度停过十天以上）时不能一次回溯到底：单轮证据会撑爆宿主上下文，
+    # 每轮都失败、水印永不前进，变成死锁。按上限截断后每轮推进一点，
+    # 剩下的后续轮次继续补——被截掉的部分不是丢失，水印会逐轮追赶。
+    # retry_since 是显式的重试意图（升级迁移、人工指定），不受这个上限约束。
+    if not saved.get('retry_since'):
+        ceiling=float(settings.get('max_lookback_days',7))
+        floor=end-timedelta(days=ceiling)
+        if start<floor:start=floor
     return start
 
 

@@ -137,7 +137,13 @@ def validate(config, evidence=None):
             try:
                 return datetime.date.fromisoformat(value)
             except ValueError as exc:
-                raise ValueError(f'{label} 须为 YYYY-MM-DD 日期') from exc
+                # 只报「须为 YYYY-MM-DD」模型不知道错在哪——实测 14:00 那轮
+                # 有两个项目因此被退回。给出实际值和几种常见错写的样子，
+                # 模型才能一次改对。
+                raise ValueError(
+                    f'{label} 值是「{value}」，须为 YYYY-MM-DD 格式的完整日期'
+                    '（如 2026-11-07）。不要用 11/07、11月7日、2026-11 这类写法。'
+                ) from exc
         # start/end 可省略：省略时由数据自动推出聚焦的时间窗
         if bool(config.get('start')) != bool(config.get('end')):
             raise ValueError('gantt 的 start 与 end 需同时给出或同时省略')

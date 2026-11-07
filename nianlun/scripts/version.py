@@ -5,7 +5,7 @@
 2026-11-07 之前版本号硬编码在 4 个地方：
 
 ```
-packaging/build.py:15      VERSION = '2.9.2'
+packaging/build.py:15      VERSION = '2.9.7'
 packaging/install.py:108   'version':'2.9.2'
 nianlun/scripts/server.py:70  'version':'2.9.2'
 nianlun/scripts/setup.py:21   VERSION = '2.9.2'
@@ -34,4 +34,4 @@ python3 tools/check_version_sync.py
 它会扫全仓库，确认没有别处还硬编码着旧版本号。
 """
 
-VERSION = '2.9.2'
+VERSION = '2.9.7'

@@ -63,6 +63,27 @@ class VersionSingleSourceTests(unittest.TestCase):
         install = (ROOT / 'packaging' / 'install.py').read_text(encoding='utf-8')
         self.assertIn("_version()", install)
 
+    def test_version_matches_latest_tag(self):
+        """version.py 必须和最新 tag 一致，不能停留在旧版本。
+
+        ⚠️ 找那一行不能靠 `str.replace(x, y, 1)`——version.py 的文档字符串里
+        有两个旧版本号的**示例**（build.py:15 / setup.py:21 那两行），
+        按次数替换会改到示例、漏掉真正的赋值。必须匹配顶格的 `VERSION = `。
+        """
+        import subprocess
+        latest = subprocess.run(
+            ['git', 'tag', '--sort=-v:refname'],
+            cwd=ROOT, capture_output=True, text=True, timeout=60
+        ).stdout.split()[0]
+        self.assertEqual(version.VERSION, latest.lstrip('v'),
+                         f'version.py 是 {version.VERSION}，最新 tag 是 {latest}')
+
+    def test_assignment_is_toplevel(self):
+        """真正的赋值必须顶格，且文件里只有一个顶格 VERSION =。"""
+        text = (Path(__file__).resolve().parent / 'version.py').read_text(encoding='utf-8')
+        toplevel = [l for l in text.splitlines() if l.startswith('VERSION = ')]
+        self.assertEqual(len(toplevel), 1, f'顶格 VERSION 赋值应只有一个，实际 {len(toplevel)}')
+
     def test_check_tool_exists_and_passes(self):
         tool = ROOT / 'tools' / 'check_version_sync.py'
         self.assertTrue(tool.exists())

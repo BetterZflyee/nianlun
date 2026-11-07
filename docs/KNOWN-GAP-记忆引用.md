@@ -1,8 +1,28 @@
 # 已知缺口：记忆之间没有引用关系
 
-**状态**：✅ 已修复（2026-11-07 09:25）——`growth.py` 的 `_related_links()`
-按本轮 evidence 里的项目拼 `[[projects/nianlun-<hash>|标题]]`。
-端到端实测：capture 后 `get_links` 返回 **18 条出边**，目标缺失 0。
+**状态**：✅ 已修复并**在真实生长中验证**（2026-11-07 10:25）
+
+`growth.py` 的 `_related_links()` 按本轮 evidence 里的项目拼
+`[[projects/nianlun-<hash>|标题]]`。
+
+**生产验证**（2026-11-07 09:25 那轮真实生长）：
+
+```
+gbrain call get_links '{"slug":"meetings/nianlun-20261107-092518-da49fe98"}'
+→ 出边数: 18
+  → projects/nianlun-a43db55a38aec99b04a20a1b
+  → projects/nianlun-921709c497dc5e6163976ea5
+  → projects/nianlun-ed9ddf27d3cc9698af253ead
+  ...
+```
+
+**工作台界面同步变化**：
+
+| | 修复前 | 修复后 |
+|---|---|---|
+| 统计 | 505 篇 · **0 条引用** | 120 篇 · **18 条引用** |
+| 3D 星图 | 只有散点 | **有放射状连线**（projects·43 → meetings·69 / concepts·6） |
+
 下面保留完整排查过程，供以后遇到同类问题时对照。
 
 **发现时间**：2026-11-07 09:10

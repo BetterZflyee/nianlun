@@ -120,7 +120,10 @@ class MemoryExplorer:
         def read(meta):
             key=meta['key']
             with self.lock:cached=self.links_cache.get(key)
-            if cached and time.monotonic()-cached[0]<300:return cached[1]
+            # 缓存 15 分钟：全量 506 篇按 6 篇/批、每批约 3.3 秒要 278 秒，
+            # 原来的 300 秒只比它多一点——用户滚回上面看时，最早那几批已经开始
+            # 过期，会触发重读。放宽到 15 分钟让一次加载的结果稳定留存。
+            if cached and time.monotonic()-cached[0]<900:return cached[1]
             params={'slug':meta['slug']}
             if meta.get('source_id'):params['source_id']=meta['source_id']
             try:

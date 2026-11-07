@@ -64,6 +64,9 @@ async function renderMemory27(root, generation) {
     "1",
   );
   depth.setAttribute("aria-label", "显示真实引用的层数");
+  // 层数只在选中某个记忆后才有意义（focus = neighborhood(selected, ...)）。
+  // 没选中时切换看不到任何变化，用户会以为控件坏了——所以未选中时禁用并说明。
+  depth.title = "先在左侧选中一条记忆，再选择查看它的几跳邻居";
   depth.onchange = () => {
     graph?.setDepth(Number(depth.value));
     updateFocus();
@@ -347,6 +350,12 @@ async function renderMemory27(root, generation) {
   }
   function updateFocus() {
     const selected = fullGraph.nodes.find((node) => node.id === selectedKey);
+    // 层数只在选中后才有意义：没选中时 focus 是空集，切了也看不出变化。
+    // 禁用而不是放任可点——控件能点却没反应，用户会以为功能坏了。
+    depth.disabled = !selected;
+    depth.title = selected
+      ? "查看该记忆的几跳邻居"
+      : "先在左侧选中一条记忆，再选择查看它的几跳邻居";
     focusTitle.textContent = selected ? selected.title : groupTitle();
     focusSummary.replaceChildren();
     if (selected) {

@@ -400,3 +400,55 @@ DWS 的延迟波动很大，**跟网络状态强相关**：
 
 **看到偶发的写入超时不用紧张**，先确认网络（`ping github.com` 之类），
 恢复后下一轮会自己补上。
+
+## 第十四章 改了前端代码，刷新页面却没变化
+
+### 先确认你看的是哪份文件
+
+年轮有两份资源，路径不一样：
+
+| 位置 | 用途 |
+|---|---|
+| `Projects/Project1 年轮/nianlun/assets/portal/` | **源码**，开发时改这里 |
+| `~/.local/share/nianlun/core/nianlun/assets/portal/` | **生产副本**，服务实际读这里 |
+
+服务进程是：
+
+```
+~/.local/share/nianlun/runtime/python-env/bin/python \
+  ~/.local/share/nianlun/core/nianlun/scripts/server.py --no-open
+```
+
+`server.py` 里 `ASSETS = n.SKILL/'assets/portal'`，而 `n.SKILL` 指向
+**该进程所在的那份代码**。所以改完源码要 `cp` 到 `core/` 再重启服务：
+
+```bash
+cp nianlun/assets/portal/*.js ~/.local/share/nianlun/core/nianlun/assets/portal/
+launchctl kickstart -k gui/$(id -u)/com.zhufei.nianlun.server
+```
+
+### 静态资源的 URL 不是 /assets/...
+
+`server.py` 用一张固定路由表，路径都在**根**上：
+
+```
+http://127.0.0.1:63890/memory-view.js      ← 对
+http://127.0.0.1:63890/assets/portal/memory-view.js   ← 404
+```
+
+**我就是踩了这个**：用错路径 `curl` 拿到 `{"error": "页面不存在"}`，
+以为改动没生效，差点去改本来正确的代码。正确做法：
+
+```bash
+curl -s http://127.0.0.1:63890/memory-view.js | grep -c '你要找的特征'
+```
+
+### 验证顺序
+
+1. 源码里有改动吗 → `grep 特征 源码文件`
+2. 生产副本有吗 → `grep 特征 ~/.local/share/.../core/...`
+3. **服务返回的有吗** → `curl -s http://127.0.0.1:63890/<文件名>.js | grep 特征`
+4. 都没有 → 才去看代码逻辑
+
+第 3 步是关键。跳过它就会像我这轮一样，在「代码明明改了」和「页面没变化」
+之间反复怀疑，其实是自己 `curl` 错了地址。

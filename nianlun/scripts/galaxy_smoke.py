@@ -25,6 +25,13 @@ URL 是 `http://127.0.0.1:63890/#<token>`——**token 走 location.hash**，
 4. 数据真的加载了（不是「正在读取真实数据…」）
 5. 控制按钮存在且可用
 6. canvas 有 aria-label（无障碍）
+7. **引用数 > 0**——星图上有连线，不是一堆孤立的散点
+8. 分簇已渲染（至少 3 个分组）
+
+第 7 项是 2026-11-07 补的：那天之前工作台长期显示「506 篇 · 0 条引用」，
+星图上 506 个点一条线都没有。根因有两层——写入侧 `growth.py` 从来没写过
+`[[wiki链接]]`；读取侧 `relations()` 又只读 `get_links`（出边），不读
+`get_backlinks`（入边）。两层都修完后引用数从 0 涨到 652。
 """
 import json
 import sys
@@ -176,7 +183,13 @@ def main():
             h: r ? Math.round(r.height) : 0,
             loading: document.body.innerText.includes('正在读取真实数据'),
             controls: ctrls,
-            aria: c ? (c.getAttribute('aria-label') || '').slice(0, 20) : ''
+            aria: c ? (c.getAttribute('aria-label') || '').slice(0, 20) : '',
+            refs: (() => {
+              const m = document.body.innerText.match(/(\\d+) 篇 · (\\d+) 条引用/);
+              return m ? +m[2] : null;
+            })(),
+            groups: [...document.querySelectorAll('button')]
+              .filter(b => /· \\d+$/.test(b.textContent.trim())).length
           };
         })()""") or {}
 
@@ -188,6 +201,12 @@ def main():
             ('控制按钮可用', bool([c for c in (data.get('controls') or []) if not c['disabled']]),
              ', '.join(c['t'] for c in (data.get('controls') or [])) or '无'),
             ('有无障碍标签', bool(data.get('aria')), data.get('aria') or '无'),
+            # 引用数 > 0 才是「真有关系网」。曾经长期是 0——因为写入侧没写
+            # [[wiki链接]]、读取侧又只读出边，星图上只有散点没有连线。
+            # 这一项就是防止它悄悄退回全散点状态。
+            ('引用数 > 0（有连线）', (data.get('refs') or 0) > 0,
+             f"{data.get('refs')} 条" if data.get('refs') is not None else '读不到统计'),
+            ('分簇已渲染', (data.get('groups') or 0) >= 3, f"{data.get('groups')} 个分组"),
         ]
         print('=== 3D 星图冒烟 ===')
         failed = 0

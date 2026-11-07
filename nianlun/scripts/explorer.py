@@ -139,6 +139,31 @@ class MemoryExplorer:
                         seen.add(target);edges.append({'slug':target[1],'source_id':target[0],
                             'type':str(row.get('link_type') or 'reference')[:100]})
                     truncated=truncated or row.get('truncated') is True
+                # 只读 get_links（出边）会让「被引用的页面」看起来是孤点：
+                # 项目记忆收到 9 条入边，但因为自己没有出边，星图上就没线。
+                # 补读 backlinks，把入边也当成 edges 的一部分交给渲染层。
+                try:
+                    back=memory.run(config,['call','get_backlinks',json.dumps(params)],timeout=20)
+                    if not back.returncode:
+                        brows=json.loads(back.stdout)
+                        if isinstance(brows,list):
+                            # 去重键要和出边一致：都按「对端 slug + 对端 source_id」。
+                            # 出边记的是 to_，入边记的是 from_，字段名不同但语义都是
+                            # 「对面那一端」——所以统一成 (source_id, slug) 才不会重复。
+                            back_seen={e['slug'] for e in edges}
+                            for row in brows[:500]:
+                                if not isinstance(row,dict):continue
+                                src=row.get('from_slug')
+                                if not isinstance(src,str) or not src:continue
+                                if src in back_seen:continue
+                                back_seen.add(src)
+                                target=(row.get('from_source_id'),src)
+                                seen.add(target)
+                                edges.append({'slug':src,'source_id':target[0],
+                                    'type':str(row.get('link_type') or 'reference')[:100]})
+                except Exception:
+                    # 入边是增强信息，读不到不影响主流程（出边仍是权威结果）。
+                    pass
                 value={'key':key,'links':edges,'verified':True,'truncated':truncated}
                 with self.lock:
                     if self.scope==scope:self.links_cache[key]=(time.monotonic(),value)

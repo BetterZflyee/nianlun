@@ -45,6 +45,18 @@ class MemoryRelations(unittest.TestCase):
     def catalog(self,rows):
         with patch('explorer.memory.run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps(rows))):return self.e.catalog()['pages']
     def result(self,rows):return SimpleNamespace(returncode=0,stdout=json.dumps(rows))
+    def routed(self,links=None,backlinks=None):
+        """按工具名分流返回：get_links 和 get_backlinks 的数据形态不同。
+
+        统一返回同一份数据会让 backlinks 拿到 to_slug 行，被当成入边重复计入。
+        真实环境里两者字段不同（get_links 有 to_slug，get_backlinks 有 from_slug），
+        mock 也要照这个来，否则测的不是真实行为。
+        """
+        def fake(config,args,timeout=None):
+            tool=args[1] if len(args)>1 else ''
+            if tool=='get_backlinks':return self.result(backlinks if backlinks is not None else [])
+            return self.result(links if links is not None else [])
+        return patch('explorer.memory.run',side_effect=fake)
     def test_same_slug_sources_stay_distinct_and_explicitly_scoped(self):
         pages=self.catalog([{'slug':'same','source_id':'one'},{'slug':'same','source_id':'two'}])
         self.assertNotEqual(pages[0]['key'],pages[1]['key'])
@@ -57,10 +69,12 @@ class MemoryRelations(unittest.TestCase):
         page=self.catalog([{'slug':'a'}])[0]
         rows=[{'from_slug':'a','to_slug':'b','link_type':'references','context':'private body'},
               {'from_slug':'a','to_slug':'b','link_type':'references'}]
-        with patch('explorer.memory.run',return_value=self.result(rows)) as run:
+        with self.routed(links=rows) as run:
             value=self.e.relations([page['key']])['pages'][0];self.e.relations([page['key']])
             self.assertTrue(value['verified']);self.assertEqual(len(value['links']),1)
-            self.assertNotIn('private body',json.dumps(value));self.assertEqual(run.call_count,1)
+            self.assertNotIn('private body',json.dumps(value))
+            # 出边 + 入边各一次，且第二次命中缓存不再调用
+            self.assertEqual(run.call_count,2)
     def test_missing_or_malformed_index_is_not_a_verified_empty_graph(self):
         page=self.catalog([{'slug':'a'}])[0]
         for result in [SimpleNamespace(returncode=1,stdout=''),self.result({'error':'failed'}),self.result([{'from_slug':'wrong','to_slug':'b'}])]:
@@ -79,7 +93,7 @@ class MemoryRelations(unittest.TestCase):
         page=self.catalog([{'slug':'a','source_id':'one'}])[0]
         rows=[{'from_slug':'a','from_source_id':'other','to_slug':'private'},
               {'from_slug':'a','from_source_id':'one','to_slug':'b','to_source_id':'two','truncated':True}]
-        with patch('explorer.memory.run',return_value=self.result(rows)):
+        with self.routed(links=rows):
             value=self.e.relations([page['key']])['pages'][0]
             self.assertTrue(value['truncated']);self.assertEqual([e['slug'] for e in value['links']],['b'])
     def test_connection_change_during_read_rejects_stale_results(self):

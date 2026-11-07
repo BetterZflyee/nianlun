@@ -452,3 +452,64 @@ curl -s http://127.0.0.1:63890/memory-view.js | grep -c '你要找的特征'
 
 第 3 步是关键。跳过它就会像我这轮一样，在「代码明明改了」和「页面没变化」
 之间反复怀疑，其实是自己 `curl` 错了地址。
+
+## 第十五章 看到「部分来源待补采」是什么意思
+
+生长面板显示这句话时，`finish.json` 里是 `status: partial`。**这不是失败。**
+
+一轮生长会从多个渠道采集数据，每个渠道独立成败：
+
+| 渠道 | 采什么 |
+|---|---|
+| `minutes` | 钉钉 AI 听记 |
+| `direct` | 会话列表与消息 |
+| `mentions` | @我的消息 |
+| `mail` | 邮件 |
+| `lark_minutes` | 飞书妙记 |
+| `harness` / `workbench` | 本机产物 |
+
+`partial` 的意思是：**有渠道没采全，但已经采到的部分照常分析、照常写表。**
+整轮的工作没有白做。
+
+### 实测一例（2026-11-07 09:25 那轮）
+
+```
+minutes        partial    count=60     DWS 未返回有效结果
+mentions       complete   count=0
+direct         partial    count=2580   会话目录分页未完整
+mail           partial    count=8      7 封中 1 封正文失败
+lark_minutes   complete   count=1
+harness        complete   count=0
+workbench      complete   count=0
+```
+
+2580 条消息、60 条听记、8 封邮件都采到了，只是没采全；其中 1 封邮件正文
+读失败。
+
+### 要做什么
+
+**通常不用做什么。** 下一轮会自动重采，缺的部分补上。
+
+想确认具体缺什么：
+
+```bash
+cd ~/.local/state/nianlun/runs && d=$(ls -dt */ | head -1)
+python3 -c "
+import json
+b = json.load(open('$d/evidence.json'))
+for c in b.get('coverage') or []:
+    if c.get('status') != 'complete':
+        print(c['channel'], c['status'], str(c.get('error'))[:80])
+"
+```
+
+### 什么时候才该管
+
+| 现象 | 判断 |
+|---|---|
+| 偶尔 partial，下一轮 complete | 正常，外部接口抖动 |
+| **连续多轮同一个渠道 partial** | 那个接口/权限有问题，去查对应章节 |
+| `status: failed` | 整轮失败，看 `finish.json` 的 error |
+
+⚠️ 注意区分：`partial` 是「部分成功」，`failed` 才是「失败」。前者数据能用，
+后者不能用。

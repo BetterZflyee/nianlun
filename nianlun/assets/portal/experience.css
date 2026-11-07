@@ -1359,3 +1359,19 @@
 .flow-step.is-selected {
   background: #edf4e8;
 }
+
+/* 过期里程碑角标：用暖色提醒但不喧哗——红太抢，会和「危险」混淆；
+   这里要的是「有件事需要你处理」，不是「系统挂了」。 */
+.project-card-overdue {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fdf3e3;
+  border: 1px solid #e8cfa4;
+  color: #8a6520;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

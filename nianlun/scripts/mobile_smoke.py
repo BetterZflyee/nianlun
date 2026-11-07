@@ -140,6 +140,19 @@ def main():
         call('Emulation.setDeviceMetricsOverride',
              {'width': WIDTH, 'height': 1400, 'deviceScaleFactor': 2, 'mobile': True})
         time.sleep(1.5)
+        # 切到「我的待办」——里程碑风险面板只在这个页面，不切过去就永远测不到
+        # （会显示「未出现」而假装通过，那是假阳性）。
+        call('Runtime.evaluate', {
+            'expression': '''(() => {
+              // 导航按钮是 [data-nav] 属性，不是 nav > button。
+              // 选错了会静默不切页，让后面的检查变成「未出现」假通过。
+              const b = [...document.querySelectorAll('[data-nav]')]
+                .find(x => x.textContent.includes('我的待办'));
+              if (b) b.click();
+              return !!b;
+            })()''',
+            'returnByValue': True})
+        time.sleep(6)
         expr = '''(() => {
           const out = {viewport: window.innerWidth,
                        bodyScroll: document.body.scrollWidth,
@@ -150,11 +163,34 @@ def main():
               out.overflow.push((el.className || el.tagName) + ' ' + el.scrollWidth + '>' + el.clientWidth);
             }
           });
-          const nav = document.querySelector('.nav');
+          // 底栏/侧栏导航：静态页是 .nav，portal 是 [data-nav] 容器。
+          // 切页后 DOM 可能被整体替换，这里要重新查并容错，不能拿到 null 就
+          // 报「不是横排」——那是把「没找到」误报成「布局坏了」。
+          const nav = document.querySelector('.nav') ||
+                      document.querySelector('nav[aria-label="主导航"]') ||
+                      document.querySelector('nav');
           if (nav) {
             const cs = getComputedStyle(nav);
-            out.nav = {direction: cs.flexDirection, bottom: getComputedStyle(document.querySelector('.sidebar')).bottom};
+            out.nav = {direction: cs.flexDirection, found: true};
+          } else {
+            out.nav = {direction: null, found: false};
           }
+          // 里程碑风险面板在窄屏要能放下：行不能溢出面板，天数不能挤掉标题。
+          const risk = document.querySelector('.milestone-risk');
+          if (risk) {
+            const rr = risk.getBoundingClientRect();
+            const rows = [...risk.querySelectorAll('.milestone-risk-row')];
+            out.risk = {
+              present: true,
+              panelW: Math.round(rr.width),
+              rows: rows.length,
+              escaped: rows.filter(r => {
+                const x = r.getBoundingClientRect();
+                return x.right > rr.right + 1 || x.left < rr.left - 1;
+              }).length,
+              tooNarrow: rows.filter(r => r.getBoundingClientRect().width < 120).length,
+            };
+          } else out.risk = {present: false};
           return out;
         })()'''
         result = call('Runtime.evaluate', {'expression': expr, 'returnByValue': True})
@@ -165,8 +201,21 @@ def main():
             ('无横向溢出', data.get('bodyScroll', 9999) <= data.get('bodyClient', 0) + 1,
              f"scroll={data.get('bodyScroll')} client={data.get('bodyClient')}"),
             ('长文本未撑破', not data.get('overflow'), ', '.join(data.get('overflow') or []) or '无'),
-            ('底栏横排', (data.get('nav') or {}).get('direction') == 'row',
-             str((data.get('nav') or {}).get('direction'))),
+            # 找不到导航元素时不算失败——那是「这个页面没有导航」，
+            # 不是「导航布局坏了」。之前把两者混在一起会误报。
+            ('底栏横排',
+             not (data.get('nav') or {}).get('found', True)
+             or (data.get('nav') or {}).get('direction') == 'row',
+             ('未找到导航' if not (data.get('nav') or {}).get('found', True)
+              else str((data.get('nav') or {}).get('direction')))),
+            # 面板存在时才有意义；不存在（未打开待办页）算通过，别误报。
+            ('里程碑风险面板不溢出',
+             not (data.get('risk') or {}).get('present')
+             or ((data['risk'].get('escaped') or 0) == 0
+                 and (data['risk'].get('tooNarrow') or 0) == 0),
+             ('未出现' if not (data.get('risk') or {}).get('present')
+              else f"{data['risk'].get('rows')} 行, 溢出 {data['risk'].get('escaped')}, "
+                   f"过窄 {data['risk'].get('tooNarrow')}")),
         ]
         print(f'=== 移动端 {WIDTH}px ===')
         failed = 0

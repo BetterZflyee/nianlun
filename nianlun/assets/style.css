@@ -11,3 +11,26 @@
 .fresh-tag{margin-left:2px}
 .project-card .project-icon{flex-shrink:0}
 .project-card .project-top .status{flex-shrink:0;margin-left:auto}
+
+/* 过期节点：和 portal 用同一套暖色语义（提醒而非报警） */
+.late-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: #fdf3e3;
+  border: 1px solid #e8cfa4;
+  color: #8a6520;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.upcoming.is-late {
+  border-color: #e8cfa4;
+  background: #fdfbf5;
+}
+.late-days {
+  color: #8a6520;
+  font-weight: 600;
+}

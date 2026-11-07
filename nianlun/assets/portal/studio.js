@@ -214,6 +214,111 @@ async function openRelations(project, rows) {
   }
 }
 
+
+/**
+ * 里程碑风险面板：按过期天数排序，只列「有日期且已过期仍未达成」的。
+ *
+ * 为什么放在待办页：这是用户每天打开看「今天该干什么」的地方。里程碑过期
+ * 属于同一类「需要你处理」的事项，放在这里才不会被忘掉。
+ *
+ * 口径（和 experience.js 的 growthMilestoneOverdue 保持一致）：
+ * - 状态属于已完成/取消/关闭 → 不算
+ * - 没有日期或日期不合法 → 不算（无从判断，不能冤枉）
+ * - 日期早于今天 → 算，并给出过期天数
+ */
+function milestoneRiskPanel() {
+  const now = Date.now();
+  const todayKey = new Date(now).toISOString().slice(0, 10);
+  const todayUtc = Date.parse(todayKey + "T00:00:00Z");
+  const items = [];
+  for (const m of data.milestones || []) {
+    // 完成态用「已达成」——真实数据里没有「已完成/已取消/已关闭」这几种值，
+    // 照旧写会把 8 条已达成也当成过期算进去。
+    if (["已达成", "已完成", "已取消", "已关闭", "已解决"].includes(
+      String(m.status || "").trim(),
+    ))
+      continue;
+    const raw = (m.date || "").slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) continue;
+    const due = Date.parse(raw + "T00:00:00Z");
+    if (Number.isNaN(due)) continue;
+    const days = Math.floor((todayUtc - due) / 86400000);
+    if (days <= 0) continue;
+    const project = (data.projects || []).find((p) =>
+      (m.project_ids || []).includes(p.id),
+    );
+    items.push({ row: m, days, project });
+  }
+  if (!items.length) return el("div", { class: "milestone-risk-empty" });
+  items.sort((a, b) => b.days - a.days);
+
+  const shown = items.slice(0, 8);
+  const panel = el("section", {
+    class: "panel milestone-risk",
+    "aria-label": "里程碑风险",
+  });
+  panel.append(
+    el("div", { class: "milestone-risk-head" }, [
+      el("div", { class: "eyebrow", text: "RISK / 里程碑风险" }),
+      el("h2", {
+        text:
+          items.length +
+          " 条里程碑已过期，最久 " +
+          items[0].days +
+          " 天",
+      }),
+      el("p", {
+        text:
+          "这些里程碑日期已经过去，但状态仍是未完成。点项目名可进入项目核对，" +
+          "数据本身不会被自动修改。",
+      }),
+    ]),
+  );
+  const list = el("div", { class: "milestone-risk-list" });
+  for (const item of shown) {
+    const row = el("button", {
+      class: "milestone-risk-row",
+      type: "button",
+      title: "进入项目：" + (item.project?.title || "未归属项目"),
+    });
+    row.append(
+      el("span", {
+        class: "milestone-risk-days",
+        text: item.days + " 天",
+      }),
+      el("span", {
+        class: "milestone-risk-title",
+        text: item.row.title || "未命名里程碑",
+      }),
+      el("span", {
+        class: "milestone-risk-meta",
+        text:
+          (item.project?.title || "未归属项目") +
+          " · " +
+          (item.row.status || "未设状态") +
+          " · " +
+          (item.row.date || "").slice(0, 10),
+      }),
+    );
+    row.onclick = () => {
+      if (item.project && typeof select === "function") {
+        selected = item.project.id;
+        navigate("projects");
+      }
+    };
+    list.append(row);
+  }
+  panel.append(list);
+  if (items.length > shown.length)
+    panel.append(
+      el("p", {
+        class: "milestone-risk-more",
+        text: "还有 " + (items.length - shown.length) + " 条，按同样规则排序。",
+      }),
+    );
+  return panel;
+}
+
 async function renderTodos23(root, generation) {
   const insights = await import("./insight-data.js");
   if (generation !== viewVersion) return;
@@ -291,6 +396,9 @@ async function renderTodos23(root, generation) {
       btn("+ 新建待办", todoDialog, "primary"),
     ]),
     stats,
+    // 里程碑风险：待办页原来只有「待办」，里程碑过期了在这里完全看不到。
+    // 实测 35 条已过期（最久 69 天），用户在日常页面里发现不了。
+    milestoneRiskPanel(),
     landscape.root,
     el("div", { class: "todo-workspace" }, [
       rail,

@@ -38,16 +38,37 @@ function shell(){
  $('page').innerHTML=renderer[ui.page]()+`<div class="page-footer">年轮 NIANLUN · 你只管往前，让它自己长。</div>`;
 }
 function heading(title,sub,action=''){return `<div class="page-heading"><div><div class="eyebrow">YOUR WORK, REMEMBERED</div><h1>${title}</h1><p>${sub}</p></div><div class="button-row">${action}</div></div>`;}
+// 里程碑完成态：真实数据里只有「已达成」表示完成（实测 200 条：
+// 待核 80 / 未开始 66 / 进行中 18 / 待核对 15 / 已延期 12 / 已达成 8）。
+// 写「已完成/已取消」会永远匹配不上，等于没过滤。
+const DONE_STATUS = ['已达成', '已完成', '已取消', '已关闭', '已解决'];
+// 过期天数：状态未完成 + 日期合法 + 早于今天。没日期的不算（无从判断）。
+function overdueDays(m, today) {
+  if (DONE_STATUS.includes(String(m.status || '').trim())) return 0;
+  const raw = String(m.date || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return 0;
+  const due = Date.parse(raw + 'T00:00:00Z');
+  if (Number.isNaN(due)) return 0;
+  const days = Math.floor((today - due) / 86400000);
+  return days > 0 ? days : 0;
+}
 function projectCard(p){const records=related('records',p.id),nodes=related('milestones',p.id);
  // 一条记忆都还没有的项目，卡片长得和有内容的一样，看不出「还没开始积累」。
  // 给它一个提示，免得点进去才发现是空的。
  const fresh=!records.length?`<span class="fresh-tag" title="这个项目还没有任何记忆，第一次沟通整理后会出现在这里">待积累</span>`:'';
- return `<button class="project-card" data-project="${e(p.id)}"><div class="project-top"><span class="project-icon">${icon('projects',17)}</span>${status(p.status)}</div><h3>${e(p.title)} <span class="priority">${e(p.priority||'—')}</span>${fresh}</h3><p>${e(p.description||'项目描述尚未填写')}</p><div class="project-meta"><span>${icon('memory',12)}${records.length} 条记忆</span><span>${icon('node',12)}${nodes.length} 个节点</span><span class="arrow">${icon('arrow',14)}</span></div></button>`;}
+ // 过期节点角标：只显示总数的话，看不出「这个项目在拖」。
+ const todayUtc=Date.parse(new Date().toISOString().slice(0,10)+'T00:00:00Z');
+ const late=nodes.filter(m=>overdueDays(m,todayUtc)>0).length;
+ const lateTag=late?`<span class="late-tag" title="有 ${late} 个节点已过期仍未达成">⚠ ${late} 个过期</span>`:'';
+ return `<button class="project-card" data-project="${e(p.id)}"><div class="project-top"><span class="project-icon">${icon('projects',17)}</span>${status(p.status)}</div><h3>${e(p.title)} <span class="priority">${e(p.priority||'—')}</span>${fresh}${lateTag}</h3><p>${e(p.description||'项目描述尚未填写')}</p><div class="project-meta"><span>${icon('memory',12)}${records.length} 条记忆</span><span>${icon('node',12)}${nodes.length} 个节点</span><span class="arrow">${icon('arrow',14)}</span></div></button>`;}
 function event(r){const p=proj((r.project_ids||[])[0]);return `<div class="event"><span class="event-mark">${icon('chat',14)}</span><div class="event-main"><div class="event-top"><span class="event-date">${e(r.date||'日期待补')}</span><span class="pill">${e(r.kind||'项目记录')}</span>${p?`<button class="source-proj" data-project="${e(p.id)}">${e(p.title)}</button>`:''}</div><h3>${e(r.title)}</h3><p>${e((r.description||'').split('\n')[0].slice(0,120))}</p><div class="event-source">${status(r.status)}${button('evidence',`${icon('up',11)} 查看记录与依据`,'source-link',`data-id="${e(r.id)}"`)}</div></div></div>`;}
 function growthPanel(){const g=S.growth;if(!g)return '';const hours=(g.schedule.growth_hours||[]).map(h=>h+':00').join(' · ');return `<section class="panel growth-panel"><div><div class="eyebrow">GROWTH / 年轮生长</div><h2>${e(g.scheduler?.message||'离线快照：运行状态请到工作台核验')}</h2><p>每天 ${e(hours)} · ${e(g.schedule.timezone||'配置时区')}</p><p>Harness 理解 →独立记忆空间→ AI 表格与待办 → 钉钉摘要</p></div><div class="growth-health">${status(g.status==='complete'?'本轮已完成':g.status==='partial'?'部分来源待补采':g.status)}<p>最近运行：${e(g.last_run?g.last_run.replace('T',' ').slice(0,16):'尚无记录')}</p>${g.status==='partial'?`<p class="growth-hint" style="font-size:12px;color:#897c54">有环节未完成，点右侧「查看这轮生长」看具体是哪步；下一轮会自动补</p>`:''}<p>记忆归档：${g.memory_verified?'已核验':'待核验'} · 摘要：${g.digest_status==='delivered'?'已投递':g.digest_status==='submitted'?'已提交':'待处理'}</p>${button('prompt','查看这轮生长','text-button',`data-text="请用年轮读取最近一轮采集覆盖、执行回执、待核项和摘要。"`)}</div></section>`;}
 function home(){
  const ps=sortProjects(S.projects.filter(active));
  const pending=S.milestones.filter(m=>PENDING.includes(m.status));
+ const todayUtc=Date.parse(new Date().toISOString().slice(0,10)+'T00:00:00Z');
+ // 过期未完成节点数——页面上要能一眼看到风险规模。
+ const lateCount=S.milestones.filter(m=>overdueDays(m,todayUtc)>0).length;
  // 无日期的节点也要露出：实表里 13 个里程碑没填日期（标题里却写着「11月30日」
  // 这些），原来被 `m.date &&` 直接过滤掉，界面上完全看不见——用户不知道
  // 自己有活儿没排期。排序时无日期的排最后。
@@ -56,7 +77,7 @@ function home(){
  return heading('让经历，慢慢长成记忆。',`来自 AI 表格 · ${dt} 读取（UTC+08:00）`,button('refresh',`${icon('memory',14)} 刷新记忆`)+link(S.base_url,'在钉钉管理','btn primary'))+
  `<section class="hero"><div class="hero-copy"><div class="eyebrow">A LITTLE EVERY DAY. A LOT OVER TIME.</div><h2>你只管往前，<br><span>让它自己长。</span></h2><p>把散落在沟通里的每一个片段，<br>串成项目的连续记忆。需要汇报时，随时展开。</p><div class="small-line">${icon('leaf',12)} 一场沟通，一圈年轮。</div></div>${rings()}<span class="ring-legend">项目记忆 · 随时间积累</span></section>`+
  `${growthPanel()}<div class="metrics">${[['我的项目',S.projects.length,'个',`${ps.length} 个当前项目`,'projects'],['积累的记忆',S.records.length,'条','来自线上项目记录表','memory'],['里程碑',S.milestones.length,'个',`${S.milestones.filter(m=>m.status==='已达成').length} 个已达成`,'node'],['关联场地',S.sites.length,'处','项目与现场，连在一起','pin']].map(([label,n,u,note,i])=>`<div class="metric"><div class="metric-top">${label}${icon(i,15)}</div><div class="metric-number">${n}<small>${u}</small></div><div class="metric-note">${note}</div></div>`).join('')}</div>`+
- `<div class="overview-grid"><div><div class="section-head"><h2>正在生长的项目 <span class="eyebrow">GROWING PROJECTS</span></h2><button class="text-button" data-page="projects">全部项目 ${icon('arrow',12)}</button></div><div class="project-grid">${ps.slice(0,4).map(projectCard).join('')}</div></div><aside class="aside"><div class="attention-card"><h3><span class="review-count">${pending.length}</span>个节点，等你确认</h3><p>这些节点的进展，需要你来确认。<br>保留判断，让项目记忆更准确。</p>${button('pending','查看待核里程碑 '+icon('arrow',12),'btn')}</div><div class="panel"><div class="section-head"><h2>待跟进的节点</h2><span class="eyebrow">MILESTONES</span></div>${nodes.map(m=>`<button class="upcoming" data-project="${e((m.project_ids||[])[0])}" style="width:100%;text-align:left"><div class="day">${m.date?e(m.date.slice(8))+`<small>${e(m.date.slice(5,7))} 月</small>`:'<small>待定</small>'}</div><div><strong>${e(m.title)}</strong><div class="sub">${e(proj((m.project_ids||[])[0])?.title||'未关联项目')} · ${e(m.status)}</div></div></button>`).join('')}<p class="data-caption">按截止日期排序，已过期节点保留原状态。</p></div></aside></div>`+
+ `<div class="overview-grid"><div><div class="section-head"><h2>正在生长的项目 <span class="eyebrow">GROWING PROJECTS</span></h2><button class="text-button" data-page="projects">全部项目 ${icon('arrow',12)}</button></div><div class="project-grid">${ps.slice(0,4).map(projectCard).join('')}</div></div><aside class="aside"><div class="attention-card"><h3><span class="review-count">${pending.length}</span>个节点，等你确认</h3><p>这些节点的进展，需要你来确认。<br>保留判断，让项目记忆更准确。</p>${button('pending','查看待核里程碑 '+icon('arrow',12),'btn')}</div><div class="panel"><div class="section-head"><h2>待跟进的节点</h2><span class="eyebrow">MILESTONES</span></div>${nodes.map(m=>{const d=overdueDays(m,todayUtc);return `<button class="upcoming${d?' is-late':''}" data-project="${e((m.project_ids||[])[0])}" style="width:100%;text-align:left"><div class="day">${m.date?e(m.date.slice(8))+`<small>${e(m.date.slice(5,7))} 月</small>`:'<small>待定</small>'}</div><div><strong>${e(m.title)}</strong><div class="sub">${e(proj((m.project_ids||[])[0])?.title||'未关联项目')} · ${e(m.status)}${d?` · <span class="late-days">已过期 ${d} 天</span>`:''}</div></div></button>`}).join('')}<p class="data-caption">按截止日期排序，已过期节点保留原状态。</p></div></aside></div>`+
  `<section class="bottom-section"><div class="section-head"><h2>最近留下的记忆 <span class="eyebrow">RECENT MEMORIES</span></h2><button class="text-button" data-page="memory">展开时间线 ${icon('arrow',12)}</button></div><div class="panel timeline">${recent(S.records).slice(0,3).map(event).join('')||empty('还没有项目记录','在 AI 对话中让年轮整理第一份材料。')}</div></section>`;
 }
 function projectsPage(){let rows=sortProjects(S.projects).filter(p=>ui.filter==='all'||(ui.filter==='active'?active(p):!active(p)));return heading('每个项目，都有自己的年轮。','项目档案保存在 AI 表格，最新进展从记录里累积。',button('newProject',icon('plus',14)+' 新建项目','btn primary'))+`<div class="filters"><div class="filter-tabs">${[['active','当前项目'],['archived','已完成 / 暂停'],['all','全部']].map(([k,l])=>`<button class="${ui.filter===k?'active':''}" data-filter="${k}">${l}</button>`).join('')}</div><span class="spacer"></span><span class="toolbar-note">P0 优先 · ${rows.length} / ${S.projects.length} 个项目</span></div><div class="project-grid full-projects">${rows.map(projectCard).join('')}</div>`;}

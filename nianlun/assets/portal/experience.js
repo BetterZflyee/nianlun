@@ -22,8 +22,28 @@ function cleanupGrowthOverview() {
 function growthRecordOpen(row) {
   return !["已解决", "已关闭", "已完成", "已取消"].includes(row.status);
 }
+// 完成态判定。原来只写了「已完成/已取消/已关闭」——但真实数据里
+// **一个都没有**（实测 200 条：待核 80、未开始 66、进行中 18、待核对 15、
+// 已延期 12、已达成 8）。于是这个函数永远返回 true，8 条「已达成」被当成
+// 未完成算进了风险统计。真实完成态是「已达成」。
+const MILESTONE_DONE = ["已达成", "已完成", "已取消", "已关闭", "已解决"];
 function growthMilestoneOpen(row) {
-  return !["已完成", "已取消", "已关闭"].includes(row.status);
+  const status = String(row.status || "").trim();
+  return !MILESTONE_DONE.includes(status);
+}
+
+// 里程碑有没有过期——原来只判状态不看日期，导致 35 条已过期（最久 69 天）的
+// 里程碑在界面上和普通"未完成"长得一模一样，用户看不出哪个项目在拖。
+// 只算"有日期且已过期"的，没日期的不算（无从判断，不能冤枉）。
+function growthMilestoneOverdue(row, now) {
+  if (!growthMilestoneOpen(row)) return 0;
+  const raw = (row.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return 0;
+  const due = Date.parse(raw + "T00:00:00Z");
+  if (Number.isNaN(due)) return 0;
+  const today = Date.parse(new Date(now).toISOString().slice(0, 10) + "T00:00:00Z");
+  const days = Math.floor((today - due) / 86400000);
+  return days > 0 ? days : 0;
 }
 function renderGrowthProjects(root) {
   cleanupGrowthOverview();
@@ -194,6 +214,12 @@ function renderGrowthProjects(root) {
       const latest = rows.records
         .filter((r) => r.date)
         .sort((a, b) => b.date.localeCompare(a.date))[0];
+      // 这个项目有多少条里程碑已过期——卡上要能一眼看出哪个项目在拖。
+      const overdueList = rows.milestones
+        .map((m) => ({ row: m, days: growthMilestoneOverdue(m, Date.now()) }))
+        .filter((x) => x.days > 0)
+        .sort((a, b) => b.days - a.days);
+      const overdueCount = overdueList.length;
       const card = el(
         "article",
         {
@@ -224,6 +250,14 @@ function renderGrowthProjects(root) {
             el("span", { text: rows.records.length + " 记录" }),
             el("span", { text: rows.milestones.length + " 里程碑" }),
             el("span", { text: rows.sites.length + " 场地" }),
+            // 过期里程碑角标：原来只显示总数，用户看不出「这个项目在拖」。
+            overdueCount > 0
+              ? el("span", {
+                  class: "project-card-overdue",
+                  title: "有 " + overdueCount + " 条里程碑已过期仍未达成",
+                  text: "⚠ " + overdueCount + " 条过期",
+                })
+              : null,
           ]),
           el("div", { class: "project-card-latest" }, [
             el("small", {

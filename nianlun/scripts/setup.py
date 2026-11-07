@@ -18,7 +18,7 @@ import nianlun as n
 from growth import Gateway, self_identity
 from file_lock import file_lock
 
-VERSION = '2.9.2'
+from version import VERSION  # noqa: E402  唯一版本来源，见 version.py
 
 
 def options(*names):

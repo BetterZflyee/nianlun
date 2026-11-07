@@ -37,6 +37,7 @@ import scheduler
 import project_actions
 import intake
 import nianlun as n
+from version import VERSION  # noqa: E402
 from setup import Setup, default_home
 from workbench import Workbench, text
 from file_lock import file_lock
@@ -67,7 +68,7 @@ class Application:
         growth=config.get('growth',{})
         scheduler=Path(growth['state_dir'])/'scheduler.json' if growth.get('state_dir') else None
         schedule=run_control.status(config,self.home,self.config)
-        return {'version':'2.9.2','configured':bool(config.get('tables')),'base_url':config.get('base_url'),
+        return {'version':VERSION,'configured':bool(config.get('tables')),'base_url':config.get('base_url'),
             'report_method':{'name':'transcript-visual-recap' if self.settings.get('report_skill_path') else '年轮默认文本','layout':'精简阶段回顾'},
             'memory_connected':bool(growth.get('brain_dir')),'scheduler':schedule,
             'memory':{'directory':growth.get('brain_dir'),'home':growth.get('brain_home'),'mode':growth.get('memory_mode')},

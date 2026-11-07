@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / 'tools'))
 from release_guard import check_file, check_source
 
-VERSION = '2.9.2'
+sys.path.insert(0, str(ROOT / 'nianlun' / 'scripts'))
+from version import VERSION  # noqa: E402  唯一版本来源
 LAUNCHERS = ('安装年轮.command', '打开年轮.command')
 
 

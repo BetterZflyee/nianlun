@@ -72,6 +72,21 @@ def register_entry(root,home):
             register(folder,root/name,home)
 
 
+
+def _version():
+    """从核心代码读版本号，读不到时给明确提示而不是静默用旧值。"""
+    import sys
+    from pathlib import Path as _P
+    core = _P(__file__).resolve().parent.parent / 'nianlun' / 'scripts'
+    if str(core) not in sys.path:
+        sys.path.insert(0, str(core))
+    try:
+        from version import VERSION
+        return VERSION
+    except ImportError:
+        return 'unknown'
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--home',default=str(Path.home()/'.local/share/nianlun'))
@@ -105,7 +120,7 @@ def main():
             if not setup.is_dir():setup=PACKAGE/'nianlun-setup'
             core_status=register(CORE,core,home);setup_status=register(setup,setup_core,home)
             config=old.get('config') or str(Path.home()/'.config/nianlun/config.json')
-            result={'version':'2.9.2','python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
+            result={'version':_version(),'python_bin':sys.executable,'home':str(home),'core':str(core),'config':config,
                     'scheduler_entry':old.get('scheduler_entry') or (str(Path(old['skills']['nianlun']['path'])/'scripts/scheduler.py') if old.get('skills') else str(core/'scripts/scheduler.py')),
                     'skills':{'nianlun':{'path':str(core),'status':core_status},'nianlun-setup':{'path':str(setup_core),'status':setup_status}},
                     'host_entries':dict(old.get('host_entries',{}))}

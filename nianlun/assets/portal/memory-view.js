@@ -242,7 +242,20 @@ async function renderMemory27(root, generation) {
       rail.querySelector("summary") === document.activeElement;
     const openFolders = rail.querySelector(".mv-folders")?.open;
     const groups = model.catalogGroups(fullGraph, projects);
-    totals.textContent = `${groups.total} 篇 · ${fullGraph.edges.length} 条引用`;
+    // 0 条引用时要说清「是正常结果」，否则用户看到「505 篇 · 0 条引用」会
+    // 以为功能坏了。引用只在记忆正文里写了 [[wiki链接]] 时才存在——早期写入
+    // 的记忆没有这种链接，所以新老混用时早期那批天然是 0。
+    const edges = fullGraph.edges.length;
+    totals.textContent = edges
+      ? `${groups.total} 篇 · ${edges} 条引用`
+      : `${groups.total} 篇 · 暂无引用`;
+    if (!edges) {
+      totals.title =
+        "这里的引用来自记忆正文里写下的 [[链接]]。" +
+        "如果说「已核验 N / N 篇」却没有引用，说明这些记忆本身没有互链，不是读取失败。";
+    } else {
+      totals.removeAttribute("title");
+    }
     rail.replaceChildren(
       navButton("全部记忆", "all", groups.total),
       navButton("未归属项目", "unassigned", groups.unassigned),

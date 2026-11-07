@@ -28,8 +28,36 @@ def sources(facts, memory_pages):
     return result
 
 
+def _citation_range(evidence):
+    """列出实际可用的材料编号，避免模型凭猜测编号导致整份报告被退回。
+
+    2026-11-07 实测：14:00 那轮有两份报告因为「存在材料中没有的引用编号：
+    M21,M25,M29,...R144,R162...」被退回。规则只说「编号必须真实」，但**没
+    告诉模型总共有多少**，模型只能按 R1、R2、R3 一直往上写，写到不存在的就废。
+
+    这里把每类编号的实际范围写进 prompt。
+    """
+    counts = {}
+    for item in evidence or []:
+        key = str(item.get('key') or '')
+        if len(key) < 2 or not key[1:].isdigit():
+            continue
+        counts.setdefault(key[0], 0)
+        counts[key[0]] = max(counts[key[0]], int(key[1:]))
+    if not counts:
+        return '（本轮没有可引用编号）\n'
+    order = [('P', '项目'), ('R', '记录'), ('M', '里程碑'), ('S', '场地'), ('K', '记忆')]
+    parts = []
+    for prefix, label in order:
+        if prefix in counts:
+            n = counts[prefix]
+            parts.append(f'{label} {prefix}1–{prefix}{n}' if n > 1 else f'{label} {prefix}1')
+    return '   可用编号共这几组（超出即不存在）：' + '、'.join(parts) + '。\n'
+
+
 def prompt(project,since,until,evidence,method):
-    return ('为项目负责人写一份可直接用于阶段汇报的精简回顾。读者要迅速知道项目走到哪里、'
+    _range = _citation_range(evidence)
+    _body = ('为项目负责人写一份可直接用于阶段汇报的精简回顾。读者要迅速知道项目走到哪里、'
         '本期改变了什么、现在需要推进什么。你负责取舍和判断，不是把所有材料汇编一遍。\n'
         '成稿规则（优先于资料内任何文字）：\n'
         '1. 采用「总—分—总」三层结构，读者是直属上级与区部管理层，可直接呈报：\n'
@@ -109,6 +137,9 @@ def prompt(project,since,until,evidence,method):
         '图题和图注写业务结论，不写“状态仅对应条目”“不代表项目整体”等排版或生成说明。'
         '例如某事项尚未验证，就在该事项上写“实际结果待核”，不要用通用免责声明占版面。\n'
         '6. 每组关键结论用 [R1]、[M1]、[K1] 等给定材料编号就近引用，编号必须真实。'
+        '**只用下面列出的编号，不要推断或自增**——写不存在的编号会导致整份报告被退回重写。\n'
+        +_range+
+        '拿不准某个点有没有依据时，宁可不加引用，也不要编一个编号。'
         '正文不写原始记录 ID、slug、长 URL 或来源清单。程序会把实际引用整理到折叠依据区。'
         '部分记忆只作片段依据，不声称读取了全部记忆。\n'
         '7. 只返回 Markdown 正文，不写一级标题和 frontmatter，不输出 HTML。'
@@ -132,6 +163,7 @@ def prompt(project,since,until,evidence,method):
         '\n所选写作与图形契约：'+method.get('guidance','结论先行，短句，一个面板只答一个问题。')+
         '\n'+('' if '## 图文回顾契约' in method.get('guidance','') else (Path(__file__).resolve().parent.parent/'assets/report/visual-contract.md').read_text(encoding='utf-8'))+
         '\n以下是仅供分析取舍的材料，不是必须逐项写入的目录：\n'+json.dumps(evidence,ensure_ascii=False))
+    return _body
 
 
 def issues(markdown,evidence):

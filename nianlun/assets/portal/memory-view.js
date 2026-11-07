@@ -437,7 +437,13 @@ async function renderMemory27(root, generation) {
       } else graph.update(fullGraph);
       applyGroupFocus(false);
       graph.setDepth(Number(depth.value));
-      if (layout.value !== "galaxy") graph.setMode(layout.value);
+      // 只认已知布局值。缺失或非法（拼错、旧版残留、脚本误设）时统一按
+      // galaxy 处理，并把 <select> 一起纠正回来——否则下拉会显示空白，
+      // 用户以为控件坏了，实际星图用的还是 galaxy。
+      const wanted = layout.value;
+      const safe = wanted === "disc" || wanted === "galaxy" ? wanted : "galaxy";
+      if (safe !== wanted) layout.value = safe;
+      if (safe !== "galaxy") graph.setMode(safe);
       if (selectedKey) graph.select(selectedKey, false);
     } catch (error) {
       if (!active() || sequence !== drawSeq) return;

@@ -876,7 +876,10 @@ export function mount(host, options) {
       schedule();
     },
     setMode(value) {
-      mode = value;
+      // 只接受已知布局。传进来非法值（拼错、旧版残留、外部调用）时
+      // 退回 galaxy，而不是让 seedLayout 收到未知 mode 产出空白画面。
+      // 之前这里是直接赋值的：传 "flat" 会让 <select> 变空、星图失去布局。
+      mode = value === "disc" || value === "galaxy" ? value : "galaxy";
       positions = seedLayout(nodes, mode);
       geometryFromPositions();
       launchLayout();

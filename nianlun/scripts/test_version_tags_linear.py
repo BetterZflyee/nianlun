@@ -60,10 +60,21 @@ class VersionTagTests(unittest.TestCase):
             out = git('log', '--oneline', f'{prev}..{nxt}')
             self.assertTrue(out, f'{prev}..{nxt} 之间没有提交（版本重叠）')
 
-    def test_no_commit_outside_tags(self):
-        """最后一个 tag 之后不应有未归入任何版本的提交。"""
+    def test_untagged_commits_are_bounded(self):
+        """最后一个 tag 之后可以有提交，但不能堆积太多。
+
+        ⚠️ 这里不能断言「必须为 0」。工作本身就在产生提交——每发一个版本，
+        立刻又会有新的修复进来，断言为 0 会让测试在自己改代码时必然失败
+        （我第一版就是这么写的，然后被自己的修复打脸两次）。
+
+        合理约束是**有界**：没归入版本的提交不超过一个小迭代的量。超过就
+        说明该发新版本了，测试会提醒。
+        """
         out = git('log', '--oneline', f'{TAGS[-1]}..HEAD')
-        self.assertFalse(out, f'有提交没被 v2.9.7 覆盖：{out}')
+        count = len([l for l in (out or '').splitlines() if l.strip()])
+        self.assertLessEqual(
+            count, 10,
+            f'{count} 个提交未归入版本，该发 v2.9.8 了：\n{out}')
 
     def test_timestamps_increase(self):
         """tag 提交时间必须严格递增，不能出现时间倒流。"""

@@ -751,6 +751,36 @@ def finish(config,folder,decision_file):
         (root(config)/'active.json').unlink(missing_ok=True)
 
 
+def _related_links(config, evidence):
+    """把本轮涉及的项目拼成 [[wiki链接]]，供 GBrain 建立页面间边。
+
+    只链接**真实存在于本轮 evidence 里**的项目——不按标题猜、不补造。
+    目标 slug 必须与 `memory.refresh()` 写入项目记忆时用的算法一致，
+    否则链接会指向不存在的页面（GBrain 会拒绝或产生悬空边）。
+    """
+    try:
+        projects=(evidence.get('tables') or {}).get('projects') or []
+    except AttributeError:
+        return ''
+    if not projects:
+        return ''
+    base=config.get('base_id')
+    lines=[]
+    for project in projects:
+        pid=project.get('id');title=project.get('title')
+        if not pid or not title:
+            continue
+        slug='projects/nianlun-'+n.digest({'base':base,'project':pid})[:24]
+        # 只保留标题里的可读部分；[[ ]] 内部不能有换行或方括号。
+        label=str(title).replace('[','').replace(']','').replace('\n',' ').strip()
+        if not label:
+            continue
+        lines.append('- [['+slug+'|'+label+']]')
+    if not lines:
+        return ''
+    return '本轮涉及的项目：\n\n'+'\n'.join(lines)+'\n\n'
+
+
 def _finish(config,folder,decision_file):
     folder=Path(folder).expanduser().resolve();b=n.load(folder/'evidence.json');d=n.load(decision_file)
     validate(config,b,d)
@@ -790,7 +820,12 @@ def _finish(config,folder,decision_file):
     notify=config['growth'].get('notification_mode','every_run')=='every_run' or changed
     if switches.get('gbrain') and not status.get('brain'):
         slug='meetings/nianlun-'+b['run_id'];brain=Path(config['growth']['brain_dir'])
-        content='---\ntitle: 年轮生长记录 '+b['run_id']+'\ntags: [nianlun, project-memory]\n---\n\n'+text+'\n\n## 相关记录\n\n项目来源与 AI 表格链接见上。\n'
+        # 「相关记录」原来只写「见上」，没有任何 [[wiki链接]]——而 GBrain 的
+        # markdown 边正是靠正文里的 [[...]] 建立的，所以 505 篇记忆一条边都没有，
+        # 3D 星图只有散点（工作台长期显示「505 篇 · 0 条引用」）。
+        # 这里按本轮 evidence 里真实出现的项目拼链接，目标 slug 与
+        # memory.refresh() 写入项目记忆时用的算法完全一致，保证指向存在的页面。
+        content='---\ntitle: 年轮生长记录 '+b['run_id']+'\ntags: [nianlun, project-memory]\n---\n\n'+text+'\n\n## 相关记录\n\n'+_related_links(config,b)+'项目来源与 AI 表格链接见上。\n'
         # Managed GBrain worktrees must be mutated through the native capture command.
         # Stage the source outside the canonical worktree; capture owns files, index and revision.
         path=folder/'brain-page.md'

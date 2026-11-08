@@ -409,7 +409,8 @@ function renderGrowthProjects(root) {
       if (generation !== growthOverviewGeneration || !stage.isConnected) return;
       scene = module.mount(stage, {
         projects: data.projects,
-        records: data.records,
+        // 归档记录不参与星图，否则 70% 的历史点会把当前脉络淹掉
+        records: data.records.filter((r) => r.status !== "已归档"),
         milestones: data.milestones,
         sites: data.sites,
         onSelect: openProject,

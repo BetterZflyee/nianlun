@@ -513,3 +513,97 @@ for c in b.get('coverage') or []:
 
 ⚠️ 注意区分：`partial` 是「部分成功」，`failed` 才是「失败」。前者数据能用，
 后者不能用。
+
+## 第十六章 · 生长整轮停摆，错误是 502
+
+### 症状
+
+定时生长不再产出报告，`finish.json` 里是：
+
+```
+dsh: SERVER: 502 status code (no body)
+```
+
+连续多轮都是这个错，重试 4 次后标 `abandoned`。
+
+### 先别急着怀疑服务挂了
+
+**502 最常见的真因不是「服务器挂了」，是「请求被送错地方了」。**
+
+2026-11-08 实测：系统代理 `http://127.0.0.1:7897` 开着，`runtime_env()`
+把 `HTTP_PROXY` / `HTTPS_PROXY` 传给了 `dsh`，**却没有 `NO_PROXY`**。
+于是 `dsh` 访问公司内网 `llm-model-hub-apis.sf-express.com` 时绕去了出境
+代理，出不去，返回 502。
+
+### 三步定位
+
+**第一步：确认模型服务本身活着**
+
+```bash
+K=$(python3 -c "import yaml;print(yaml.safe_load(open('$HOME/.dsh/.credentials.yaml'))['refs']['SF_LLM_API_KEY'])")
+curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 \
+  -H "Authorization: Bearer $K" \
+  http://llm-model-hub-apis.sf-express.com/v1/models
+```
+
+- 返回 **400 或 200** → 服务活着，不是它的问题
+- 无响应 / 超时 → 才是真的连不上
+
+**第二步：做代理对照实验（关键）**
+
+```bash
+# 不带代理
+echo "hi" | SF_LLM_API_KEY="$K" \
+  /Users/zhufei/.nodejs/bin/dsh headless --json | tail -2
+
+# 带代理
+echo "hi" | SF_LLM_API_KEY="$K" \
+  HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897 \
+  /Users/zhufei/.nodejs/bin/dsh headless --json | tail -2
+```
+
+- 不带代理能通、带代理报错 → **就是代理问题**，去第三步
+- 两个都不通 → 继续查凭证（见下）
+
+**第三步：确认 `runtime_env()` 有内网白名单**
+
+```bash
+cd ~/.local/share/nianlun/core/nianlun/scripts
+python3 -c "import harness;e=harness.runtime_env();print(e.get('NO_PROXY'))"
+```
+
+应该看到包含 `.sf-express.com`、`.dingtalk.com`、`.aliyuncs.com`。
+
+### 另一个常见误判：以为是凭证丢了
+
+`dsh headless` 直跑可能报：
+
+```
+MISSING_CREDENTIAL: no credential for provider route "sf-llm"
+```
+
+**这不等于年轮拿不到 Key。** 年轮的 `dsh_api_key()` 会从
+`~/.dsh/.credentials.yaml` 的 `refs` 段读，直接验证：
+
+```bash
+python3 -c "import harness;print(len(harness.dsh_api_key() or ''))"
+```
+
+- 打印一个正数（如 283）→ 凭证没问题，**别去动它**
+- 打印 0 → 才是凭证问题
+
+⚠️ 我在这上面栽过：以为凭证丢了，加了一段重复的补丁，后来发现
+`dsh_api_key()` 早就实现了，白写一遍还多了一套逻辑。
+
+### 还要注意：不要用管道接 `grow` 的输出
+
+```bash
+# 会卡死
+python3 host.py grow | tail -12
+
+# 正确
+python3 host.py grow > /tmp/grow.log 2>&1 < /dev/null &
+```
+
+`grow` 运行时间长、输出量大，管道缓冲区满后进程**阻塞在 write 上**，
+看起来像「卡在推理」。实测卡了 3 分半、CPU 只用 0.2 秒。

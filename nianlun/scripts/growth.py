@@ -257,6 +257,11 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
             progress(label+'：部分覆盖，已保留缺口；'+str(e))
     progress('正在读取 AI 表格中的项目、里程碑和记录')
     bundle['tables'] = n.fetch(config,gw.table())
+    # 已归档记录是历史，不参与本轮理解与写入：既避免 evidence 膨胀，
+    # 也避免模型把上个月已办结的事项当成新进展重复处理。
+    bundle['tables']['records'] = [
+        r for r in bundle['tables'].get('records', [])
+        if str(r.get('status') or '').strip() != '已归档']
     if selection and selection['project_ids']:
         chosen=set(selection['project_ids'])
         if chosen-{p['id'] for p in bundle['tables']['projects']}:raise n.Error('所选项目已不存在，请刷新')

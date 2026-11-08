@@ -58,6 +58,17 @@ def runtime_env():
     for protocol in ('http','https'):
         if not env.get(protocol+'_proxy') and not env.get(protocol.upper()+'_PROXY') and proxies.get(protocol):
             env[protocol.upper()+'_PROXY']=proxies[protocol]
+    # 内网地址必须绕过代理，否则走代理出不去，表现为 502（不是「服务挂了」）。
+    # 2026-11-08 实测：系统代理 http://127.0.0.1:7897 开着时，dsh 访问
+    # llm-model-hub-apis.sf-express.com 全部 502；同一 Key 加上 NO_PROXY 后
+    # 立刻正常返回。此前 6 轮生长停摆的真正原因就是它——不是凭证丢失。
+    bypass = ('localhost,127.0.0.1,::1,'
+              '.sf-express.com,.sf-express.cn,.dingtalk.com,.alibaba-inc.com,'
+              '.aliyuncs.com,.dingtalkapps.com')
+    existing = env.get('NO_PROXY') or env.get('no_proxy') or ''
+    merged = ','.join([x for x in [existing.strip(), bypass] if x])
+    env['NO_PROXY'] = merged
+    env['no_proxy'] = merged
     return env
 
 

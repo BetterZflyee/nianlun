@@ -129,7 +129,9 @@ function compactRelations(project) {
       ]),
     );
   const count = rows.records.filter(
-    (r) => r.milestone_ids?.length || r.site_ids?.length,
+    (r) =>
+      (r.milestone_ids?.length || r.site_ids?.length) &&
+      r.status !== "已归档",
   ).length;
   const panel = el("section", {
     class: "relation-strip",

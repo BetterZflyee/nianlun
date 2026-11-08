@@ -518,7 +518,7 @@ def validate(config,bundle,decision):
             if op=='create_record' and not a['table_plan']['actions'][0].get('skip_existing'):
                 normalized_title=lambda value:re.sub(r'\s+','',value).casefold()
                 duplicates=[r for r in bundle['tables']['records'] if p['id'] in r.get('project_ids',[])
-                    and r.get('status') not in ('已解决','已关闭','已取消')
+                    and r.get('status') not in ('已解决','已关闭','已取消','已归档')
                     and normalized_title(r.get('title',''))==normalized_title(a['title'])]
                 duplicates += [x for x in actions if x['op']=='create_record' and x['project']==a['project']
                     and normalized_title(x['title'])==normalized_title(a['title'])]

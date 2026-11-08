@@ -23,6 +23,8 @@ def main():
     ap.add_argument('--keep-status', nargs='*', default=['处理中'],
                     help='这些状态的记录不归档（默认：处理中）')
     ap.add_argument('--batch', type=int, default=100)
+    ap.add_argument('--all-status', action='store_true',
+                    help='连「处理中」也一起归档（默认保护，避免把在做的任务藏起来）')
     ap.add_argument('--yes', action='store_true', help='实际写表；不加只演算')
     args = ap.parse_args()
 
@@ -40,7 +42,7 @@ def main():
     if ARCHIVED not in opts:
         print('字段里没有「%s」选项，请先添加' % ARCHIVED); return 1
 
-    keep = set(args.keep_status) | {ARCHIVED}
+    keep = ({ARCHIVED} if args.all_status else set(args.keep_status) | {ARCHIVED})
     cutoff = args.before
     targets = []
     for r in state['records']:

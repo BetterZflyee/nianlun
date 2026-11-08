@@ -20,7 +20,7 @@ function cleanupGrowthOverview() {
   growthOverviewCleanup = () => {};
 }
 function growthRecordOpen(row) {
-  return !["已解决", "已关闭", "已完成", "已取消"].includes(row.status);
+  return !["已解决", "已关闭", "已完成", "已取消", "已归档"].includes(row.status);
 }
 // 完成态判定。原来只写了「已完成/已取消/已关闭」——但真实数据里
 // **一个都没有**（实测 200 条：待核 80、未开始 66、进行中 18、待核对 15、
@@ -247,7 +247,7 @@ function renderGrowthProjects(root) {
             }),
           ]),
           el("div", { class: "project-card-counts" }, [
-            el("span", { text: rows.records.length + " 记录" }),
+            el("span", { text: rows.records.filter((r) => r.status !== "已归档").length + " 记录" }),
             el("span", { text: rows.milestones.length + " 里程碑" }),
             el("span", { text: rows.sites.length + " 场地" }),
             // 过期里程碑角标：原来只显示总数，用户看不出「这个项目在拖」。
@@ -357,7 +357,7 @@ function renderGrowthProjects(root) {
   ]);
   root.replaceChildren(hero, metrics, collection);
   const recent = data.records
-    .filter((r) => r.date && r.project_ids?.some((id) => byProject.has(id)))
+    .filter((r) => r.date && r.project_ids?.some((id) => byProject.has(id)) && r.status !== "已归档")
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 5);
   if (recent.length)

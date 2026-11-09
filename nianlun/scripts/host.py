@@ -86,10 +86,41 @@ def schedule_owner(config_path, provider):
         n.save(path,receipt);return receipt
 
 
+def init_tables(config_path, name=None, output=None):
+    """一键建四张表并写好绑定配置。
+
+    面向「拿到年轮想直接用」的人：不需要手工建表、不需要知道字段该叫什么。
+    建完之后配置可以直接跑生长。
+    """
+    import bootstrap
+    import growth
+    config_path = Path(config_path).expanduser()
+    existing = n.load(config_path) if config_path.exists() else {}
+    gw = growth.Gateway(existing or {'base_id': '', 'tables': {}})
+    steps = []
+    binding = bootstrap.build(existing, gw, name=name, progress=steps.append)
+    target = Path(output).expanduser() if output else config_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    n.save(target, binding)
+    return {
+        'saved': str(target),
+        'base_id': binding['base_id'],
+        'base_url': binding['base_url'],
+        'tables': {role: {'name': t['name'], 'id': t['id'], 'fields': len(t['fields'])}
+                   for role, t in binding['tables'].items()},
+        'coverage': bootstrap.coverage(binding),
+        'steps': steps,
+        'next': '打开工作台即可看到四张表；也可以直接跑 host.py grow 生成第一轮。',
+    }
+
+
 def main():
     p=argparse.ArgumentParser(description='年轮通用宿主接口')
     p.add_argument('--config',default=str(Path.home()/'.config/nianlun/config.json'))
     sub=p.add_subparsers(dest='command',required=True)
+    init=sub.add_parser('init-tables')
+    init.add_argument('--name',help='新 Base 的名称，默认带时间戳')
+    init.add_argument('--output',help='绑定配置写到哪，默认覆盖当前配置')
     sub.add_parser('status');sub.add_parser('grow');sub.add_parser('health')
     sub.add_parser('pause');sub.add_parser('unpause');sub.add_parser('recovery-status')
     rec=sub.add_parser('reconcile');rec.add_argument('--run-id',required=True)
@@ -119,6 +150,7 @@ def main():
             import source_state
             result=source_state.runtime_status(n.load(args.config))
         elif args.command=='status':result={'selected':harness.status(harness.selection(args.config)),'hosts':harness.PROVIDERS}
+        elif args.command=='init-tables':result=init_tables(args.config,args.name,args.output)
         elif args.command=='connect':result=connect(args.config,args.provider,args.mode,args.binary)
         elif args.command=='export':result=export(args.config,args.provider,args.home)
         elif args.command=='pending':result=host_bridge.pending(args.config,args.id)

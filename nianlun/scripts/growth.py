@@ -596,6 +596,57 @@ def writable_cells(config, role, cells):
     return result, dropped
 
 
+def _contact_index(gw, cache=None):
+    """扫一遍记录表，建「姓名 → user 对象」索引。
+
+    只认**唯一出现**的姓名：同名多个说明这个团队里也有歧义，不能猜。
+    """
+    key = '__contact_index__'
+    if cache is not None and key in cache:
+        return cache[key]
+    index = {}
+    try:
+        cfg = gw.config
+        table = cfg['tables']['records']
+        fid = (table.get('fields') or {}).get('contact', {}).get('fieldId')
+        if not fid:
+            if cache is not None:
+                cache[key] = {}
+            return {}
+        rows = gw.table().records(cfg['base_id'], table['id'])
+    except Exception:
+        if cache is not None:
+            cache[key] = {}
+        return {}
+    seen = {}
+    for row in rows:
+        value = (row.get('cells') or {}).get(fid)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict) or not item.get('userId'):
+                continue
+            name = str(item.get('name') or '').strip()
+            if not name:
+                continue
+            seen.setdefault(name, set()).add(json.dumps(
+                {'userId': item['userId'], **({'corpId': item['corpId']} if item.get('corpId') else {})},
+                ensure_ascii=False, sort_keys=True))
+    for name, variants in seen.items():
+        if len(variants) == 1:
+            index[name] = [json.loads(next(iter(variants)))]
+        else:
+            index[name] = None   # 同名多个用户，标记为不可用
+    if cache is not None:
+        cache[key] = index
+    return index
+
+
+def historic_contact(gw, name, cache=None):
+    index = _contact_index(gw, cache)
+    return index.get(name)
+
+
 def resolve_contact(gw, name, cache=None):
     """把中文姓名解析成钉钉 user 对象 [{corpId,userId}]。
 
@@ -622,6 +673,18 @@ def resolve_contact(gw, name, cache=None):
         return None
     if cache is not None and key in cache:
         return cache[key]
+    # ★ 优先从**已有记录**里查同名历史值。
+    #
+    # 为什么必须这样：全公司同名的人很多——实测「朱飞」有 **15 个**，
+    # 只按姓名搜根本判不出是哪个。硬选第一个会把记录挂到收派员名下。
+    #
+    # 而表里已经写进去过的对接人，就是「这个团队实际用到的人」，
+    # 用它反向匹配比全公司搜索准得多。
+    historic = historic_contact(gw, key, cache)
+    if historic:
+        if cache is not None:
+            cache[key] = historic
+        return historic
     try:
         data = gw.call(['contact', 'user', 'search', '--query', key])
     except Exception:

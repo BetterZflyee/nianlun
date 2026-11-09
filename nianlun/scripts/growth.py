@@ -609,9 +609,23 @@ def table_write(config,gw,role,cells,record_id=None):
         ids=d.get('newRecordIds',[])
         if len(ids)!=1:raise n.Error('新增记录的返回 ID 不明确')
         record_id=ids[0]
-    d=gw.call(['aitable','+record-query','--base-id',base,'--table-id',table,'--record-ids',record_id])
-    rows=d.get('records',[])
-    if len(rows)!=1 or rows[0]['recordId']!=record_id or not all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):raise n.Error('表格写后验证不一致')
+    # 写后回读**要重试**：写入本身绝不重发（会重复入库），但「读一次没读到」
+    # 可能只是钉钉侧的可读性延迟——实测刚写完立刻查，偶尔返回 0 行，
+    # 再查就有。原来的写法读一次对不上就抛「写入结果未知」，让用户以为
+    # 写失败、于是重做一遍，反而可能产生重复记录。
+    #
+    # ⚠️ 这里重试的只是**读**，不是写。写入永远只发一次。
+    rows=[]
+    for attempt in range(4):
+        d=gw.call(['aitable','+record-query','--base-id',base,'--table-id',table,'--record-ids',record_id])
+        rows=d.get('records',[])
+        if len(rows)==1 and rows[0].get('recordId')==record_id and all(
+                n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):
+            break
+        if attempt<3:time.sleep(1.5*(attempt+1))
+    if len(rows)!=1 or rows[0]['recordId']!=record_id or not all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):
+        raise n.Error('表格写后验证不一致：已重试读取 4 次仍未读到本次写入。'
+                      '该记录可能已写入但回读延迟，请先在表格里核对，确认后再决定是否重做')
     # dropped 不能悄悄丢掉：只读字段、越界选项、未知字段被剔除后，写进去的记录就少了几列，
     # 而调用方看到 verified=True 会以为整条都写成功了。把剔除明细带回回执。
     result={'record_id':record_id,'verified':True}

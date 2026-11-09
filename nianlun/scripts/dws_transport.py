@@ -41,5 +41,20 @@ def failure(result,args):
         if word.startswith('--'):break
         command.append(word)
     submitted=is_write(args) and category not in ('auth','validation','discovery') and reason!='confirmation_required'
-    suffix='；写入结果未知，请核验原结果，未自动重发' if submitted else '；读取未确认，未把缺失结果视为空数据' if not is_write(args) else ''
+    # 「写入结果未知」不能只说「未知」——用户不知道该不该重做，往往就重复写一遍，
+    # 于是同一件事出现两份记录。这里把在跑的命令、以及「怎么核验」都说出来。
+    #
+    # `cause` 里如果带 read-back missing / failedCount，说明是**写后回读没对上**：
+    # 大概率已经写进去了（executed=true），只是响应没回来或回读时机太早。
+    detail=str(error.get('cause') or '')
+    if 'read-back' in detail:
+        suffix=('；该记录很可能已写入，只是回读没确认到。'
+                '请先在表格里核对该条记录，确认已正确后再决定是否重做——'
+                '不要直接重试，否则可能产生重复记录')
+    elif submitted:
+        suffix='；写入结果未知，请先在表格里核验原结果，确认未生效后再重做；不要直接重试'
+    elif not is_write(args):
+        suffix='；读取未确认，未把缺失结果视为空数据'
+    else:
+        suffix=''
     return 'DWS '+ ' '.join(command)+'：'+cause+suffix

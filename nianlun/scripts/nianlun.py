@@ -176,6 +176,96 @@ def clean_name(name):
     return re.sub(r'[^\w\u4e00-\u9fff]', '', name)
 
 
+# ---- 开放表结构推断 ----
+# 目标：别人拿到年轮，用它自己的表结构也能跑，不要求列名和我们的预设一致。
+#
+# 做法分三层，逐层放宽：
+#   ① 显式映射（field_mapping）—— 用户/向导指定，最高优先级
+#   ② 别名匹配（FIELDS）—— 常见中文列名
+#   ③ 结构推断（本函数）—— 按列类型 + 语义线索猜，只用于别名全部落空时
+#
+# ③ 是「可移植性」的关键。因为列类型在钉钉表里是唯一的：
+#   关联列只可能是 bidirectionalLink/unidirectionalLink，
+#   日期列只可能是 date/createdTime/modifiedTime，
+#   人员列是 user/creator。这些线索和列名无关。
+
+# 结构推断的语义线索词。匹配顺序有意义：越具体越靠前。
+_SEMANTIC_HINTS = {
+    'title': ('标题', '名称', '内容', '事项', '主题', 'title', 'name', 'subject'),
+    'description': ('详情', '描述', '说明', '内容', '正文', 'detail', 'desc'),
+    'solution': ('解决', '处理', '方案', '结论', 'solution', 'resolution'),
+    'status': ('状态', '进度', '阶段', 'status', 'state', 'stage'),
+    'date': ('日期', '时间', '截止', 'date', 'time', 'due'),
+    'owner': ('人', '负责', 'owner', 'assignee', 'creator'),
+    'kind': ('类型', '分类', '类别', 'type', 'kind', 'category'),
+    'code': ('编码', '代码', '编号', 'code', 'number', 'id'),
+    'priority': ('优先级', '等级', 'priority', 'level'),
+    'risk': ('风险', '卡点', '阻塞', 'risk', 'blocker'),
+}
+
+
+def _hint_score(logical, field_name):
+    """列名和逻辑字段的语义接近程度，0 表示无关。"""
+    name = str(field_name or '').casefold()
+    if not name:
+        return 0
+    best = 0
+    for hint in _SEMANTIC_HINTS.get(logical, ()):
+        if hint.casefold() in name:
+            # 越长的线索词越可信：「截止日期」比「日期」更能说明问题
+            best = max(best, len(hint))
+    return best
+
+
+def _infer_by_structure(role, logical, fields, taken):
+    """别名匹配不上时，按类型和语义猜一列。
+
+    只在「类型能唯一确定用途」或「语义线索足够强」时才返回，避免瞎猜：
+    - 关联字段（*_ids）：看目标表，不是所有 link 都能当项目
+    - 日期：date/createdTime/modifiedTime 三选一，优先 date
+    - 其余：靠语义线索，且必须唯一
+    """
+    open_fields = [f for f in fields if f['fieldId'] not in taken]
+    if not open_fields:
+        return None
+    if logical.endswith('_ids'):
+        wanted = [f for f in open_fields
+                  if f.get('type') in ('bidirectionalLink', 'unidirectionalLink')]
+        if not wanted:
+            return None
+        target = {'project_ids': 'projects', 'site_ids': 'sites',
+                  'milestone_ids': 'milestones'}.get(logical)
+        if target:
+            # 关联目标表能直接判断这一列连的是谁，比列名可靠得多。
+            matched = [f for f in wanted
+                       if (f.get('config') or {}).get('linkedTableId')]
+            if matched:
+                return matched[0] if len(matched) == 1 else None
+        return wanted[0] if len(wanted) == 1 else None
+    if logical in ('date', 'updated', 'deadline', 'start_date', 'entry_date'):
+        wanted = [f for f in open_fields
+                  if f.get('type') in ('date', 'createdTime', 'modifiedTime')]
+        if not wanted:
+            return None
+        # 优先真实 date（可写），系统生成的创建/修改时间只读。
+        writable = [f for f in wanted if f.get('type') == 'date']
+        pool = writable or wanted
+        return pool[0] if len(pool) == 1 else None
+    if logical == 'owner':
+        wanted = [f for f in open_fields
+                  if f.get('type') in ('user', 'creator', 'modifiedBy')]
+        if wanted:
+            return wanted[0] if len(wanted) == 1 else None
+    # 最后靠语义线索，且必须明显高于其它候选（防止把「标题」猜成「标题备注」）。
+    scored = sorted(((_hint_score(logical, f.get('fieldName')), f) for f in open_fields),
+                    key=lambda x: -x[0])
+    if not scored or scored[0][0] == 0:
+        return None
+    if len(scored) > 1 and scored[0][0] == scored[1][0]:
+        return None  # 并列就放弃，宁可缺字段也不猜错
+    return scored[0][1]
+
+
 def bind(client, base, base_url, mapping=None, field_mapping=None, config_path=None):
     parsed = urlparse(base_url)
     if parsed.scheme != 'https' or not (parsed.hostname or '').endswith('.dingtalk.com') or base not in parsed.path.split('/'):
@@ -211,9 +301,23 @@ def bind(client, base, base_url, mapping=None, field_mapping=None, config_path=N
                 raise Error(f'{name}.{logical} 字段有歧义')
             if candidates:
                 resolved[logical] = candidates[0]
+        # 别名落空的逻辑字段，尝试按类型+语义推断（开放表结构的关键）。
+        # 只补必填项和能确定用途的列；推断不出来就留空，不硬凑。
+        taken = {f['fieldId'] for f in resolved.values()}
+        inferred = []
+        for logical in FIELDS[role]:
+            if logical in resolved:
+                continue
+            guess = _infer_by_structure(role, logical, fields, taken)
+            if guess:
+                resolved[logical] = guess
+                taken.add(guess['fieldId'])
+                inferred.append(logical)
         missing = set(REQUIRED[role]) - resolved.keys()
         if missing:
-            raise Error(f'{name}缺少字段：{", ".join(sorted(missing))}')
+            raise Error(f'{name}缺少字段：{", ".join(sorted(missing))}。'
+                        f'已自动识别 {len(resolved)} 列{("（推断：" + "、".join(inferred) + "）") if inferred else ""}；'
+                        '请用 --field-map 指定缺失字段对应的列')
         for logical, f in resolved.items():
             if logical.endswith('_ids'):
                 expected = ('bidirectionalLink', 'unidirectionalLink')

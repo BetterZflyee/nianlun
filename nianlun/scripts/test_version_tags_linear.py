@@ -44,8 +44,13 @@ def _tag_list():
     早就不存在的版本线。
     **维护性测试的数据必须来自被检查的对象本身，不能靠人工同步。**
     """
-    out = git('tag', '--list', 'v2.9.*')
-    tags = [x for x in (out or '').splitlines() if x.strip()]
+    # ⚠️ 不能写 'v2.9.*'——那只匹配 2.9 系列，2.10/2.11/2.12 全被漏掉，
+    # 测试会一直拿 v2.9.9 当「最新」，永远发现不了之后的堆积。
+    # 用 glob 匹配所有 vX.Y.Z，再按版本号排序。
+    out = git('tag', '--list', 'v*')
+    import re as _re
+    tags = [x for x in (out or '').splitlines()
+            if _re.fullmatch(r'v\d+\.\d+\.\d+', x.strip())]
     def key(tag):
         parts = tag.lstrip('v').split('.')
         try:

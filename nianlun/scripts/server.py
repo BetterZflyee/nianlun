@@ -617,14 +617,29 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError,ConnectionResetError):pass
 
     def allowed(self,api=False,write=False):
-        expected='127.0.0.1:'+str(self.server.server_port)
-        if self.headers.get('Host')!=expected:
-            self.respond(403,{'error':'主机地址不匹配'});return False
+        port=str(self.server.server_port)
+        # 本机别名都要认：用户存的书签可能是 localhost、127.0.0.1、甚至是 [::1]。
+        # 原来只认 '127.0.0.1:<port>'，用 localhost 打开就永远 403
+        # （实测 localhost 返回 403、127.0.0.1 返回 200），而前端把 403
+        # 渲染成「本次读取未完成 / 会话已失效」——于是用户以为是登录掉了，
+        # 其实是地址写法不同。Host 校验的目的是防 DNS 重绑定，只要 Host
+        # 属于本机别名就安全，不必限定某一种写法。
+        hosts={'127.0.0.1:'+port,'localhost:'+port,'[::1]:'+port,'::1:'+port}
+        host=str(self.headers.get('Host') or '')
+        if host not in hosts:
+            self.respond(403,{'error':'主机地址不匹配：' + host + '；请用 127.0.0.1:'+port+' 或 localhost:'+port});return False
+        expected='http://'+host
         origin=self.headers.get('Origin')
-        if (origin and origin!='http://'+expected) or (write and origin!='http://'+expected):
+        if (origin and origin!=expected) or (write and origin!=expected):
             self.respond(403,{'error':'请求来源不匹配'});return False
         if api and not hmac.compare_digest(self.headers.get('Authorization',''),'Bearer '+self.server.token):
-            self.respond(401,{'error':'工作台会话已失效，请重新打开年轮'});return False
+            # 报错必须告诉用户「怎么办」，而且要指名正确地址——
+            # 「会话已失效」会让人去重新接入，但真正的原因常常是地址写法
+            # （用 localhost 打开、或端口变了）导致 Host 校验不过。
+            url='http://'+host+'/#'
+            self.respond(401,{'error':'工作台会话已失效。请打开 '+url+'<token> 重新进入；'
+                                      'token 在 ~/.config/nianlun/portal/token'})
+            return False
         return True
 
     def do_GET(self):

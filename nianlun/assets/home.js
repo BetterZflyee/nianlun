@@ -54,6 +54,30 @@ function overdueDays(m, today) {
   const days = Math.floor((today - due) / 86400000);
   return days > 0 ? days : 0;
 }
+// 本周聚焦：把「什么过期了」变成「先做哪三件」。
+// 数据和 portal 用同一套算法（pulse.py），两套前端必须给出一致的判断。
+function pulseFocus() {
+  const p = S.pulse;
+  if (!p || !(p.focus || []).length) return '';
+  const rows = p.focus.map((f, i) =>
+    `<button class="pulse-row" data-project="${e(f.project_id || '')}">
+       <span class="pulse-index">${i + 1}</span>
+       <span class="pulse-body">
+         <span class="pulse-line">${e(f.line)}</span>
+         <span class="pulse-why">${e(f.why || '')}</span>
+       </span>
+       <span class="pulse-proj">${e(f.project || '')}</span>
+     </button>`).join('');
+  return `<section class="pulse-focus">
+    <div class="pulse-head">
+      <div class="eyebrow">FOCUS / 本周聚焦</div>
+      <h2>${p.focus.length} 件事值得你先看</h2>
+      <p>按过期时长和项目健康度排序。每条都能追溯到具体的里程碑，数据本身不会被改动。</p>
+    </div>
+    <div class="pulse-list">${rows}</div>
+  </section>`;
+}
+
 function projectCard(p){const records=related('records',p.id),nodes=related('milestones',p.id);
  // 一条记忆都还没有的项目，卡片长得和有内容的一样，看不出「还没开始积累」。
  // 给它一个提示，免得点进去才发现是空的。
@@ -78,7 +102,7 @@ function home(){
    .sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999')).slice(0,4);
  return heading('让经历，慢慢长成记忆。',`来自 AI 表格 · ${dt} 读取（UTC+08:00）`,button('refresh',`${icon('memory',14)} 刷新记忆`)+link(S.base_url,'在钉钉管理','btn primary'))+
  `<section class="hero"><div class="hero-copy"><div class="eyebrow">A LITTLE EVERY DAY. A LOT OVER TIME.</div><h2>你只管往前，<br><span>让它自己长。</span></h2><p>把散落在沟通里的每一个片段，<br>串成项目的连续记忆。需要汇报时，随时展开。</p><div class="small-line">${icon('leaf',12)} 一场沟通，一圈年轮。</div></div>${rings()}<span class="ring-legend">项目记忆 · 随时间积累</span></section>`+
- `${growthPanel()}<div class="metrics">${[['我的项目',S.projects.length,'个',`${ps.length} 个当前项目`,'projects'],['积累的记忆',S.records.filter(r=>!isArchived(r)).length,'条','来自线上项目记录表','memory'],['里程碑',S.milestones.length,'个',`${S.milestones.filter(m=>m.status==='已达成').length} 个已达成`,'node'],['关联场地',S.sites.length,'处','项目与现场，连在一起','pin']].map(([label,n,u,note,i])=>`<div class="metric"><div class="metric-top">${label}${icon(i,15)}</div><div class="metric-number">${n}<small>${u}</small></div><div class="metric-note">${note}</div></div>`).join('')}</div>`+
+ `${growthPanel()}${pulseFocus()}<div class="metrics">${[['我的项目',S.projects.length,'个',`${ps.length} 个当前项目`,'projects'],['积累的记忆',S.records.filter(r=>!isArchived(r)).length,'条','来自线上项目记录表','memory'],['里程碑',S.milestones.length,'个',`${S.milestones.filter(m=>m.status==='已达成').length} 个已达成`,'node'],['关联场地',S.sites.length,'处','项目与现场，连在一起','pin']].map(([label,n,u,note,i])=>`<div class="metric"><div class="metric-top">${label}${icon(i,15)}</div><div class="metric-number">${n}<small>${u}</small></div><div class="metric-note">${note}</div></div>`).join('')}</div>`+
  `<div class="overview-grid"><div><div class="section-head"><h2>正在生长的项目 <span class="eyebrow">GROWING PROJECTS</span></h2><button class="text-button" data-page="projects">全部项目 ${icon('arrow',12)}</button></div><div class="project-grid">${ps.slice(0,4).map(projectCard).join('')}</div></div><aside class="aside"><div class="attention-card"><h3><span class="review-count">${pending.length}</span>个节点，等你确认</h3><p>这些节点的进展，需要你来确认。<br>保留判断，让项目记忆更准确。</p>${button('pending','查看待核里程碑 '+icon('arrow',12),'btn')}</div><div class="panel"><div class="section-head"><h2>待跟进的节点</h2><span class="eyebrow">MILESTONES</span></div>${nodes.map(m=>{const d=overdueDays(m,todayUtc);return `<button class="upcoming${d?' is-late':''}" data-project="${e((m.project_ids||[])[0])}" style="width:100%;text-align:left"><div class="day">${m.date?e(m.date.slice(8))+`<small>${e(m.date.slice(5,7))} 月</small>`:'<small>待定</small>'}</div><div><strong>${e(m.title)}</strong><div class="sub">${e(proj((m.project_ids||[])[0])?.title||'未关联项目')} · ${e(m.status)}${d?` · <span class="late-days">已过期 ${d} 天</span>`:''}</div></div></button>`}).join('')}<p class="data-caption">按截止日期排序，已过期节点保留原状态。</p></div></aside></div>`+
  `<section class="bottom-section"><div class="section-head"><h2>最近留下的记忆 <span class="eyebrow">RECENT MEMORIES</span></h2><button class="text-button" data-page="memory">展开时间线 ${icon('arrow',12)}</button></div><div class="panel timeline">${recent(S.records.filter(r=>!isArchived(r))).slice(0,3).map(event).join('')||empty('还没有项目记录','在 AI 对话中让年轮整理第一份材料。')}</div></section>`;
 }

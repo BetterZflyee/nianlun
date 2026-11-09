@@ -3129,3 +3129,99 @@ main {
   .milestone-risk-title { grid-area: title; }
   .milestone-risk-meta { grid-area: meta; white-space: normal; }
 }
+
+/* 本周聚焦：整页最上层的一块，用深色底把「先做这几件」和下面的事实列表分开 */
+.pulse-focus {
+  margin-bottom: 20px;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #f7f9f5 0%, #eef3ea 100%);
+  border: 1px solid #dde6d6;
+}
+.pulse-empty {
+  display: none;
+}
+.pulse-head h2 {
+  margin: 5px 0 6px;
+  font-size: 19px;
+  color: #26331f;
+  letter-spacing: -0.2px;
+}
+.pulse-head p {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6b7a61;
+}
+.pulse-list {
+  display: grid;
+  gap: 8px;
+}
+.pulse-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid #dde6d6;
+  border-radius: 10px;
+  background: #ffffff;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.pulse-row:hover,
+.pulse-row:focus-visible {
+  border-color: #9fb890;
+  outline: none;
+}
+.pulse-index {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #315539;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pulse-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.pulse-line {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #22301c;
+  overflow-wrap: anywhere;
+}
+.pulse-why {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #6f7d66;
+  overflow-wrap: anywhere;
+}
+.pulse-proj {
+  font-size: 11px;
+  color: #8a9583;
+  white-space: nowrap;
+  align-self: center;
+}
+@media (max-width: 650px) {
+  .pulse-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-areas: "index body" ". proj";
+  }
+  .pulse-index { grid-area: index; }
+  .pulse-body { grid-area: body; }
+  .pulse-proj {
+    grid-area: proj;
+    white-space: normal;
+    padding-top: 2px;
+  }
+}

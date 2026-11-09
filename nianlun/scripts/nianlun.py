@@ -27,7 +27,7 @@ FIELDS = {
               'report': ['定期汇报','阶段性汇报链接','一页纸链接','汇报链接','阶段汇报'], 'goal': ['项目目标','目标'],
               'deadline': ['目标日期','项目截止日期','计划完成日期'],
               'biz_owner': ['业务负责人'], 'tech_owner': ['科技负责人']},
- 'milestones': {'title': ['里程碑','里程碑名称'], 'project_ids': ['项目'], 'site_ids': ['场地代码','场地','所属场地'], 'date': ['截止日期','计划验收日期','验收日期','截止时间'],
+ 'milestones': {'title': ['里程碑','里程碑名称'], 'project_ids': ['项目'], 'site_ids': ['场地代码','场地','所属场地'], 'date': ['截止日期','计划结束日期','目标日期','计划验收日期','验收日期','截止时间'],
                 'status': ['状态','里程碑状态'],
                 'description': ['交付内容','实际交付内容'], 'benefit': ['预期效益','预期交付内容'],
                 'notes': ['备注'], 'attachments': ['附件','里程碑汇报'],
@@ -423,6 +423,18 @@ def plan(config, state, candidates):
                             field('status'): candidate.get('status', '开放')}
             if kind_key:
                 record_cells[field(kind_key)] = candidate['kind']
+            # 反馈子类别：和 kind 是两个独立的单选列，原来完全没填——实测整表覆盖率只有 24%。
+            # 只在表里真有这一列、且给了合法取值时才写，避免凭空造选项。
+            if 'sub_kind' in fields and candidate.get('sub_kind'):
+                want = str(candidate['sub_kind']).strip()
+                options = [o['name'] for o in fields['sub_kind'].get('config', {}).get('options', [])]
+                if not options or want in options:
+                    record_cells[field('sub_kind')] = want
+            # 对接人：user 类型列，写姓名由 DWS 解析。原来也没填——实测覆盖率 2%。
+            if 'contact' in fields and candidate.get('contact'):
+                who = str(candidate['contact']).strip()
+                if who:
+                    record_cells[field('contact')] = who
             cells = record_cells
             for logical, role in (('site_ids', 'sites'), ('milestone_ids', 'milestones')):
                 ids = candidate.get(logical, [])
@@ -621,6 +633,14 @@ def build_home(state, output, config=None):
                            'reports': reports_state,
                            'switches': config['growth'].get('switches', {}),
                            'scheduler': snapshot_status}
+    # 主动推进：把「本周该关注什么」算进快照，静态页也具备 C 定位的能力。
+    # 算不出来（数据不全）时不影响主页——`pulse` 缺省，前端会跳过该区块。
+    try:
+        import pulse as _pulse
+        state = dict(state)
+        state['pulse'] = _pulse.build(state)
+    except Exception:
+        pass
     template = (SKILL / 'assets/home.html').read_text(encoding='utf-8')
     css = (SKILL / 'assets/style.css').read_text(encoding='utf-8')
     script = (SKILL / 'assets/home.js').read_text(encoding='utf-8')

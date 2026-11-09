@@ -228,6 +228,71 @@ async function openRelations(project, rows) {
  * - 没有日期或日期不合法 → 不算（无从判断，不能冤枉）
  * - 日期早于今天 → 算，并给出过期天数
  */
+
+/**
+ * 本周聚焦：把「什么过期了」变成「先做哪三件」。
+ *
+ * 数据来自 /api/pulse，全部由规则算出（不调模型，不耗额度）。
+ * 每条都带 why，用户能看到它凭什么这么说——这是「主动推进」和
+ * 「乱给建议」的分界线。
+ */
+async function pulseFocusPanel(generation) {
+  let data = null;
+  try {
+    data = await api("/api/pulse");
+  } catch (_) {
+    return el("div", { class: "pulse-empty" });
+  }
+  if (generation !== viewVersion) return el("div");
+  const focus = data?.focus || [];
+  if (!focus.length) return el("div", { class: "pulse-empty" });
+
+  const panel = el("section", {
+    class: "pulse-focus",
+    "aria-label": "本周聚焦",
+  });
+  panel.append(
+    el("div", { class: "pulse-head" }, [
+      el("div", { class: "eyebrow", text: "FOCUS / 本周聚焦" }),
+      el("h2", {
+        text:
+          focus.length +
+          " 件事值得你先看",
+      }),
+      el("p", {
+        text:
+          "按过期时长和项目健康度排序。每条都能追溯到具体的里程碑，数据本身不会被改动。",
+      }),
+    ]),
+  );
+  const list = el("div", { class: "pulse-list" });
+  focus.forEach((item, index) => {
+    const row = el("button", {
+      class: "pulse-row",
+      type: "button",
+      title: "进入项目：" + item.project,
+    });
+    row.append(
+      el("span", { class: "pulse-index", text: String(index + 1) }),
+      el("span", { class: "pulse-body" }, [
+        el("span", { class: "pulse-line", text: item.line }),
+        el("span", { class: "pulse-why", text: item.why }),
+      ]),
+      el("span", { class: "pulse-proj", text: item.project }),
+    );
+    row.onclick = () => {
+      const found = (data.projects || []).find((p) => p.id === item.project_id);
+      if (found) {
+        selected = found.id;
+        navigate("projects");
+      }
+    };
+    list.append(row);
+  });
+  panel.append(list);
+  return panel;
+}
+
 function milestoneRiskPanel() {
   const now = Date.now();
   const todayKey = new Date(now).toISOString().slice(0, 10);
@@ -400,6 +465,7 @@ async function renderTodos23(root, generation) {
     stats,
     // 里程碑风险：待办页原来只有「待办」，里程碑过期了在这里完全看不到。
     // 实测 35 条已过期（最久 69 天），用户在日常页面里发现不了。
+    await pulseFocusPanel(generation),
     milestoneRiskPanel(),
     landscape.root,
     el("div", { class: "todo-workspace" }, [

@@ -29,7 +29,6 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-TAGS = ['v2.9.2', 'v2.9.3', 'v2.9.4', 'v2.9.5', 'v2.9.6', 'v2.9.7']
 
 
 def git(*args):
@@ -37,7 +36,32 @@ def git(*args):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _tag_list():
+    """动态读 v2.9.x 的 tag，按版本号排序。
+
+    ⚠️ 这里不能写死列表。第一版写死到 v2.9.7，之后发了 v2.9.8/v2.9.9 就忘了更新，
+    测试于是以为「v2.9.7 之后堆了 12 个提交没归版本」——它其实在检查一个
+    早就不存在的版本线。
+    **维护性测试的数据必须来自被检查的对象本身，不能靠人工同步。**
+    """
+    out = git('tag', '--list', 'v2.9.*')
+    tags = [x for x in (out or '').splitlines() if x.strip()]
+    def key(tag):
+        parts = tag.lstrip('v').split('.')
+        try:
+            return tuple(int(p) for p in parts)
+        except ValueError:
+            return (0,)
+    return sorted(tags, key=key)
+
+
+TAGS = _tag_list()
+
+
 class VersionTagTests(unittest.TestCase):
+    def setUp(self):
+        self.assertTrue(TAGS, '一个 v2.9.x tag 都没有，无法校验版本线')
+
     def commit_of(self, tag):
         """必须用 ^{commit}——否则拿到的是 tag 对象 SHA。"""
         return git('rev-parse', f'{tag}^{{commit}}')

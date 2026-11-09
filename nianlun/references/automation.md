@@ -57,7 +57,15 @@
 
 各动作通用必填 `project/source_id/quote`。来源必须存在、摘录必须确实出现；项目和状态选项从实时表读取。
 
-- `create_record`：可带已有 `site_ids/milestone_ids`，关联需属于同一项目。可用 `ref` 供后续待办关联新记录。
+- `create_record`：**必须尽量把记录表里每一列都填上**，不要只写标题和正文就交差。
+  - 必填：`title/description/date/kind/status`
+  - 关联：`site_ids`（场地）、`milestone_ids`（里程碑）——有依据就填，关联须属于同一项目
+  - 分类：`sub_kind`（反馈子类别）——依据表里该字段**实际存在的选项**选最贴切的一个
+  - 人员：`contact`（对接人）——来源里明确提到「谁负责/谁对接」时填对方姓名
+  - 可用 `ref` 供后续待办关联新记录。
+  - ⚠️ **推断优先于留空**：来源里出现场地名/编号、里程碑名、具体负责人、明确的问题分类时，
+    必须把它们落到对应列。**写错比留空好**——留空的记录后面没人能补，写错了用户看得见还能改。
+    但推断必须来自本轮证据，不许凭项目名想象。拿不准就在 `description` 里写清「推测：……」。
 - `create_milestone`：另填 `title/description/date`。自动发现初始状态只允许 `待核`；精确日期有依据才新增，不把会议、普通行动项全变里程碑。
 - `create_todo`：仅 `executor:self`；`record_ids` 关联现有记录，或 `record_ref` 关联本批先前新记录。`due` 只接受来源明确或可确定换算的时区时间；没给截止时间就省略。不能把他人的行动转派给本人。
 - `update_status`：另填 `role`（projects/records/milestones）、真实 `record_id`、`status`、`match:unique`。完成一个子任务不意味着项目全部完成。来自 `todo:<id>` 的明确 `isDone:true` 证据，可将 `todo_links` 中对应记录更新为已解决。

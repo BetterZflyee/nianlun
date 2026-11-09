@@ -47,9 +47,59 @@ READ_OPS={'todo_detail','memory_catalog','memory_relations','memory_page','snaps
 
 
 class Application:
+    # ---- 主动推进的缓存 ----
+    # snapshot() 拉四张表要 30 秒，不能挂在每次页面渲染上。
+    # 这里缓存结果，另起线程刷新，页面永远拿上一次算好的那份（带 stale 标记）。
+    PULSE_TTL = 600  # 10 分钟
+
+    def pulse_view(self):
+        import threading, time as _t
+        now = _t.time()
+        with self._pulse_lock:
+            current = self._pulse_cache
+            fresh = current and (now - current.get('at', 0)) < self.PULSE_TTL
+            working = self._pulse_working
+        if not fresh and not working:
+            spawn = True
+            with self._pulse_lock:
+                if self._pulse_working:
+                    spawn = False
+                else:
+                    self._pulse_working = True
+            if spawn:
+                def refresh():
+                    try:
+                        import pulse as _pulse
+                        state = self.work.snapshot()
+                        result = _pulse.build(state)
+                        result['at'] = _t.time()
+                        result['stale'] = False
+                        with self._pulse_lock:
+                            self._pulse_cache = result
+                    except Exception as exc:
+                        with self._pulse_lock:
+                            if self._pulse_cache:
+                                self._pulse_cache['stale'] = True
+                                self._pulse_cache['error'] = '刷新失败，显示的是上次结果：' + str(exc)[:100]
+                    finally:
+                        with self._pulse_lock:
+                            self._pulse_working = False
+                threading.Thread(target=refresh, name='pulse-refresh', daemon=True).start()
+        with self._pulse_lock:
+            cached = self._pulse_cache
+        if cached:
+            return dict(cached)
+        # 第一次打开：还没有缓存，给个明确的「正在算」而不是空数据。
+        return {'actions': [], 'scores': [], 'focus': [],
+                'pending': True, 'stale': False,
+                'totals': {'projects': 0, 'milestones': 0, 'overdue': 0},
+                'message': '正在计算建议，约需半分钟；稍后刷新即可看到。'}
+
     def __init__(self, home, config):
         self.home=Path(home).expanduser().resolve();self.config=Path(config).expanduser().resolve()
         self.setup=Setup(self.home,self.config);self.work=Workbench(self.config)
+        import threading as _threading
+        self._pulse_lock=_threading.Lock();self._pulse_cache=None;self._pulse_working=False
         self.runtime=self.config.parent/'portal';self.runtime.mkdir(parents=True,exist_ok=True)
         self.jobs={};self.guard=threading.RLock()
         self.sessions={}
@@ -327,6 +377,7 @@ class Application:
             with g.locked(config):
                 return planning.run(config,[data['project_id']],choice,g.root(config)/'milestone-plans')
         if op=='snapshot':return self.work.snapshot()
+        if op=='pulse':return self.pulse_view()
         if op=='todos':return self.work.todos(completed=data.get('completed') is True)
         if op=='todo_detail':
             import explorer
@@ -581,6 +632,20 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed(path.startswith('/api/')):return
         app=self.server.app
         if path=='/api/bootstrap':return self.respond(200,app.bootstrap())
+        if path=='/api/pulse':
+            # 主动推进：行动建议 + 健康度 + 本周聚焦。
+            # 全部由数据算出，不调用模型——所以不消耗额度。
+            #
+            # ⚠️ snapshot() 要拉四张表，实测 30.8 秒。直接把这条挂在页面渲染上
+            # 会让页面白屏半分钟（第一版就是这样，面板一直不出现）。
+            # 所以缓存结果，并让前端能立刻拿到上一次算好的那份。
+            try:
+                return self.respond(200,app.pulse_view())
+            except Exception as exc:
+                return self.respond(200,{'error':'暂时算不出建议：'+str(exc)[:120],
+                                         'actions':[],'scores':[],'focus':[],
+                                         'stale':True,
+                                         'totals':{'projects':0,'milestones':0,'overdue':0}})
         if path=='/api/notifications':return self.respond(200,app.notifications())
         if path=='/api/jobs':
             with app.guard:

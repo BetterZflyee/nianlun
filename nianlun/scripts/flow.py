@@ -156,6 +156,29 @@ def prompt_evidence(bundle):
             columns[logical]=item
         fields[role]=columns
     result['table_fields']=fields
+    # 可关联对象清单：模型要给记录挂场地/里程碑，必须先知道有哪些候选。
+    # 原来只给了字段定义（"site_ids 是 bidirectionalLink"），没给任何可选对象，
+    # 模型只能凭记忆里出现过的名字猜 —— 于是绝大多数记录这三列空着
+    # （实测场地 20%、里程碑 22%、对接人 2%）。
+    # 这里只列 id+名称，控制体积；按项目分组，让模型能对上号。
+    linkable={}
+    for role,label in (('sites','sites'),('milestones','milestones')):
+        items=[]
+        for row in (bundle.get('tables') or {}).get(role) or []:
+            name=row.get('title') or row.get('name') or ''
+            if not name:continue
+            item={'id':row['id'],'name':name}
+            if role=='sites':
+                code=row.get('code') or row.get('number')
+                if code:item['code']=code
+            if role=='milestones':
+                if row.get('status'):item['status']=row['status']
+                if row.get('date'):item['date']=str(row['date'])[:10]
+            owners=[p for p in (row.get('project_ids') or [])]
+            if owners:item['project_ids']=owners
+            items.append(item)
+        linkable[label]=items
+    result['linkable']=linkable
     return result
 
 
@@ -223,6 +246,13 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         '写单选字段（类型、状态、等级、场地状态、项目名称）时，取值必须来自 table_fields 中该字段的 options；'
                         'options 里没有的旧分类一律不要使用，改用最接近的现有选项；实在无法归类就把该事项放进 pending 并说明原因。'
                         '标了 readonly 的字段（创建时间、创建人、公式、关联汇总）不可写，不要为它们生成取值。'
+                        '【每条记录都要尽量填满所有列，不要只写标题和正文】'
+                        'create_record 时逐列检查：场地（site_ids）、里程碑（milestone_ids）、反馈子类别（sub_kind）、'
+                        '对接人（contact）——来源里出现对应信息就必须落到该列。'
+                        '候选对象见 linkable（sites/milestones，带 id 和名称）：名称能对上就用它的 id。'
+                        '对接人写来源里明确提到的责任人姓名；来源没说谁负责就不填，不要猜。'
+                        '⚠️ 推断优先于留空：留空的记录后面没人补得回来，写错了用户看得见还能改。'
+                        '但推断必须来自本轮证据，不许凭项目名想象；拿不准的把推测写进 description 并注明「推测」。'
                         '当本轮较新原文明确证明某个既有问题已解决，使用 update_status 关闭那条记录为已解决，保留其历史描述；不要另建一条解决记录。'
                         '关闭必须唯一匹配同项目同事项，并逐字引用解决证据；仅安排、预计、讨论或含糊的已完成不可关闭。多个同名事项无法区分时保留 pending。'
                         'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'

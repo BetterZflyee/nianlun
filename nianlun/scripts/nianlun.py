@@ -522,6 +522,7 @@ def plan(config, state, candidates):
             details += '\n' + marker
             if len(details) > 20000 or len(candidate['title']) > 180:
                 raise Error('单条内容过长，请拆分或缩短')
+            contact_unresolved = None
             record_cells = {field('title'): candidate['title'].strip(), field(detail_key): details,
                             field('project_ids'): {'linkedRecordIds': [projects[0]['id']]}, field('date'): candidate['date'],
                             field('status'): candidate.get('status', '开放')}
@@ -534,11 +535,28 @@ def plan(config, state, candidates):
                 options = [o['name'] for o in fields['sub_kind'].get('config', {}).get('options', [])]
                 if not options or want in options:
                     record_cells[field('sub_kind')] = want
-            # 对接人：user 类型列，写姓名由 DWS 解析。原来也没填——实测覆盖率 2%。
+            # 对接人：user 类型列，**值必须是一组 user 对象**（corpId+userId），
+            # 不能传姓名。实测直接写「梁玉标」会被 DWS 拒绝：
+            #   user field value must be an array of user objects
+            # 而且它返回 category=internal，落进「写入结果未知」的分类里，
+            # 让用户以为写成功了——2026-11-09 19:07 那轮 5 条记录全废在这。
+            #
+            # 所以只接受已经解析好的 [{corpId,userId}]；传字符串一律跳过并记录，
+            # 由调用方（growth.table_write 之前）负责用 contact user search 解析。
             if 'contact' in fields and candidate.get('contact'):
-                who = str(candidate['contact']).strip()
-                if who:
-                    record_cells[field('contact')] = who
+                who = candidate['contact']
+                resolved = None
+                if isinstance(who, list) and who and all(
+                        isinstance(x, dict) and x.get('userId') for x in who):
+                    resolved = who
+                elif isinstance(who, dict) and who.get('userId'):
+                    resolved = [who]
+                if resolved:
+                    record_cells[field('contact')] = resolved
+                else:
+                    # plan() 是纯计算、没有网络，解析不了姓名。这里只记下原因，
+                    # 由调用方（growth.table_write）负责解析；仍解析不出来才丢弃。
+                    contact_unresolved = str(who)[:40]
             cells = record_cells
             for logical, role in (('site_ids', 'sites'), ('milestone_ids', 'milestones')):
                 ids = candidate.get(logical, [])
@@ -562,6 +580,9 @@ def plan(config, state, candidates):
             action = {'op': op, 'role': 'records', 'title': candidate['title'], 'project': projects[0]['title'],
                       'cells': cells, 'marker': marker, 'detail_key': detail_key,
                       'skip_existing': [r['id'] for r in existing]}
+            if contact_unresolved:
+                action['dropped'] = ['contact=' + contact_unresolved +
+                                     '（对接人须先解析成 userId，姓名不能直接写）']
             key = marker
         else:
             raise Error('仅支持 create_record 或 update_status，不执行删除及结构修改')
@@ -579,6 +600,17 @@ def equivalent(actual, expected):
     if expected is None:return actual is None or actual=='' or actual==[]
     if isinstance(expected, dict):
         return isinstance(actual, dict) and all(actual.get(k) == v for k, v in expected.items())
+    # user / 关联列写进去的是一组对象，回读时会**多出服务端补的字段**
+    # （例如写 [{'userId':'x'}]，读回来是 [{'corpId':'y','userId':'x'}]）。
+    # 严格相等会判不等，导致「明明写成功却报写后验证失败」。
+    # 这里按「每个期望对象的每个键都能在对应实际对象里找到」来比。
+    if isinstance(expected, list) and expected and all(isinstance(x, dict) for x in expected):
+        if not isinstance(actual, list) or len(actual) != len(expected):
+            return False
+        return all(
+            isinstance(got, dict) and all(got.get(k) == v for k, v in want.items())
+            for got, want in zip(actual, expected)
+        )
     return value(actual) == str(expected) or (isinstance(expected, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', expected) and str(actual)[:10] == expected)
 
 

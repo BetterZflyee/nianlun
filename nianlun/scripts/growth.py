@@ -596,8 +596,69 @@ def writable_cells(config, role, cells):
     return result, dropped
 
 
-def table_write(config,gw,role,cells,record_id=None):
+def resolve_contact(gw, name, cache=None):
+    """把中文姓名解析成钉钉 user 对象 [{corpId,userId}]。
+
+    ## 为什么必须有这一步
+
+    「对接人」是 user 类型列，值必须是一组 user 对象。直接写姓名会被拒绝：
+
+        user field value must be an array of user objects
+
+    而且 DWS 把它归为 category=internal，落进「写入结果未知」的分类——
+    用户看到「未知」会以为写成功了，实际整条都没写进去。
+    2026-11-09 19:07 那轮 5 条记录全废在这里。
+
+    ## 行为
+
+    - 同名多个人 → 放弃（列表里可能既有在职也有离职，猜错会挂到别人名下）
+    - 搜不到 → 放弃
+    - 任何失败 → 放弃，绝不因为解析失败而阻断整条记录写入
+    """
+    if not name or not isinstance(name, str):
+        return None
+    key = name.strip()
+    if not key:
+        return None
+    if cache is not None and key in cache:
+        return cache[key]
+    try:
+        data = gw.call(['contact', 'user', 'search', '--query', key])
+    except Exception:
+        if cache is not None:
+            cache[key] = None
+        return None
+    rows = data.get('result') if isinstance(data, dict) else None
+    rows = rows if isinstance(rows, list) else []
+    # 名字必须完全相等：搜索是模糊的，「梁玉」也会搜出「梁玉标」。
+    same = [r for r in rows if str(r.get('name') or '').strip() == key]
+    result = None
+    if len(same) == 1 and same[0].get('userId'):
+        item = {'userId': same[0]['userId']}
+        if same[0].get('corpId'):
+            item['corpId'] = same[0]['corpId']
+        result = [item]
+    if cache is not None:
+        cache[key] = result
+    return result
+
+
+def table_write(config,gw,role,cells,record_id=None,contact_cache=None):
     cells,dropped=writable_cells(config,role,cells)
+    # 对接人：单元格里如果是中文姓名，先解析成 user 对象。写姓名会被 DWS 拒绝，
+    # 且错误被归成「写入结果未知」，最容易让人误判成「已经写上了」。
+    fields=config['tables'][role].get('fields') or {}
+    contact_field=fields.get('contact')
+    if contact_field:
+        fid=contact_field.get('fieldId')
+        raw=cells.get(fid)
+        if isinstance(raw,str) and raw.strip():
+            resolved=resolve_contact(gw,raw,contact_cache)
+            if resolved:
+                cells=dict(cells);cells[fid]=resolved
+            else:
+                cells=dict(cells);cells.pop(fid,None)
+                dropped.append('contact='+raw[:40]+'（没能唯一匹配到钉钉用户，未写入）')
     if not cells:raise n.Error('写入字段均已失效（只读或选项不匹配），本次未提交')
     table=config['tables'][role]['id'];base=config['base_id']
     if record_id:

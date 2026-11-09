@@ -34,4 +34,4 @@ python3 tools/check_version_sync.py
 它会扫全仓库，确认没有别处还硬编码着旧版本号。
 """
 
-VERSION = '2.12.2'
+VERSION = '2.12.3'

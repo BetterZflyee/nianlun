@@ -156,9 +156,21 @@ class PlanWritesNewFieldsTests(unittest.TestCase):
         result = self.plan_one(sub_kind='不存在的方向')
         self.assertNotIn('f7', result['actions'][0]['cells'])
 
-    def test_contact_is_written(self):
+    def test_contact_needs_resolved_user_not_name(self):
+        """对接人必须是 user 对象，不能直接写姓名。
+
+        ⚠️ 这条测试原来断言「写姓名」，而那正是引发事故的行为：
+        2026-11-09 19:07 那轮 5 条记录全废在
+        `user field value must be an array of user objects`。
+        **测试断言的可能是错误行为**——发现规格变了就要改测试，别迁就它。
+        """
         result = self.plan_one(contact='张三')
-        self.assertEqual(result['actions'][0]['cells'].get('f8'), '张三')
+        self.assertNotIn('f8', result['actions'][0]['cells'])
+
+    def test_contact_written_when_already_resolved(self):
+        result = self.plan_one(contact=[{'userId': 'u1', 'corpId': 'c1'}])
+        self.assertEqual(result['actions'][0]['cells'].get('f8'),
+                         [{'userId': 'u1', 'corpId': 'c1'}])
 
     def test_missing_optional_fields_do_not_break(self):
         """没给 sub_kind/contact 时照常写入，不能因此失败。"""

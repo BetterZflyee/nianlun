@@ -1,12 +1,41 @@
 "use strict";
 const $ = (s) => document.querySelector(s);
 const localFile = location.protocol === "file:";
-let token = localFile
-  ? null
-  : location.hash.slice(1) || sessionStorage.getItem("nianlun.session");
-if (!localFile && location.hash) {
-  sessionStorage.setItem("nianlun.session", token);
-  history.replaceState(null, "", location.pathname);
+// 会话令牌的取得与保存。
+//
+// 原来的两个缺陷叠在一起，导致「重开页面就要重新接入，接入又失效」：
+//
+// ① 只存 sessionStorage —— 关掉标签页就清空，下次打开读不到。
+// ② 读到之后立刻 `history.replaceState` 把地址栏的 #token 抹掉，
+//    于是刷新时 URL 里也没有 token 了，只能依赖 sessionStorage，
+//    而它已经没了。两个「仅有的来源」同时失效。
+//
+// 现在：localStorage 长期保存（跨标签页、跨重启都在），地址栏 hash 保留
+// 作为兜底入口（旧书签仍然能用），并且**不再抹掉 hash**——抹掉它只会让
+// 用户失去唯一的可见凭证。
+const TOKEN_KEY = "nianlun.session";
+function readToken() {
+  if (localFile) return null;
+  const fromHash = location.hash.slice(1);
+  if (fromHash) {
+    // 新链接优先：写入长期存储，并保留 hash 供用户保存书签。
+    try {
+      localStorage.setItem(TOKEN_KEY, fromHash);
+      sessionStorage.setItem(TOKEN_KEY, fromHash);
+    } catch (_) {}
+    return fromHash;
+  }
+  let stored = null;
+  try {
+    stored =
+      localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+  } catch (_) {}
+  return stored;
+}
+let token = readToken();
+if (!localFile && token && !location.hash) {
+  // 从存储恢复时把 hash 补回地址栏，让「复制链接」永远能拿到可用地址。
+  history.replaceState(null, "", location.pathname + "#" + token);
 }
 let boot = {},
   data = null,

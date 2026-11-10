@@ -13,7 +13,10 @@ import sys;sys.path.insert(0,'.')
 import nianlun as n, growth as g, flow, harness, memory, planning, os
 from pathlib import Path
 
-CONFIG_PATH = sys.argv[1] if len(sys.argv) > 1 else '/Users/zhufei/.config/nianlun/config.json'
+# 默认走用户自己的配置路径，不能写死某个人的主目录——
+# 写死之后别人拿到这个包跑 readiness 必定失败（发布门禁也会拦）。
+CONFIG_PATH = (sys.argv[1] if len(sys.argv) > 1
+               else str(Path.home() / '.config' / 'nianlun' / 'config.json'))
 cfg=n.load(CONFIG_PATH)
 gw=g.Gateway(cfg)
 ok=[];fail=[]
@@ -93,7 +96,9 @@ check('工作台·生成', c8)
 def c9():
     import scheduler
     from datetime import datetime
-    rec=n.load('/Users/zhufei/.local/state/nianlun/scheduler.json')
+    # 调度状态目录从配置推导，不写死个人主目录。
+    state_dir = Path(cfg['growth']['state_dir']).expanduser()
+    rec=n.load(state_dir / 'scheduler.json')
     act=datetime.fromisoformat(rec['activated_at'])
     slots=scheduler.due_slots(cfg['growth']['schedule'],datetime.fromisoformat('2026-11-07T10:00:00+08:00'),act)
     if not slots: raise ValueError('明早无槽位')

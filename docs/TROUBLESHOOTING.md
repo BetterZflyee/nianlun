@@ -377,7 +377,7 @@ DWS aitable +record-update：DWS 未返回有效结果，请检查连接与执�
 ```python
 from collections import Counter
 import nianlun as n, growth as g
-cfg = n.load('/Users/zhufei/.config/nianlun/config.json')
+cfg = n.load('~/.config/nianlun/config.json')
 gw = g.Gateway(cfg); g.self_identity(gw)
 st = n.fetch(cfg, gw.table())
 dup = {k: v for k, v in Counter(m['title'] for m in st['milestones']).items() if v > 1}
@@ -554,12 +554,12 @@ curl -s -o /dev/null -w "%{http_code}\n" --max-time 20 \
 ```bash
 # 不带代理
 echo "hi" | SF_LLM_API_KEY="$K" \
-  /Users/zhufei/.nodejs/bin/dsh headless --json | tail -2
+  dsh headless --json | tail -2
 
 # 带代理
 echo "hi" | SF_LLM_API_KEY="$K" \
   HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897 \
-  /Users/zhufei/.nodejs/bin/dsh headless --json | tail -2
+  dsh headless --json | tail -2
 ```
 
 - 不带代理能通、带代理报错 → **就是代理问题**，去第三步

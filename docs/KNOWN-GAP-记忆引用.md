@@ -44,7 +44,7 @@ gbrain call get_links '{"slug":"meetings/nianlun-20261107-092518-da49fe98"}'
 ### 1. 读取是正常的
 
 ```python
-ex = MemoryExplorer('/Users/zhufei/.config/nianlun/config.json')
+ex = MemoryExplorer('~/.config/nianlun/config.json')
 r = ex.relations([key1, key2])
 # → verified: True | links: 0 | error: ''
 ```

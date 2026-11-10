@@ -47,7 +47,12 @@ def launch(home,config,open_browser=True):
             time.sleep(.15)
         if not url:raise n.Error('工作台启动超时，请在所选 AI 宿主运行接入检查')
     if open_browser:webbrowser.open(url)
-    return {'running':True,'address':url.split('#')[0],'session':str(session)}
+    # ⚠️ 必须返回**带 token 的完整地址**。原来这里是 url.split('#')[0]，
+    # 把 `#token` 截掉了——调用方拿这个 address 去打开，页面会说
+    # 「会话已失效」，用户以为服务没启动。
+    # 这正是「关掉网页后再也进不去」的真正原因（2026-11-10 飞哥报的）。
+    # token 只在 127.0.0.1 之间传递，不落外部。
+    return {'running':True,'url':url,'address':url,'session':str(session)}
 
 
 def main():

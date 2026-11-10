@@ -27,6 +27,7 @@ def build(output=None):
         package = Path(tmp) / '年轮安装版'
         package.mkdir()
         names = ('install.py', '在AI宿主中安装.md', '在Codex中安装.md', '使用说明.md',
+                 '常见问题速查.md',
                  '安装年轮.command', '安装年轮.cmd', '安装年轮.ps1', '打开年轮.command',
                  '打开年轮.cmd', '打开年轮.ps1', '开始使用.html', '验收说明.md')
         for name in names:

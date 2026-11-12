@@ -125,21 +125,23 @@ def trim_facts(facts, budget=PLAN_FACTS_BUDGET):
     return facts, notes
 
 
-def deadline(project,state=None):
-    """项目目标日期。
+def deadline_source(project,state=None):
+    """项目目标日期，以及它是从哪儿来的。
 
-    来源优先级：deadline 字段 → 备注里的「年轮目标日期：YYYY-MM-DD」→
-    该项目的未完成里程碑里最晚的那个日期。
-    最后这条是兜底：实表里 7 个活跃项目的 goal 和 notes 全空，但每个项目都有
-    里程碑且带日期（最晚的 2026-12-18 到 2027-01-30）。只因为没人手工写那个
-    隐式备注就让倒排能力一直闲着，不合理。
+    来源要一起返回，因为三种来源的可信度差得很远：deadline 字段和备注是人
+    写的，都是明确意图；「未完成里程碑里最晚的那个日期」是**猜的**。
+    755RA数智化标杆 的 deadline 和备注都空，兜底猜出 2026-12-31，而它名下
+    另外 6 条里程碑的日期里有 11-26 / 12-01 / 12-16 / 12-26——模型拿到一个
+    没有来源标注的 12-31，就会把它当成硬承诺，围着这一天硬凑一个「交付节点」。
     """
     value=project.get('deadline')
-    if not value:
-        match=re.search(r'年轮目标日期[：:]\s*(\d{4}-\d{2}-\d{2})',project.get('notes',''))
-        value=match[1] if match else None
-    try:return date.fromisoformat(value)
-    except (TypeError,ValueError):pass
+    if value:
+        try:return date.fromisoformat(value),'deadline 字段（人工填写）'
+        except (TypeError,ValueError):pass
+    match=re.search(r'年轮目标日期[：:]\s*(\d{4}-\d{2}-\d{2})',project.get('notes','') or '')
+    if match:
+        try:return date.fromisoformat(match[1]),'备注里的年轮目标日期（人工填写）'
+        except (TypeError,ValueError):pass
     if state:
         dates=[]
         for m in state.get('milestones') or []:
@@ -151,9 +153,14 @@ def deadline(project,state=None):
             latest=max(dates)
             # 全部里程碑都已过期时不能拿来当目标：倒排会算出一批已成过去的
             # 节点，写进表里就是「已过期的计划」。当作没有目标，让调用方提示。
-            if latest < date.today():return None
-            return latest
-    return None
+            if latest < date.today():return None,'全部里程碑已过期，无可用目标'
+            return latest,'推测：该项目未完成里程碑里最晚的日期（非人工确认）'
+    return None,'无'
+
+
+def deadline(project,state=None):
+    """项目目标日期。来源说明见 deadline_source()。"""
+    return deadline_source(project,state)[0]
 
 
 def validate(answer, target):
@@ -161,6 +168,18 @@ def validate(answer, target):
 
     目标日期若已过期，倒排毫无意义——算出来的节点日期全在过去，写进表里
     就是一批「已过期的计划」。宁可拒绝并说清楚，也不生成垃圾数据。
+
+    **曾经有一条「必须包含截止日交付节点」的硬校验**（要求
+    `min(days_before_deadline)==0`），已删除。它看起来是在保证计划收束到
+    截止日，实际是一条编造机器：当截止日本身就是一个已存在的人工里程碑
+    （755RA 的 cA2fgc0KHp / ycXUscgmM9 都是 12-31），prompt 又要求「不要
+    重复规划已有节点」，模型就只剩一个选择——在最后一天塞一个不与交付重
+    名的东西。它塞的是「四项补充材料归档」，而「四项」指的正是它自己规划
+    的四个上游节点，是一个自指的空壳。
+    实测 2026-11-11 那批 29 份计划：29 份全部有且仅有 1 个 d-0 节点，其中
+    28 份的标题落在「归档/收口/总结/盘点/材料就绪」上。97% 同一形状，
+    说明那不是模型在思考，是规则在输出。而项目是否需要一个截止日节点，
+    应该由证据决定，不该由校验器强制。
     """
     if target < date.today():
         raise n.Error(f'目标日期 {target} 已过期，无法倒排；请先更新里程碑日期或补填目标日期')
@@ -207,7 +226,6 @@ def validate(answer, target):
             if bykey[parent]['date']>bykey[key]['date']:raise n.Error('前置节点不能晚于后续节点')
             walk(parent,trail|{key})
     for key in keys:walk(key,set())
-    if min(x['days_before_deadline'] for x in result)!=0:raise n.Error('倒排计划须包含截止日交付节点')
     return result
 
 
@@ -220,7 +238,15 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
     for pid in project_ids:
         project=next((p for p in state['projects'] if p['id']==pid),None)
         if not project:raise n.Error('项目不存在')
-        target=deadline(project,state);goal=project.get('goal') or project.get('description')
+        target,target_source=deadline_source(project,state);goal=project.get('goal')
+        # goal 字段为空时退回项目描述——但要在 prompt 里标出来。
+        # 755RA数智化标杆 的 goal 是空的，描述是「标杆场地总体方案、票件孪生、
+        # 非生产岗能效」，而它名下的 24 条反馈记录全是安检围挡、门禁、减员。
+        # 模型只能照着描述去拆，拆出来的方向跟证据对不上，是这次错误的起点。
+        # 标出来至少让模型知道这不是用户亲口定的目标。
+        goal_source='goal 字段'
+        if not goal:
+            goal=project.get('description');goal_source='项目描述（goal 字段为空）'
         if not n.project_active(project):continue
         if not target or not goal:
             # 提示要能照着做：目标写 goal 字段，日期写 notes 里的「年轮目标日期：YYYY-MM-DD」。
@@ -256,6 +282,25 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
             # 节点、什么状态，其余是纯浪费。
             existing=[{k:v for k,v in m.items() if k in ('id','title','date','status','notes','description')}
                       for m in state['milestones'] if pid in m.get('project_ids',[])]
+            # 跨项目已有里程碑，只作**提示**塞进 prompt，不做硬校验。
+            # 一开始我是想硬拦的（标题二元组 Jaccard ≥ 0.30 就拒绝），但在
+            # 真实 238 条标题上实测被否了：任意阈值下跨项目都会命中 63–266 对，
+            # 里面大量是合法的同阶段模板行——「755RA 运营培训」同时属于车辆
+            # 靠离卡、机器狗、F区安检三个项目，因为三个项目在同一个场地各做
+            # 各的运营培训。硬拦会把这些合法节点全部判死。
+            # 所以改成「告诉模型别处已经有了，自己判断」。
+            elsewhere=[]
+            for m in state['milestones']:
+                title=str(m.get('title') or '').strip()
+                if not title:continue
+                # 本项目已有节点在 existing 里，这里只看别的项目。
+                if pid in (m.get('project_ids') or []):continue
+                # 别的项目上一轮倒排出来的节点不算“已有事实”，别拿它挡自己。
+                if '[年轮倒排:' in (m.get('notes','')+m.get('description','')):continue
+                owners=[p['title'] for p in state['projects'] if p['id'] in m.get('project_ids',[])]
+                elsewhere.append({'归属':'、'.join(owners) or '（未归属）','标题':title})
+            # 按标题排序去重：顺序稳定便于人工核对，也让 prompt 缓存更容易命中。
+            elsewhere=[{'归属':k,'标题':v} for k,v in sorted({r['标题']:r['归属'] for r in elsewhere}.items())][:120]
             # 校验不过要给模型一次改正机会。原来这里只调一次模型，validate 抛错就整轮倒排作废——
             # 哪怕报错已经详细到「节点 X 依赖了不存在的 key Y，可用的 key 是…」，模型也没机会用。
             # 实测 2026-11-07 04:31 那轮倒排就是因为这个原因失败。
@@ -267,8 +312,13 @@ def run(config, project_ids, choice, folder, progress=lambda message: None):
                 '日期以 days_before_deadline 表示，0 表示最终交付，依赖节点日期不能晚于后续。'
                 '计划不是已完成事实；交付物要可验收。不得凭空承诺负责人、收益或完成情况。'
                 '只根据已有记录、文档和记忆拆解可验证的交付物。每个节点的 description 必须指出参考的记录或页面；无法支持的阶段不编造。'
-                '\n目标：'+goal+'\n截止日期：'+target.isoformat()+'\n项目事实：'+json.dumps(facts,ensure_ascii=False)+
-                '\n独立记忆空间依据：'+history.get('text','')+'\n现有全部节点：'+json.dumps(existing,ensure_ascii=False))
+                # 最后一条是这次修复加的：不要把别的项目已登记的交付再写一遍。
+                # 不硬校验（见 elsewhere 处的注释），只在 prompt 里点出来。
+                '全表已有里程碑见最后一段：如果某个交付在别的项目里已经登记过，不要在这个项目再建一条；'
+                '同一场地的不同项目可以有同名阶段（各做各的），但同一个交付只该有一个归属。'
+                '\n目标（来源：'+goal_source+'）：'+goal+'\n截止日期：'+target.isoformat()+'（来源：'+target_source+'）\n项目事实：'+json.dumps(facts,ensure_ascii=False)+
+                '\n独立记忆空间依据：'+history.get('text','')+'\n本项目现有节点：'+json.dumps(existing,ensure_ascii=False)+
+                '\n全表已有里程碑（归属 | 标题，仅用于避免重复登记，不是本项目的待办）：'+json.dumps(elsewhere,ensure_ascii=False))
             current_prompt=base_prompt
             for attempt in range(PLAN_RETRIES):
                 if attempt:

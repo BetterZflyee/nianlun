@@ -509,7 +509,14 @@ def validate(config,bundle,decision):
     deferred=decision.get('deferred_source_ids',[])
     if not isinstance(deferred,list) or any(i not in {s['id'] for s in bundle['sources']} for i in deferred):raise n.Error('未处理来源 ID 不合法')
     for a in decision['actions']:
-        s=evidence(bundle,a); p=project_for(bundle,a); op=a['op']; a=dict(a)
+        s=evidence(bundle,a)
+        # 项目必填要**先于** project_for 检查：project_for 走 n.select_projects，
+        # 项目名为空时会先抛「需唯一匹配，当前 0 项」，用户看不出该怎么改。
+        # 实测 390/1479 = 26% 的记录就是因为这里没兜住，落成了无项目孤儿。
+        if a.get('op')=='create_record' and not str(a.get('project') or '').strip():
+            raise n.Error('记录必须归属一个项目；无法确定归属时把这个事项放进 pending 并说明候选项目，'
+                          '不要创建没有项目关联的记录——孤儿记录在项目视图、报表和记忆页里全都看不见')
+        p=project_for(bundle,a); op=a['op']; a=dict(a)
         if a['source_id'] in deferred:raise n.Error('尚未处理的来源不能同时生成写入动作')
         normalize_site_codes(bundle,a)
         if op in ('create_record','update_status'):
@@ -528,10 +535,61 @@ def validate(config,bundle,decision):
                 duplicates += [x for x in actions if x['op']=='create_record' and x['project']==a['project']
                     and normalized_title(x['title'])==normalized_title(a['title'])]
                 if duplicates:raise n.Error('同项目已有同名未关闭记录。复用原记录并核对状态，不重复新增')
+                # 标题要能当台账里的「一行事」读。实测现存 1479 条里 87% 在 10-30 字，
+                # 最长 54 字——那是「整段背景塞进标题」，在报表里只能被截断。
+                if not 6<=len(a['title'])<=60:
+                    raise n.Error(f'记录标题须 6 至 60 字，当前 {len(a["title"])} 字：'
+                                  '标题写「发生了什么、要做什么」，背景和过程放进描述')
+                # 标题不能是「来源 + 确认/提到」这种元描述。实测出现过
+                # 「飞书妙记确认F区安检为第二位优先级」——读者要的是「F区安检列为第二位优先级」，
+                # 不是「某份听记确认了这件事」。来源已经在来源字段里，不必进标题。
+                if re.match(r'^\s*(飞书妙记|语音通话|会议纪要|听记|钉钉|群聊|邮件|与\S{1,6}的\S{0,6})\s*'
+                            r'(确认|提到|说到|沟通|表示|指出|记录)',a['title']):
+                    raise n.Error('记录标题写成了「来源+确认」的元描述，应直接写事项本身。'
+                                  '例如「飞书妙记确认F区安检为第二位优先级」应写成「F区安检列为第二位优先级」')
         elif op=='create_milestone':
             if not a.get('title') or not a.get('description'):raise n.Error('缺里程碑标题/交付内容')
-            datetime.strptime(a['date'],'%Y-%m-%d')
+            # 标题是台账里唯一被人读的东西，太短说不清做了什么，太长在甘特图和
+            # 报告里都会被截断。实测现存 1479 条记录标题 10-54 字，里程碑同量级。
+            if not 6<=len(a['title'])<=60:
+                raise n.Error(f'里程碑标题须 6 至 60 字，当前 {len(a["title"])} 字：'
+                              '标题写「做完了什么」，不要把整段背景塞进标题，细节放交付内容')
+            # 交付内容是「可验收的完成物」，不是「这件事很重要」的复述。
+            # 倒排那批错误节点的 description 平均不到 80 字，全是套话。
+            if len(a['description'])<20:
+                raise n.Error('里程碑交付内容须至少 20 字，写清验收标准和交付物；只写「完成XX」不算')
+            when=datetime.strptime(a['date'],'%Y-%m-%d').date()
             if a.get('status','待核')!='待核':raise n.Error('自动发现的里程碑初始为待核')
+            # 日期必须落在可信区间。11-13 发现 2026-11-06/11-09/11-10 三个已过去的
+            # 日期被写进了里程碑——那已经是「已过期的计划」，写进去就是让看板显示
+            # 一批永远不会发生的交付。用本轮证据的 until 作参照，不看系统今天：
+            # 补跑历史批次时，系统日期会把这些全部判死，反而是错的。
+            reference=instant(bundle['until'],timezone.utc).date() if bundle.get('until') else datetime.now(timezone.utc).date()
+            if when<reference:
+                raise n.Error(f'里程碑日期 {when} 早于本轮证据时间 {reference}，属于「已过期的计划」，'
+                              '不能作为待交付节点写入；请核对这个日期是否应该更新')
+            # 倒排那 5 条错里程碑的共同点：标题像交付、备注全是套话、没有任何
+            # record_id / 里程碑 ID 支撑。有 quote 只证明「这句话被说过」，
+            # 不证明「这件事有这个交付节点」。所以要求至少一个可核验的关联对象。
+            linked=list(a.get('record_ids') or [])+list(a.get('milestone_ids') or [])
+            if not linked:
+                raise n.Error('里程碑必须关联至少一条已有记录或里程碑作为依据（record_ids / milestone_ids）。'
+                              '只在来源里提过某个想法不足以成为交付节点；'
+                              '若确实没有可关联对象，把该事项放进 pending 并说明需要的依据')
+            for rid in linked:
+                if not any(r['id']==rid for r in bundle['tables'].get('records',[])+bundle['tables'].get('milestones',[])):
+                    raise n.Error(f'里程碑依据 {rid} 不存在，不能作为来源')
+            if a.get('date') and a.get('title'):
+                # 同一项目不许有两件同名交付。实测 755RA 与 APEC 航城安保各有
+                # 「12月31日前完成向机场方的汇报」，全表 9 条含「机场方」的里程碑里
+                # 至少 4 条是同一件事的改写。本项目内先按归一化标题挡一道。
+                norm=lambda value:re.sub(r'\s+','',str(value or '')).casefold()
+                same_title=[m for m in bundle['tables'].get('milestones',[])
+                            if p['id'] in m.get('project_ids',[]) and norm(m.get('title'))==norm(a['title'])]
+                same_title+=[{'title':x['title']} for x in actions
+                             if x['op']=='create_milestone' and x['project_id']==p['id'] and norm(x['title'])==norm(a['title'])]
+                if same_title:
+                    raise n.Error('同项目已有同名里程碑「'+a['title']+'」，请复核合并，不要重复新增')
         elif op=='create_todo':
             if a.get('executor')!='self' or not a.get('title'):raise n.Error('只创建明确分配给本人的待办')
             candidates=bundle['todos']+[{'subject':'['+x['project']+'] '+x['title']} for x in actions if x['op']=='create_todo']
@@ -794,7 +852,13 @@ def apply(config,folder,plan_file):
                 same=[r for r in rows if r['title']==a['title'] and a['project_id'] in r['project_ids']]
                 values={'title':a['title'],'date':a['date'],'status':'待核','description':a['description'],
                     'project_ids':{'linkedRecordIds':[a['project_id']]}}
-                values[evidence_field]=((a['description']+'\n') if evidence_field=='description' else '')+a['quote']+'\n来源：'+a['source_id']+'\n'+marker
+                # 依据要落进备注。validate 只为「必须有依据」挡了一道，
+                # 如果依据本身不写进表，事后就查不出这条里程碑是从哪条记录来的——
+                # 那和没有依据是一样的。倒排那批错节点的备注里全是套话，
+                # 正是因为没有这一步。
+                basis=list(a.get('record_ids') or [])+list(a.get('milestone_ids') or [])
+                values[evidence_field]=((a['description']+'\n') if evidence_field=='description' else '')+ \
+                    a['quote']+'\n来源：'+a['source_id']+'\n依据：'+'、'.join(basis)+'\n'+marker
                 cells={f[k]['fieldId']:v for k,v in values.items()}
                 if existing:
                     if len(existing)!=1 or not all(n.equivalent(existing[0]['raw_cells'].get(k),v) for k,v in cells.items()):raise n.Error('里程碑来源重复或内容已变更，请对账')

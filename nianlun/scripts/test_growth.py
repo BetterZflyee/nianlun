@@ -103,7 +103,7 @@ class Tests(unittest.TestCase):
                 with self.assertRaises(n.Error):g.apply(self.cfg,self.p,self.p/'plan.json')
         self.assertEqual(self.gw.creates,1);self.assertIn('in_flight',n.load(self.p/'receipt.json'))
     def test_todo_links_to_new_record(self):
-        a={**self.base,'op':'create_record','title':'说明待编写','description':'下一步编写说明','date':'2026-10-19','kind':'沟通要点','ref':'note'}
+        a={**self.base,'op':'create_record','title':'联调说明待编写','description':'下一步编写说明文档','date':'2026-10-19','kind':'沟通要点','ref':'note'}
         b={**self.base,'op':'create_todo','executor':'self','title':'编写说明','record_ref':'note'}
         r=self.run_apply(self.decision([a,b]));self.assertEqual(r['status'],'verified')
         self.assertEqual(n.load(self.p/'links.json')['T2']['record_ids'],['created-1'])
@@ -118,7 +118,7 @@ class Tests(unittest.TestCase):
         with self.assertRaises(n.Error):self.run_apply(self.decision([a]))
         self.assertEqual(self.gw.creates,0)
     def test_delayed_apply_ignores_generation_clock_only(self):
-        a={**self.base,'op':'create_record','title':'说明待编写','description':'下一步编写说明','date':'2026-10-19','kind':'沟通要点'}
+        a={**self.base,'op':'create_record','title':'联调说明待编写','description':'下一步编写说明文档','date':'2026-10-19','kind':'沟通要点'}
         with patch.object(n,'stamp',return_value='2026-10-19T19:00:00+08:00'):self.write(self.decision([a]))
         with patch.object(n,'stamp',return_value='2026-10-19T20:00:00+08:00'),patch.object(g,'Gateway',return_value=self.gw):
             result=g.apply(self.cfg,self.p,self.p/'plan.json')

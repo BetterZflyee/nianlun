@@ -117,7 +117,7 @@ class Recovery(unittest.TestCase):
         t=tempfile.TemporaryDirectory();self.addCleanup(t.cleanup);self.root=Path(t.name)
         self.folder=self.root/'runs/one';self.config,raw=fixture()
         self.config['growth']={'state_dir':str(self.root),'switches':{'table_writes':True,'todos':True,'completion':True}}
-        raw['records']=[{'recordId':'R1','cells':{'records-title':'联调','records-status':'处理中','records-project_ids':{'linkedRecordIds':['P1']}}}]
+        raw['records']=[{'recordId':'R1','cells':{'records-title':'联调验证','records-status':'处理中','records-project_ids':{'linkedRecordIds':['P1']}}}]
         self.gw=Gateway(self.config,raw)
         self.bundle={'run_id':'one','binding':n.digest(self.config),'identity':{'user_id':'U1','name':'本人','corp_id':'C1'},
             'until':'2026-10-21T10:00:00+08:00','tables':n.fetch(self.config,self.gw.table()),'todos':[self.gw.todo.copy()],
@@ -132,13 +132,13 @@ class Recovery(unittest.TestCase):
         n.save(self.folder/'plan.json',plan);n.save(self.folder/'decision.json',decision);return plan
 
     def record(self):
-        return {**self.base,'op':'create_record','title':'说明','description':'编写说明','date':'2026-10-21','kind':'沟通要点'}
+        return {**self.base,'op':'create_record','title':'联调说明编写完成','description':'编写说明文档并归档','date':'2026-10-21','kind':'沟通要点'}
 
     def apply(self):return g.apply(self.config,self.folder,self.folder/'plan.json')
 
     def lost_record(self, second=False):
         actions=[self.record()]
-        if second:actions.append({**self.record(),'title':'后续说明','description':'另一步'})
+        if second:actions.append({**self.record(),'title':'后续说明补充完整','description':'补充另一步说明'})
         plan=self.plan(actions);real=self.gw.t.call
         def lost(args):
             result=real(args)
@@ -173,7 +173,7 @@ class Recovery(unittest.TestCase):
         before=(self.folder/'receipt.json').read_bytes()
         with self.assertRaises(n.Error):recovery.reconcile(self.config,'one')
         self.assertEqual((self.folder/'receipt.json').read_bytes(),before);self.assertEqual(self.gw.t.writes,1)
-        self.gw.t.raw['records'][-1]['cells']['records-title']='说明'
+        self.gw.t.raw['records'][-1]['cells']['records-title']='联调说明编写完成'
         self.gw.t.raw['records'].append(copy.deepcopy(self.gw.t.raw['records'][-1]))
         with self.assertRaises(n.Error):recovery.reconcile(self.config,'one')
         self.assertEqual(self.gw.t.writes,1)
@@ -192,13 +192,13 @@ class Recovery(unittest.TestCase):
         self.assertEqual(self.gw.t.writes,1)
 
     def test_unknown_todo_without_original_id_is_not_guessed(self):
-        self.plan([{**self.base,'op':'create_todo','executor':'self','title':'说明','record_ids':['R1']}]);self.gw.fail=True
+        self.plan([{**self.base,'op':'create_todo','executor':'self','title':'联调说明编写完成','record_ids':['R1']}]);self.gw.fail=True
         with self.assertRaises(n.Error):self.apply()
         with self.assertRaisesRegex(n.Error,'未返回编号'):recovery.reconcile(self.config,'one')
         self.assertEqual(self.gw.creates,1)
 
     def test_known_todo_readback_failure_recovers_original_id(self):
-        self.plan([{**self.base,'op':'create_todo','executor':'self','title':'说明','record_ids':['R1']}]);real=self.gw.call
+        self.plan([{**self.base,'op':'create_todo','executor':'self','title':'联调说明编写完成','record_ids':['R1']}]);real=self.gw.call
         def fail(args,**kwargs):
             if args[:2]==['todo','+get']:raise n.Error('read failed')
             return real(args,**kwargs)

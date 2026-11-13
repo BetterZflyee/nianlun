@@ -206,8 +206,24 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         n.save(folder/'evidence-trim.json',{'notes':notes,'chars':len(evidence),
                                                             'budget':EVIDENCE_BUDGET})
                         progress('本轮证据较多，已按预算裁剪：'+'；'.join(notes))
-                    if len(evidence)>EVIDENCE_BUDGET:
-                        raise n.Error('本轮证据较多，已完整保存在运行目录。请由宿主分批处理当前轮次；未截断来源或执行写入。')
+                    # 超出预算才拦截，但要区分「差一点点」和「真的太多」。
+                    #
+                    # 2026-11-12 20:00 那轮实测：裁剪已经用尽所有手段（记录压到 60 条、
+                    # 来源截到 1200 字、明细全折叠、自适应减半 2 轮），最后仍超
+                    # **42 个字符**（预算 30 万，超出 0.014%），整轮直接作废；
+                    # 之后 21:00/22:00/23:00 连着废——**一点余量都不留的判据，
+                    # 在数据量刚好卡线时会连续误杀**。
+                    #
+                    # 现在：超出 2% 以内视为可接受（提示词本来就留有余量，
+                    # 多这几千字符不会真的塞爆上下文）；超过 2% 才交回宿主分批。
+                    over = len(evidence) - EVIDENCE_BUDGET
+                    if over > EVIDENCE_BUDGET * 0.02:
+                        raise n.Error(
+                            '本轮证据较多（超出预算 ' + str(over) + ' 字符），已完整保存在运行目录。'
+                            '请由宿主分批处理当前轮次；未截断来源或执行写入。')
+                    if over > 0:
+                        progress('本轮证据超出预算 ' + str(over) + ' 字符（' +
+                                 '%.2f' % (over * 100 / EVIDENCE_BUDGET) + '%），在容忍范围内，继续执行')
                     memories=[]
                     if config['growth'].get('brain_dir'):
                         progress('正在结合当前证据检索项目记忆')

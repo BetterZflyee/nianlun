@@ -55,6 +55,14 @@ def window(settings, checkpoint, channel, end, explicit=None):
 def advance(bundle, decision, previous):
     channels=dict(previous.get('channels',{}));deferred=set(decision.get('deferred_source_ids',[]))
     delayed=set()
+    # 模型想延后、但 ID 解析不中的那些（unresolved_deferred）不能当「已处理」跳过。
+    # 短引用 S12 抄错几乎不可能，但升级过渡期/模型偶尔仍会写错。
+    # 处理原则：**宁可下一轮重采这些来源（幂等去重会挡住重复入库），
+    # 也不能赌它们不重要直接推进水位**——后者等于悄悄丢数据。
+    # 无法定位具体来源时，保留全部渠道窗口，下轮自然重看。
+    unresolved=decision.get('unresolved_deferred') or []
+    if unresolved:
+        delayed.update(LABELS)
     for item in bundle['sources']:
         if item['id'] in deferred:
             delayed.update(item.get('channels',list(LABELS)))  # Legacy evidence: retain every window.

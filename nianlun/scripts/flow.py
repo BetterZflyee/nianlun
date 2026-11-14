@@ -274,7 +274,7 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         '关闭必须唯一匹配同项目同事项，并逐字引用解决证据；仅安排、预计、讨论或含糊的已完成不可关闭。多个同名事项无法区分时保留 pending。'
                         'actions_json 字段是契约 actions 数组的 JSON 字符串；其他字段按契约填写。'
                         '引用原文里的对话或短语时使用中文引号「」，不要在 JSON 字符串内写 ASCII 双引号，否则会破坏结构。'
-                        'source_id 必须逐字复制本轮证据 sources 里的 id 字段；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
+                        'source_id 和 deferred_source_ids 一律填本轮证据 sources 里的 ref 短引用（S1、S2 这样的编号），不要抄写 minutes: 开头的长 ID；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
                         '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False))
                     # 证据与记忆单独拼装：撞到宿主上下文上限时要能用更小的证据重拼，而不必重建整段指令。
                     prompt_base=prompt

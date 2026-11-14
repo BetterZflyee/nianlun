@@ -36,12 +36,12 @@
   "run_id": "来自 evidence.json",
   "summary": "有依据的中文总结，动作数量必须与计划一致",
   "pending": ["有歧义的事项及原因"],
-  "deferred_source_ids": ["尚未处理的真实来源ID；下次不会跳过它"],
+  "deferred_source_ids": ["要延后的来源，填其 ref 短引用（如 S3）；下次不会跳过它"],
   "actions": [
     {
       "op": "create_record", "ref": "handover",
       "project": "项目主表中的准确名称",
-      "source_id": "本轮来源ID", "quote": "来源正文中的逐字摘录",
+      "source_id": "本轮来源的 ref 短引用（S1、S2…）", "quote": "来源正文中的逐字摘录",
       "title": "本次变化", "description": "事实、结论、待核内容",
       "date": "2026-10-20", "kind": "沟通要点", "status": "开放"
     },

@@ -401,6 +401,14 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
         if item['id'] in unique:item['channels']=sorted(set(item['channels']+unique[item['id']]['channels']))
         unique[item['id']]=item
     bundle['sources']=list(unique.values())
+    # 给每个来源分配短引用 S1、S2……
+    # 真实 ID 形如 minutes:763275696435…，平均 36 字符的十六进制串。
+    # 要求模型「逐字复述」它，它必然偶尔抄错中段——实测 11-13/11-14 连续多轮
+    # 失败在「未处理来源 ID 不合法」：模型抄的 deferred ID 与真实 ID 公共前缀
+    # 只有 21/62 字符，中段全错，整轮作废。
+    # 让模型只复述 2-4 字符的 S12，抄错概率几乎归零；解析逻辑集中在 resolve_source。
+    for index, item in enumerate(bundle['sources'], 1):
+        item['ref'] = 'S' + str(index)
     bundle['since']=min((x['since'] for x in bundle['coverage'] if x.get('since')),default=bundle['since'])
     n.save(folder/'evidence.json',bundle)
     n.save(pending,{'run_dir':str(folder),'run_id':run_id})
@@ -432,6 +440,12 @@ def resolve_source(bundle, given):
     """
     sources = bundle['sources']
     if not isinstance(given, str) or not given.strip():
+        return None
+    # 新格式：短引用 S1、S2……（ref 是 collect 分配的，稳定且极短）
+    ref = [x for x in sources if x.get('ref') == given]
+    if len(ref) == 1:
+        return ref[0]
+    if ref:
         return None
     exact = [s for s in sources if s['id'] == given]
     if len(exact) == 1:
@@ -506,8 +520,19 @@ def validate(config,bundle,decision):
     if not isinstance(decision.get('actions'),list) or len(decision['actions'])>100:raise n.Error('动作应为不超过 100 条的数组')
     actions=[];keys=set();refs={}
     if len(decision['summary'])>8000:raise n.Error('本轮总结过长')
-    deferred=decision.get('deferred_source_ids',[])
-    if not isinstance(deferred,list) or any(i not in {s['id'] for s in bundle['sources']} for i in deferred):raise n.Error('未处理来源 ID 不合法')
+    # deferred 解析容错：模型要延后的引用解析不到具体来源时，**不再抛错整轮作废**。
+    # 原报错「未处理来源 ID 不合法」是过去两天 25+ 轮失败的元凶——
+    # 模型把 62 字符真实 ID 的中段十六进制抄错一个字符，整轮就白做。
+    # 现在：先按短引用（S1）解析，退回旧格式完整 ID 兼容历史 decision；
+    # 仍解析不中的记入 unresolved_deferred，由水位逻辑保守处理（见 apply），
+    # 丢一轮重采，不丢数据。
+    deferred_raw=decision.get('deferred_source_ids',[])
+    if not isinstance(deferred_raw,list):raise n.Error('deferred_source_ids 应为数组')
+    resolved_deferred=[];unresolved_deferred=[]
+    for x in deferred_raw:
+        match=resolve_source(bundle,x)
+        if match:resolved_deferred.append(match['id'])
+        else:unresolved_deferred.append(str(x)[:80])
     for a in decision['actions']:
         s=evidence(bundle,a)
         # 项目必填要**先于** project_for 检查：project_for 走 n.select_projects，
@@ -517,7 +542,7 @@ def validate(config,bundle,decision):
             raise n.Error('记录必须归属一个项目；无法确定归属时把这个事项放进 pending 并说明候选项目，'
                           '不要创建没有项目关联的记录——孤儿记录在项目视图、报表和记忆页里全都看不见')
         p=project_for(bundle,a); op=a['op']; a=dict(a)
-        if a['source_id'] in deferred:raise n.Error('尚未处理的来源不能同时生成写入动作')
+        if s['id'] in resolved_deferred:raise n.Error('尚未处理的来源不能同时生成写入动作')
         normalize_site_codes(bundle,a)
         if op in ('create_record','update_status'):
             c={**a,'source':s}
@@ -624,7 +649,8 @@ def validate(config,bundle,decision):
         if a.get('ref'):
             if a['ref'] in refs:raise n.Error('ref 重复')
             refs[a['ref']]=a
-    return {'run_id':bundle['run_id'],'binding':n.digest(config),'evidence_hash':n.digest(bundle),'decision':decision,'actions':actions}
+    return {'run_id':bundle['run_id'],'binding':n.digest(config),'evidence_hash':n.digest(bundle),'decision':decision,'actions':actions,
+            'resolved_deferred':resolved_deferred,'unresolved_deferred':unresolved_deferred}
 
 
 def writable_cells(config, role, cells):
@@ -1060,16 +1086,20 @@ def _finish(config,folder,decision_file):
             if delivery.get('result',{}).get('sendStatus')=='SUCCESS':status['digest']['status']='delivered'
             else:raise n.Error('钉钉摘要已提交，但投递结果未确认；保留发送句柄，不重复发')
             n.save(status_path,status)
+    # 水位用 validate 解析后的真实 ID；unresolved 非空时 advance 会把
+    # 全部渠道水位保留（宁可下一轮重采，也不让一个抄错的 ID 决定丢哪些数据）。
+    deferred_ids=plan.get('resolved_deferred',d.get('deferred_source_ids',[]))
+    water={'deferred_source_ids':deferred_ids,'unresolved_deferred':plan.get('unresolved_deferred',[])}
     selected=b.get('selection',{}).get('project_ids',[])
     seen_path=root(config)/'scopes'/(n.digest(selected)+'.json') if selected else root(config)/'seen.json'
     seen=n.load(seen_path) if seen_path.exists() else {}
     for s in b['sources']:
-        if s['id'] not in d.get('deferred_source_ids',[]):seen[s['id']]=s['version']
+        if s['id'] not in deferred_ids:seen[s['id']]=s['version']
     n.save(seen_path,seen)
     # Incomplete sources retain their window for the next run; don't silently drop missing pages.
     checkpoint=root(config)/'checkpoint.json'
     if not b.get('manual'):
-        n.save(checkpoint,source_state.advance(b,d,n.load(checkpoint) if checkpoint.exists() else {}))
+        n.save(checkpoint,source_state.advance(b,water,n.load(checkpoint) if checkpoint.exists() else {}))
     health_path=root(config)/'source-health.json'
     n.save(health_path,source_state.health(b,n.load(health_path) if health_path.exists() else {}))
     n.save(notice_path,{'signature':signature,'run_id':b['run_id']})

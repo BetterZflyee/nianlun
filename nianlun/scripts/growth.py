@@ -637,7 +637,13 @@ def validate(config,bundle,decision):
                 previous=refs.get(a['record_ref'])
                 if not previous or previous['op']!='create_record' or previous['project_id']!=p['id']:raise n.Error('record_ref 必须指向本项目先前的新增记录')
                 a['record_action_key']=previous['key']
-            if not a.get('record_ids') and not a.get('record_ref'):raise n.Error('待办必须关联项目记录，支持 record_ids 或 record_ref')
+            if not a.get('record_ids') and not a.get('record_ref'):
+                # 报错要给「出路」：模型三次重试都栽在这句（实测 2026-11-14 22:40 轮），
+                # 因为原话只说「必须关联」，没说没有现成记录时该怎么办。
+                raise n.Error('待办必须关联项目记录（record_ids 或 record_ref）。'
+                              '本轮没有可关联的记录时，二选一：'
+                              '先写一条 create_record 并用 ref 命名，待办用 record_ref 指向它；'
+                              '或把该待办放进 pending 数组说明缺少记录，下一轮补关联')
         elif op=='complete_todo':
             matches=[t for t in bundle['todos'] if t['taskId']==a.get('task_id')]
             if len(matches)!=1 or a.get('match')!='unique' or a.get('completion')!='explicit':raise n.Error('完成待办必须来自本人未完成列表、唯一匹配和明确完成证据')

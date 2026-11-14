@@ -452,10 +452,19 @@ def resolve_source(bundle, given):
         return exact[0]
     if exact:
         return None
-    # 只接受「末尾填充符数量不同」这一种偏差：模型常把 == 写成 = 或干脆省掉。
+    # 只接受两类**确定性变换**（不是模糊匹配，否则会把不同消息认成同一来源）：
+    # ①末尾填充符差异——模型常把 == 写成 = 或干脆省掉；
+    # ②省略渠道前缀——实测 2026-11-14 22:00 轮，模型三次重试的 deferred 都是
+    #   裸十六进制串（`7632756964…`），整段 `minutes:` 前缀都没写。
+    # 都要求**唯一命中**，歧义即放弃。
     stripped = given.rstrip('=')
     candidates = [s for s in sources if s['id'].rstrip('=') == stripped]
-    return candidates[0] if len(candidates) == 1 else None
+    if len(candidates) == 1:
+        return candidates[0]
+    if ':' in given:
+        return None
+    bare = [s for s in sources if s['id'].split(':', 1)[1].rstrip('=') == stripped]
+    return bare[0] if len(bare) == 1 else None
 
 def evidence(bundle,a):
     match=resolve_source(bundle,a.get('source_id'))

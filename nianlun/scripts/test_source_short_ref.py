@@ -144,3 +144,17 @@ class AdvanceWatermarkTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class BareHexCompatTests(unittest.TestCase):
+    """过渡期兼容：模型省略渠道前缀写裸 hex（22:00 轮实测行为）。"""
+
+    def test_bare_hex_resolves(self):
+        b = make_bundle()
+        bare = b['sources'][0]['id'].split(':', 1)[1]
+        self.assertEqual(g.resolve_source(b, bare)['ref'], 'S1')
+
+    def test_bare_hex_ambiguous_rejected(self):
+        """裸 hex 撞上多个来源时必须放弃，不能赌一个。"""
+        b = make_bundle()
+        b['sources'][1]['id'] = b['sources'][0]['id']  # 人为制造同 payload
+        self.assertIsNone(g.resolve_source(b, b['sources'][0]['id'].split(':', 1)[1]))

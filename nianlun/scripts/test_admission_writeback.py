@@ -165,6 +165,32 @@ class DetailFieldTests(unittest.TestCase):
         self.assertEqual(ra._detail_field(table), 'D1')
 
 
-if __name__ == '__main__':
+
+class UiCallShapeTests(unittest.TestCase):
+    """UI 的 run() 不自动加 request_id（服务端对写操作硬性要求）。
+
+    实机 curl 测通了 API，但那是手工构造的 JSON——UI 少传 request_id 时
+    服务端会拒绝整个请求，而单测/fake 全都不会发现。
+    源码级断言：admission 两个调用必须带 request_id。
+    """
+
+    def app_js(self):
+        return (Path(__file__).resolve().parent.parent / 'assets' / 'portal' /
+                'app.js').read_text(encoding='utf-8')
+
+    def test_confirm_call_has_request_id(self):
+        src = self.app_js()
+        idx = src.index('"admission_confirm"')
+        block = src[idx: idx + 200]
+        self.assertIn('request_id', block)
+
+    def test_reject_call_has_request_id(self):
+        src = self.app_js()
+        idx = src.index('"admission_reject"')
+        block = src[idx: idx + 240]
+        self.assertIn('request_id', block)
+
+
+if __name__ == "__main__":
     import unittest.mock
     unittest.main()

@@ -145,7 +145,10 @@ function admissionControls(row, contentRoot) {
   const confirmBtn = btn("确认", async () => {
     confirmBtn.disabled = true;
     try {
-      await run("admission_confirm", { record_id: row.id });
+      await run("admission_confirm", {
+        record_id: row.id,
+        request_id: crypto.randomUUID(),
+      });
       data = null;
       renderProject(contentRoot);
       toast("已确认为项目记忆");
@@ -160,6 +163,7 @@ function admissionControls(row, contentRoot) {
       await run("admission_reject", {
         record_id: row.id,
         reason: "执行过程，不改变项目状态",
+        request_id: crypto.randomUUID(),
       });
       data = null;
       renderProject(contentRoot);

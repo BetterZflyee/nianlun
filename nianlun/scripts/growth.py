@@ -578,6 +578,11 @@ def normalize_site_codes(bundle,action):
 def validate(config,bundle,decision):
     if decision.get('run_id')!=bundle['run_id'] or bundle['binding']!=n.digest(config):raise n.Error('运行或绑定已变化')
     if not isinstance(decision.get('summary'),str) or not decision['summary'].strip():raise n.Error('缺少本轮行文总结')
+    # 对接人姓名 → user 对象（飞哥 2026-11-15：从上下文找谁来安排/对接就写谁，可多个）。
+    # 必须放在 validate 而不是 table_write：生长写入走 apply_plan，不经过 table_write
+    # 的 contact 分支，v2.12.3 的解析只在手工编辑生效——这就是对接人 2% 一直修不动的原因。
+    # 三处 validate（重试循环/主路径/resume）都从这里走，单点接入 + 幂等保证 fresh==plan。
+    decision=enrich_contacts(config,decision)
     if not isinstance(decision.get('actions'),list) or len(decision['actions'])>100:raise n.Error('动作应为不超过 100 条的数组')
     actions=[];keys=set();refs={}
     if len(decision['summary'])>8000:raise n.Error('本轮总结过长')
@@ -895,6 +900,81 @@ def resolve_contact(gw, name, cache=None):
     if cache is not None:
         cache[key] = result
     return result
+
+
+# 进程内缓存：每轮 tick/grow 是独立进程，姓名→user 的索引与解析结果只算一次。
+# 不缓存的话，重试循环里每个新 decision 有姓名就重扫全表（1480 条约 16 秒×3）。
+# 缓存不影响 fresh==plan 一致性：同一姓名 → 同一索引 → 同一结果，天然确定。
+_ENRICH_CACHE = {}
+
+
+def split_contact_names(value):
+    """把模型给的对接人拆成姓名列表。容忍这些真实形态：
+    '张三' / '张三、李四' / '张三，李四' / ['张三','李四'] / 已是 user 对象。"""
+    if isinstance(value, list):
+        out = []
+        for x in value:
+            if isinstance(x, dict):
+                return None  # 已经是 user 对象（比如 R 推导注入的），调用方原样保留
+            out.extend(split_contact_names(x) or [])
+        return out or None
+    text = str(value or '').strip()
+    if not text:
+        return None
+    return [x.strip() for x in re.split(r'[、，,;；/\s]+', text) if x.strip()] or None
+
+
+def enrich_contacts(config, decision, gw=None, cache=None):
+    """在 validate 之前，把 create_record 里的姓名字符串对接人解析成 user 对象。
+
+    ## 为什么必须放在这里（而不是 table_write）
+
+    n.plan() 只接受已解析的 user 对象，姓名字符串会被直接丢弃；
+    而生长写入走 n.apply_plan，**根本不经过 table_write 的 contact 分支**。
+    所以 v2.12.3 加的姓名解析只对界面手工编辑生效，生长路径一直是断的——
+    这就是「对接人 2% 覆盖率」修了一轮还没动的真原因。
+
+    ## 规则（飞哥 2026-11-15 补充）
+
+    - 来源里「谁来安排、谁来对接」点名的人就是对接人，**可以一个或多个**；
+      列本身 multiple=true，姓名按顿号/逗号/空格拆开后逐个解析。
+    - 与 R 推导共存：模型从来源点名的优先（明确的人 > 结构默认）。
+    - 解析不了（同名歧义/搜不到）→ 该名字丢弃并记入 action['contact_names_unresolved']，
+      **绝不阻断整条写入**。
+    - 已是 user 对象的（R 推导注入的）原样跳过。
+    - 幂等：二次调用对已对象化的 decision 不再触网——fresh==plan 比对依赖这点。
+    """
+    if not isinstance(decision, dict):
+        return decision
+    cache = cache if cache is not None else _ENRICH_CACHE
+    for a in decision.get('actions') or []:
+        if a.get('op') != 'create_record':
+            continue
+        raw = a.get('contact')
+        if raw is None or raw == '':
+            continue
+        if split_contact_names(raw) is None:
+            continue  # 已是 user 对象数组，保持原样
+        names = split_contact_names(raw) or []
+        resolved = []
+        unresolved = []
+        if gw is None:
+            gw = Gateway(config)  # 只有真需要解析姓名时才建网关、扫表
+        for name in names:
+            users = resolve_contact(gw, name, cache)
+            if users:
+                for u in users:
+                    if u not in resolved:
+                        resolved.append(u)
+            else:
+                unresolved.append(name)
+        if resolved:
+            a['contact'] = resolved
+        else:
+            a.pop('contact', None)
+        if unresolved:
+            a['contact_names_unresolved'] = unresolved
+    return decision
 
 
 def table_write(config,gw,role,cells,record_id=None,contact_cache=None):

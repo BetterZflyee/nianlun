@@ -172,6 +172,9 @@ def prompt_evidence(bundle):
                 code=row.get('code') or row.get('number')
                 if code:item['code']=code
             if role=='milestones':
+                # ref：让模型填 m1、m2 而不是抄 10 字符 ID——
+                # 和 deferred 长 ID「抄错一字符、整轮作废」是同一个坑，一次教训够了。
+                if row.get('ref'):item['ref']=row['ref']
                 if row.get('status'):item['status']=row['status']
                 if row.get('date'):item['date']=str(row['date'])[:10]
             owners=[p for p in (row.get('project_ids') or [])]
@@ -265,7 +268,8 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         '【每条记录都要尽量填满所有列，不要只写标题和正文】'
                         'create_record 时逐列检查：场地（site_ids）、里程碑（milestone_ids）、反馈子类别（sub_kind）、'
                         '对接人（contact）——来源里出现对应信息就必须落到该列。'
-                        '候选对象见 linkable（sites/milestones，带 id 和名称）：名称能对上就用它的 id。'
+                        '候选对象见 linkable：milestone_ids 一律填其 ref 短引用（m1、m2…）而不是 id；'
+                        'site_ids 名称能对上就用它的 id。**挂不到任何里程碑时照常创建记录，不要为了挂而硬凑一个不相干的里程碑**。'
                         '对接人写来源里明确提到的责任人姓名；来源没说谁负责就不填，不要猜。'
                         '⚠️ 结构化列（site_ids/milestone_ids/sub_kind/contact）只写来源里明确出现的；'
                         '留空比猜错好——猜错的会被当成事实统计，比空白更难发现。'
@@ -277,6 +281,16 @@ def grow(config_path, binary=None, progress=lambda value:None, since=None, until
                         'source_id 和 deferred_source_ids 一律填本轮证据 sources 里的 ref 短引用（S1、S2 这样的编号），不要抄写 minutes: 开头的长 ID；quote 必须从该来源 text 中连续逐字复制一段原文，不改标点、不补字、不省略、不改全角半角。要引用哪句话就先核对它确实出现在该来源里，无法逐字确认时把该事项放进 pending，不要编造引用。'
                         '\n契约：'+contract+'\n允许操作开关：'+json.dumps(config['growth']['switches'],ensure_ascii=False))
                     # 证据与记忆单独拼装：撞到宿主上下文上限时要能用更小的证据重拼，而不必重建整段指令。
+                    # 驳回学习闭环：用户驳回过的「不该是项目记忆」案例，作为负例
+                    # 注入本轮 prompt。准入规则（挂不到里程碑不算项目记忆）靠
+                    # needs_review 打标只能拦下「可疑」，真正把界线教会模型的
+                    # 是用户的具体否决——这是飞哥定的「持续学习」路径。
+                    try:
+                        import record_admission
+                        negatives = record_admission.negative_examples(config)
+                        if negatives:
+                            prompt = prompt + '\n\n【历史驳回（用户认定「这不是项目记忆」，本轮同类内容不要再写进表）】\n' + negatives
+                    except Exception: pass
                     prompt_base=prompt
                     prompt=_build_prompt(prompt_base,evidence,memories)
                     # 校验失败时把具体原因反馈给模型再写一稿：盲重试同样的输入只会重复同样的错误。

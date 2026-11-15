@@ -390,6 +390,13 @@ class Application:
             return self.memory_explorer.page(data.get('slug'),data.get('key'))
         if op=='mutate':return self.work.mutate(data)
         if op=='bulk_mutate':return self.work.bulk(data,lambda message:self.phase(jid,message))
+        if op in ('admission_confirm','admission_reject'):
+            import record_admission
+            config = n.load(self.config)
+            rid = text(data.get('record_id'), '记录编号', 200, True)
+            if op == 'admission_confirm':
+                return record_admission.confirm(config, rid)
+            return record_admission.reject(config, rid, text(data.get('reason'), '驳回理由', 40))
         if op=='memory_query':return self.work.memory_query(data.get('query'))
         if op=='harness_status':
             selected={**choice,**{k:v for k,v in data.items() if k in ('provider','mode','binary')}}
@@ -594,7 +601,7 @@ class Application:
 
 
 OPERATIONS=READ_OPS|{'mutate','setup_dependencies','setup_login','create_resource','table_plan','tables_apply',
-    'memory_connect','configure','setup_doctor','harness_connect','capability_toggle','capability_roots','ask','report','send_report','plan_milestones','grow','workflow','memory_baseline','scheduler_check','host_export','resume','workflow_request','schedule_pause','reconcile_growth','resume_growth','bulk_mutate','pick_directory','capability_bulk','report_method','cdbi_connect','cdbi_install','cdbi_login','cdbi_import'}
+    'memory_connect','configure','setup_doctor','harness_connect','capability_toggle','capability_roots','ask','report','send_report','plan_milestones','grow','workflow','memory_baseline','scheduler_check','host_export','resume','workflow_request','schedule_pause','reconcile_growth','resume_growth','bulk_mutate','pick_directory','capability_bulk','report_method','cdbi_connect','cdbi_install','cdbi_login','cdbi_import','admission_confirm','admission_reject'}
 
 
 class HTTPServer(ThreadingHTTPServer):

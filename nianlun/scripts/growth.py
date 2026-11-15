@@ -401,6 +401,15 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
         if item['id'] in unique:item['channels']=sorted(set(item['channels']+unique[item['id']]['channels']))
         unique[item['id']]=item
     bundle['sources']=list(unique.values())
+    # 里程碑同样分配短引用（m1、m2…）。理由和来源 ref 完全一样：真实 ID 是 10 字符
+    # 随机串，准入规则要求模型给记录挂 milestone_ids，让模型逐字抄 ID 就会重演
+    # 「抄错→整轮作废」。挂接在计划里只允许填这些短引用（validate 解析）。
+    # 只给 milestones 分配 m1…；records **故意不分配 ref**——
+    # trim_evidence 会把 records 按日期重排取最近 60 条，bundle 与提示词里的
+    # 编号必然错位（同「裁剪破坏 evidence_hash」一个坑）。milestones 不被裁剪，安全。
+    for index, item in enumerate(bundle['tables'].get('milestones') or [], 1):
+        item['ref'] = 'm' + str(index)
+    bundle['sources']=list(unique.values())
     # 给每个来源分配短引用 S1、S2……
     # 真实 ID 形如 minutes:763275696435…，平均 36 字符的十六进制串。
     # 要求模型「逐字复述」它，它必然偶尔抄错中段——实测 11-13/11-14 连续多轮
@@ -429,6 +438,25 @@ def similar_todos(project,title,todos):
         if body and other and (body==other or (min(len(body),len(other))>=8 and SequenceMatcher(None,body,other).ratio()>=0.85)):
             matches.append(todo)
     return matches
+
+
+REVIEW_MARKER = '\n[年轮待复核：未关联里程碑]'
+
+
+def resolve_row_ref(bundle, role, given):
+    """按短引用（m1/r1…）或真实 ID 在表里找**唯一**一行，找不到返回 None。
+
+    准入规则要求模型给记录挂 milestone_ids，可真实 ID 是 10 字符随机串——
+    让模型逐字抄，就会重演 deferred 长 ID「抄错一个字符、整轮作废」。
+    所以 collect 给里程碑/记录也分配了 m1、r1 短引用，这里统一解析。
+    与 resolve_source 同原则：只做确定性变换 + 唯一命中，绝不做模糊匹配。
+    """
+    rows = (bundle.get('tables') or {}).get(role) or []
+    if not isinstance(given, str) or not given.strip():
+        return None
+    key = given.strip()
+    exact = [x for x in rows if x.get('ref') == key] or [x for x in rows if x.get('id') == key]
+    return exact[0] if len(exact) == 1 else None
 
 
 def resolve_source(bundle, given):
@@ -553,6 +581,31 @@ def validate(config,bundle,decision):
         p=project_for(bundle,a); op=a['op']; a=dict(a)
         if s['id'] in resolved_deferred:raise n.Error('尚未处理的来源不能同时生成写入动作')
         normalize_site_codes(bundle,a)
+        # 准入规则（飞哥 2026-11-14 定稿）：**挂不到里程碑上的东西，不算项目记忆**。
+        # 但落地方式不是拒写——真实数据显示用户自己已经用「归档」筛过一遍
+        # （已归档 1102 条挂里程碑率 0.7%，开放 310 条挂 83%），说明这条界线
+        # 用户认。所以这里照写、但打标 needs_review，交给人「确认 / 驳回」：
+        # 确认=补挂里程碑后 marker 自动清除；驳回=归档并写入负例库，
+        # 下一轮 prompt 带上负例，模型不再重复犯。
+        # 记录 ID 同理：模型给 record_ids/milestone_ids 允许填短引用。
+        if op=='create_record':
+            given=a.get('milestone_ids') or []
+            resolved=[];unresolved=[]
+            if isinstance(given,list):
+                for x in given:
+                    row=resolve_row_ref(bundle,'milestones',x)
+                    if row and p['id'] in (row.get('project_ids') or []):
+                        if row['id'] not in resolved:resolved.append(row['id'])
+                    else:unresolved.append(str(x)[:24])
+            a['milestone_ids']=resolved
+            if unresolved:a['milestone_refs_unresolved']=unresolved
+            a['needs_review']=not resolved
+            if a['needs_review']:
+                # 表里没有 needs_review 列（不加列，用户表结构不动），
+                # 标记写进描述末尾：人在表格里一眼可见，界面按同一标记识别。
+                # 必须是**确定性**变换——resume 时 validate 重跑生成 fresh plan，
+                # 同一输入两次结果不同会被「计划内容变更」拦死。
+                a['description']=str(a.get('description') or '')+REVIEW_MARKER
         if op in ('create_record','update_status'):
             c={**a,'source':s}
             if op=='update_status':

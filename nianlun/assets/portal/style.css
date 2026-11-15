@@ -890,3 +890,25 @@ dialog{padding:0;overflow:hidden;max-height:90dvh}dialog[open]{display:flex;flex
 .notification-row.is-read .read-badge{color:#7c887b}
 .read-badge{font-size:12px;color:#32604c;white-space:nowrap}
 @media(max-width:600px){.report-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.notification-toolbar{position:static}.notification-toolbar button{font-size:13px}}
+
+/* 准入复核控件：确认/驳回是低频但重要的动作，样式克制 */
+.admission-box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fdf6e8;
+  border: 1px solid #e8cfa4;
+}
+.admission-tip {
+  font-size: 12px;
+  color: #8a6520;
+  margin-right: 4px;
+}
+.admission-box button {
+  font-size: 12px;
+  padding: 4px 10px;
+}

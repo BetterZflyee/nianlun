@@ -132,6 +132,47 @@ function el(tag, attrs = {}, children = []) {
   }
   return node;
 }
+
+// 生长写入时把待复核标记追加在 description 末尾（growth.REVIEW_MARKER），
+// 表里不加列——用户在 AI 表格里直接看得见，界面也按同一标记识别。
+const REVIEW_MARK = "[年轮待复核：未关联里程碑]";
+const isPendingReview = (row) => (row.description || "").includes(REVIEW_MARK);
+
+function admissionControls(row, contentRoot) {
+  const box = el("div", { class: "admission-box" }, [
+    el("span", { class: "admission-tip", text: "这条还没挂上里程碑，属于项目记忆吗？" }),
+  ]);
+  const confirmBtn = btn("确认", async () => {
+    confirmBtn.disabled = true;
+    try {
+      await run("admission_confirm", { record_id: row.id });
+      data = null;
+      renderProject(contentRoot);
+      toast("已确认为项目记忆");
+    } catch (e) {
+      confirmBtn.disabled = false;
+      toast(e.message);
+    }
+  });
+  const rejectBtn = btn("不是项目记忆", async () => {
+    rejectBtn.disabled = true;
+    try {
+      await run("admission_reject", {
+        record_id: row.id,
+        reason: "执行过程，不改变项目状态",
+      });
+      data = null;
+      renderProject(contentRoot);
+      toast("已归档，并告诉模型下次不再记这类内容");
+    } catch (e) {
+      rejectBtn.disabled = false;
+      toast(e.message);
+    }
+  });
+  box.append(confirmBtn, rejectBtn);
+  return box;
+}
+
 const btn = (label, fn, cls = "") =>
   el("button", { type: "button", class: cls, onclick: fn, text: label });
 const badge = (value, cls = "") =>
@@ -468,6 +509,11 @@ function renderProject(root) {
             .join(" · "),
         }),
         badge(row.status || row.kind || "已记录"),
+        // 准入复核（飞哥定稿的规则）：挂不到里程碑的记录会被生长打上
+        // 待复核标记，这里给「确认 / 不是项目记忆」两个动作。
+        // 驳回会归档该记录并把标题+项目记入负例库，下一轮 prompt
+        // 带上它——用户的每一次否决都在教模型界线在哪。
+        isPendingReview(row) ? admissionControls(row, root) : null,
       ]),
     );
   }

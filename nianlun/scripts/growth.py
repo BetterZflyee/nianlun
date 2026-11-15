@@ -441,6 +441,30 @@ def similar_todos(project,title,todos):
 
 
 REVIEW_MARKER = '\n[年轮待复核：未关联里程碑]'
+CONTACT_NOTE = '\n[年轮对接人：取自所挂里程碑的交付负责人 R，若不对请直接修改]'
+
+
+def _milestone_owner_users(value):
+    """把里程碑 r_owner 归一成 [{corpId?,userId}...]；认不出返回 []。
+
+    ⚠️ 同一字段有两种真实形态：DWS 原始返回是 list[dict]，
+    n.normalized 之后变成 **字符串化的 repr**（"[{'corpId':…}…]"）。
+    validate 拿到的 bundle 是 normalized 后的——只按 list 判断会**永远**
+    静默失配（2026-11-15 实测踩中：条件全对，类型全错，推导 0 命中）。
+    """
+    import ast as _ast
+    rows = value
+    if isinstance(rows, str):
+        text = rows.strip()
+        if not text.startswith('['):
+            return []
+        try:
+            rows = _ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return []
+    if not isinstance(rows, list):
+        return []
+    return [x for x in rows if isinstance(x, dict) and x.get('userId')]
 
 
 def resolve_row_ref(bundle, role, given):
@@ -600,6 +624,21 @@ def validate(config,bundle,decision):
             a['milestone_ids']=resolved
             if unresolved:a['milestone_refs_unresolved']=unresolved
             a['needs_review']=not resolved
+            # 对接人默认规则（飞哥 2026-11-15）：「反馈能挂上里程碑时，对接人
+            # 一般就是该里程碑的交付负责人 R」。
+            # 实测依据：开放记录 361 条里 126 条对接人空白但挂到的里程碑有 R，
+            # 可以直接补上；同时有 22 条已填对接人与 R 不一致——所以规则是
+            # **默认值不是裁决**：只在模型没给对接人时推导，绝不覆盖明确的人。
+            # r_owner 本来就是 [{corpId,userId}] 对象，无需再过通讯录解析。
+            if not a.get('contact') and resolved:
+                mrows={x['id']:x for x in (bundle.get('tables') or {}).get('milestones') or []}
+                for mid in resolved:
+                    owner=_milestone_owner_users(mrows.get(mid,{}).get('r_owner'))
+                    if owner:
+                        a['contact']=owner
+                        a['contact_from_milestone_r']=True
+                        a['description']=str(a.get('description') or '')+CONTACT_NOTE
+                        break
             if a['needs_review']:
                 # 表里没有 needs_review 列（不加列，用户表结构不动），
                 # 标记写进描述末尾：人在表格里一眼可见，界面按同一标记识别。

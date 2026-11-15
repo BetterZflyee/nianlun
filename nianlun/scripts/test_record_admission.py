@@ -173,3 +173,64 @@ class LinkableRefTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ContactFromMilestoneRTests(unittest.TestCase):
+    """对接人默认规则：挂上里程碑时取该里程碑的 R 交付负责人（飞哥 11-15 定）。"""
+
+    def bundle(self, r_owner_value):
+        b = bundle()
+        b['tables']['milestones'][0]['r_owner'] = r_owner_value
+        return b
+
+    def decision_no_contact(self):
+        d = decision(['m1'])
+        return d
+
+    def test_str_shape_inferred(self):
+        """normalized 后的 str repr 形态——validate 实际拿到的就是这个。"""
+        b = self.bundle("[{'corpId': 'c1', 'userId': 'uR'}]")
+        plan = g.validate(CONFIG, b, self.decision_no_contact())
+        a = plan['actions'][0]
+        self.assertEqual(a['contact'], [{'corpId': 'c1', 'userId': 'uR'}])
+        self.assertTrue(a['contact_from_milestone_r'])
+        self.assertIn('交付负责人 R', a['description'])
+
+    def test_list_shape_inferred(self):
+        b = self.bundle([{'userId': 'uR'}])
+        plan = g.validate(CONFIG, b, self.decision_no_contact())
+        self.assertEqual(plan['actions'][0]['contact'], [{'userId': 'uR'}])
+
+    def test_model_contact_never_overridden(self):
+        """已填对接人绝不覆盖——R 是默认值，明确的人优先（实测 22 条冲突）。"""
+        d = self.decision_no_contact()
+        d['actions'][0]['contact'] = [{'userId': 'someone-else'}]
+        b = self.bundle("[{'userId': 'uR'}]")
+        plan = g.validate(CONFIG, b, d)
+        self.assertEqual(plan['actions'][0]['contact'], [{'userId': 'someone-else'}])
+        self.assertFalse(plan['actions'][0].get('contact_from_milestone_r'))
+
+    def test_no_milestone_no_inference(self):
+        d = decision()  # 无 milestone_ids
+        b = self.bundle("[{'userId': 'uR'}]")
+        plan = g.validate(CONFIG, b, d)
+        self.assertIsNone(plan['actions'][0].get('contact'))
+
+    def test_bare_user_without_corp_ok(self):
+        """只有 userId 没有 corpId 也接受（表里两种都有）。"""
+        b = self.bundle("[{'userId':'solo'}]")
+        plan = g.validate(CONFIG, b, self.decision_no_contact())
+        self.assertEqual(plan['actions'][0]['contact'], [{'userId': 'solo'}])
+
+    def test_inference_is_deterministic(self):
+        """两次 validate 结果必须完全一致（fresh==plan 拦回归）。"""
+        b = self.bundle("[{'corpId': 'c', 'userId': 'uR'}]")
+        p1 = g.validate(CONFIG, b, self.decision_no_contact())
+        p2 = g.validate(CONFIG, self.bundle("[{'corpId': 'c', 'userId': 'uR'}]"),
+                        self.decision_no_contact())
+        self.assertEqual(p1['actions'][0]['description'],
+                         p2['actions'][0]['description'])
+
+    def test_garbage_str_returns_empty(self):
+        self.assertEqual(g._milestone_owner_users('不是列表'), [])
+        self.assertEqual(g._milestone_owner_users(None), [])

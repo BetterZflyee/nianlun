@@ -209,6 +209,33 @@ class Corpus:
         return bool(terms(subject) & self.title_terms[record_id])
 
 
+def _anchors(text):
+    """抽出「专有标识」：带数字的设备号（769XE、247、C21）。
+
+    ⚠️ 必须**先剔掉待办的 `[项目名]` 前缀**，否则前缀里的场地码会假装成标识。
+
+    2026-11-16 实测踩到：`[755R-顺丰航空F区安检数智化] 联系亮哥，落实新增IP事宜`
+    被诊断成「有记录但判不准」（因为 755R 能在同项目一条记录的会议名里搜到）。
+    查下来那条记录是「会议名为「755RA场地 F 区安检 AI 替人系统应用功能培训」」——
+    755R 是**场地码**，出现在会议名里，跟「联系亮哥落实 IP」毫无关系。
+    这和「[项目名] 前缀不该参与判据」是同一个道理：场地码/项目代号属于
+    归属信息，不是「这件事是什么」的凭证。
+
+    所以：剥离前缀、且**剔除形如「755R」「755RA」的场地/项目代号**（字母开头
+    后跟纯数字+可选 A 的地块编号）。保留 769XE、247 这种设备号/数量。
+    """
+    body = re.sub(r'^\s*[\[【].*?[\]】]\s*', '', str(text or ''))
+    out = set()
+    for token in re.findall(r'[A-Za-z0-9]*\d[A-Za-z0-9]*', body):
+        if len(token) < 3:
+            continue
+        # 场地/项目代号：755R、755RA、591WA —— 数字开头 + 至多 2 个字母
+        if re.fullmatch(r'\d{3,4}[A-Za-z]{0,2}', token):
+            continue
+        out.add(token.upper())
+    return out
+
+
 def find_record(records, fragment):
     for r in records:
         if fragment in str(r.get('title') or ''):
@@ -285,14 +312,31 @@ def evaluate(bundle, corpus, min_specific=2, fields='title', links=None, pairs=N
     block_all = 100.0 * len(zero) / len(per_todo) if per_todo else 0.0
 
     # ④b 误杀候选：旧口径能对上、新口径对不上
+    #
+    # 这里同时算**诊断三分**（产品 2026-11-16 要求）：光看「挡住多少条」分不清
+    # 「该项目压根没有对应记录」和「有记录但判不出来」。前者是正确拒绝，
+    # 后者才是误杀。判别用「专有标识」（设备号/场地码，如 769XE、247、755RA）：
+    # 这类词在项目内几乎不重复，一旦能在同项目记录里搜到，就说明确实有对应记录。
     false_neg = []
+    no_record = []          # 专有标识在同项目搜不到 → 大概率真没记录
+    judged_out = []         # 专有标识能搜到 → 有记录但判不出来，才是真误杀候选
     for x in per_todo:
         if x['n_hits'] > 0:
             continue
-        old = [r for r in (corpus.peers.get(x['pid']) or [])
-               if corpus.any_overlap(r['id'], x['todo'].get('subject'))]
+        peers = corpus.peers.get(x['pid']) or []
+        subject = x['todo'].get('subject')
+        best = max((corpus.containment(r['id'], subject) for r in peers), default=0.0)
+        anchors = _anchors(subject)
+        anchored = [r for r in peers
+                    if any(a in ' '.join(str(r.get(k) or '')
+                                         for k in ('title', 'description', 'solution')).upper()
+                           for a in anchors)]
+        row = {**x, 'peers': len(peers), 'best': best,
+               'anchors': sorted(anchors), 'anchored': anchored}
+        old = [r for r in peers if corpus.any_overlap(r['id'], subject)]
         if old:
-            false_neg.append({**x, 'old_hits': old})
+            false_neg.append({**row, 'old_hits': old})
+        (judged_out if anchored else no_record).append(row)
     fn_rate = 100.0 * len(false_neg) / len(per_todo) if per_todo else 0.0
 
     # ③ 正例：links.json + plan 里 create_todo 的 record_ref
@@ -331,6 +375,7 @@ def evaluate(bundle, corpus, min_specific=2, fields='title', links=None, pairs=N
         'total': total, 'passed': passed, 'rate': rate,
         'per_todo': per_todo, 'zero': zero, 'block_all': block_all,
         'false_neg': false_neg, 'fn_rate': fn_rate,
+        'no_record': no_record, 'judged_out': judged_out,
         'kept': kept, 'killed': killed, 'killed_rows': killed_rows,
         'n_positives': len(positives),
         'corpus': corpus,
@@ -368,6 +413,17 @@ def report(r, title, verbose=False, top=6, examples=6):
 
     print('\n④b 误杀候选（旧口径能对上 & 新口径对不上）= 收紧的真实代价')
     print('   %d / %d = %.1f%%' % (len(r['false_neg']), len(r['per_todo']), r['fn_rate']))
+
+    # 诊断三分：出问题时先看这里，能直接分清「没记录」和「判不准」
+    judged, no_rec = r['judged_out'], r['no_record']
+    print('\n④c 挡住原因三分（线上出现「明明有记录却关不掉」时查这里）')
+    print('   真没记录（专有标识在同项目搜不到）: %d 条' % len(no_rec))
+    print('   有记录但判不准（专有标识能搜到，才是真误杀候选）: %d 条' % len(judged))
+    for x in judged[:10]:
+        print('     ⚠ [%d条记录, 最高包含度%.2f] %s'
+              % (x['peers'], x['best'], str(x['todo'].get('subject'))[:46]))
+        for rec in x['anchored'][:1]:
+            print('        搜到: ' + str(rec.get('title'))[:54])
     for x in r['false_neg'][:examples]:
         print('   · 旧命中%2d  %s' % (len(x['old_hits']), str(x['todo'].get('subject'))[:52]))
         for rec in x['old_hits'][:2]:

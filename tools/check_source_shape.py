@@ -254,8 +254,13 @@ def main():
 
     failed = 0
     new_dirty = []
+    # 把每轮的检查结果存下来：后面做基线对照时直接查这张表，
+    # 不再对同一个 evidence.json 读第二遍（产品 2026-11-16 指出的浪费：
+    # 54 轮 × 每轮 1.6MB，等于一次运行读两遍）。
+    verdicts = {}
     for target in targets:
         ok, lines = check(target, show=args.show)
+        verdicts[target.name] = ok
         if args.quiet:
             # 定时器模式：只在「新面孔变脏」时说话。
             # 已知存量的 9 轮永远脏（历史 evidence 改不了），天天报等于没报。
@@ -291,15 +296,20 @@ def main():
         #
         # 正确判据：已知存量（known_dirty 白名单）永远脏、不报警；
         # 只有**新面孔变脏**才说明采集侧真的回退了。轮数涨跌完全无关。
-        new_dirty = sorted({t.name for t in targets
-                            if t.name not in BASELINE['known_dirty']}
-                           & {t.name for t in targets if check(t)[0] is False})
+        # 用上面存下的 verdicts，不再重读；轮数涨跌也与判断无关。
+        new_dirty = sorted(name for name, ok in verdicts.items()
+                           if ok is False and name not in BASELINE['known_dirty'])
         print('本次 %d 轮：干净 %d，带残留 %d（其中已知存量 %d）'
               % (len(targets), clean, dirty,
                  dirty - len(new_dirty)))
         print('基线 %d 轮：干净 %d，带残留 %d（%s，已知存量 %d 轮，不报警）'
               % (BASELINE['total'], BASELINE['clean'], BASELINE['dirty'],
                  BASELINE['at'], len(BASELINE['known_dirty'])))
+        # 口径说明：54 是**当前可回溯全集**，不是项目全历史。
+        # prune_runs() 只留 11-09 之后的轮次，更早的已经清掉了。
+        # 不写这句，下个月有人看到 54 会以为历史只有这么久。
+        print('口径：runs 目录现存 %d 轮（可回溯全集；prune_runs 只留 11-09 之后，'
+              '更早的已清理）' % len(targets))
         if new_dirty:
             print('⚠️ 出现 %d 轮**新**残留（不在已知存量里）：' % len(new_dirty))
             for name in new_dirty:

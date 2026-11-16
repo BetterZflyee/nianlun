@@ -128,6 +128,39 @@ def _build_prompt(base, evidence, memories):
             '\n独立记忆空间查询结果：' + json.dumps(memories, ensure_ascii=False))
 
 
+# 提示词材料的瘦身规则。
+#
+# 2026-11-16 12:00 轮死锁的根源：prompt_evidence 全量 54.7 万字符，其中
+# tables.milestones 独占 32.9 万——而模型判断「本轮发生了什么」并不需要
+# 每条历史里程碑的完整备注、附件和表格链接。
+#
+# 更危险的是：该轮失败后水位不前进，14:00 窗口更长、来源更多，
+# 下一轮必然再次超预算 → **失败会自己养活自己**。所以瘦身是治本，不是调参。
+# 只裁**装饰性字段**，保留全部判断所需信息（标题/状态/日期/RACI/项目归属）。
+_SLIM_TEXT_CAP = {
+    'milestones': {'notes': 100, 'description': 120, 'benefit': 80, 'actual_deliver': 60,
+                   'actual_accept': 60, 'accept_result': 60},
+    'records': {'description': 160, 'solution': 120},
+    'projects': {'description': 100, 'notes': 80, 'risk': 100},
+    'sites': {'notes': 80},
+}
+_SLIM_DROP_KEYS = {'table_url', 'attachments', 'table_id'}   # 每行重复的 URL/附件，顶层已有
+
+
+def _slim_row(role, row):
+    """按 _SLIM_TEXT_CAP 折叠长文本并去掉装饰字段。确定性变换，不动原数据。"""
+    out = {}
+    caps = _SLIM_TEXT_CAP.get(role) or {}
+    for k, v in row.items():
+        if k in _SLIM_DROP_KEYS or k == 'raw_cells':
+            continue
+        cap = caps.get(k)
+        if cap and isinstance(v, str) and len(v) > cap:
+            v = v[:cap] + '…'
+        out[k] = v
+    return out
+
+
 def prompt_evidence(bundle):
     # 必须深拷贝：后续 trim_evidence 会原地改写 tables/sources 来压缩体积，
     # 浅拷贝时 sources 等列表仍与原 bundle 共享引用，裁剪会把原证据一起改掉，
@@ -136,7 +169,7 @@ def prompt_evidence(bundle):
     import copy as _copy
     bundle=_copy.deepcopy(bundle)
     result={k:v for k,v in bundle.items() if k not in ('tables','todos')}
-    result['tables']={role:[{k:v for k,v in row.items() if k!='raw_cells'} for row in bundle['tables'][role]] for role in n.ROLES}
+    result['tables']={role:[_slim_row(role,row) for row in bundle['tables'][role]] for role in n.ROLES}
     result['todos']=[{k:todo.get(k) for k in ('taskId','subject','isDone','dueTime','priority')} for todo in bundle['todos']]
     # 目标表的真实字段与可用取值：单选必须落在 options 内，只读字段不可写。
     # 缺了这段，模型只能从历史记录反推类型，表结构一改就会写出失效的旧分类。

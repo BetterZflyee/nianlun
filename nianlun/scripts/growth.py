@@ -102,8 +102,42 @@ def root(config):
 @contextmanager
 def locked(config):
     r = root(config); r.mkdir(parents=True, exist_ok=True)
-    with file_lock(r / 'growth.lock'):
-        yield
+    try:
+        with file_lock(r / 'growth.lock'):
+            yield
+    except n.Error as exc:
+        if '已有年轮操作正在运行' not in str(exc):
+            raise
+        # 撞锁时原话只有「已有年轮操作正在运行，请稍后重试」——用户会以为坏了
+        # （2026-11-16 飞哥：「年轮的任务老是执行不了」）。其实这多半是 12:00
+        # 定时轮还在跑，手动点「生长一次」撞上——这是**防止重复写入的保护**，
+        # 不是故障。把「谁在跑、跑到哪一步」读出来，人才敢等而不是反复猛点。
+        raise n.Error(str(exc) + _lock_holder_hint(r)) from exc
+
+
+def _lock_holder_hint(r):
+    active = r / 'active.json'
+    try:
+        if not active.exists():
+            return ''
+        a = n.load(active)
+        run_dir = Path(a.get('run_dir') or '')
+        step = '正在采集/推理'
+        if run_dir.exists():
+            names = set(p.name for p in run_dir.iterdir())
+            for key, label in (('receipt.json', '正在写表格'),
+                               ('postprocess.json', '正在生成报告与记忆'),
+                               ('decision.json', '决策已生成，正在核验写入'),
+                               ('memory-0.txt', '正在检索记忆')):
+                if key in names:
+                    step = label
+                    break
+        # 完整 run_id 是 `%Y%m%d-%H%M%S`+8 位 hash 共 23 字符；截到 14 会把秒吃掉
+        # （实测显示成 20261116-12000，用户拿它去执行记录里搜不到）。保留全量。
+        run_id = str(a.get('run_id') or '')[:23]
+        return f'（当前有一轮在跑：{run_id}，{step}。这是防止重复写入的保护，不是故障——等它跑完再点即可，定时轮会自动继续。）'
+    except (OSError, ValueError):
+        return ''
 
 
 def self_identity(gw):
@@ -527,7 +561,61 @@ def evidence(bundle,a):
 
 
 def project_for(bundle,a):
-    return n.select_projects(bundle['tables'],[a.get('project','')])[0]
+    name = str(a.get('project') or '').strip()
+    if name:
+        return n.select_projects(bundle['tables'],[name])[0]
+    # project 缺失时按动作里已有的关联对象**反推**项目，而不是直接抛
+    # 「项目「」需唯一匹配，当前 0 项」。
+    #
+    # 2026-11-16 12:20 轮整轮失败的直接原因就是这个裸报错：契约只要求
+    # complete_todo 填 task_id/record_ids/match/completion，**从没要求填 project**，
+    # 但 validate 对所有 op 无条件调 project_for → 空名匹配 0 项 → 抛错 →
+    # 三次重试（fix1/fix2）全在同一处撞死。契约与实现不一致，错的是实现。
+    # 反推比要求模型多填一个字段更可靠：record_ids 本来就必须填且已被校验。
+    inferred = _infer_project(bundle,a)
+    if inferred:
+        return inferred
+    raise n.Error('动作' + str(a.get('op') or '') + '无法确定项目：请填 project（项目主表中的准确名称），'
+                  '或给出**同属一个项目**的 record_ids/milestone_ids/record_id；'
+                  '确实无法归属时把这个事项放进 pending 并说明原因，不要留空')
+
+
+def _infer_project(bundle,a):
+    """从动作已带的关联对象反推唯一项目；不唯一或缺失返回 None。
+
+    必须是纯函数：validate 在 apply 里会重跑生成 fresh plan，两次不一致
+    会被「计划内容变更」拦死（教训 72）。
+    """
+    tables = bundle.get('tables') or {}
+    projects = {p['id']:p for p in (tables.get('projects') or [])}
+    owners = set()
+    for rid in (a.get('record_ids') or []):
+        for row in (tables.get('records') or []):
+            if row.get('id') == rid:
+                for pid in (row.get('project_ids') or []):
+                    if pid in projects:
+                        owners.add(pid)
+    for mid in (a.get('milestone_ids') or []):
+        for row in (tables.get('milestones') or []):
+            if row.get('id') == mid:
+                for pid in (row.get('project_ids') or []):
+                    if pid in projects:
+                        owners.add(pid)
+    # update_status：行本身在 role 表里，直接取它的项目归属
+    if a.get('record_id') and a.get('role') in ('records','milestones','projects'):
+        role = a['role']
+        if role == 'projects':
+            if a['record_id'] in projects:
+                owners.add(a['record_id'])
+        else:
+            for row in (tables.get(role) or []):
+                if row.get('id') == a['record_id']:
+                    for pid in (row.get('project_ids') or []):
+                        if pid in projects:
+                            owners.add(pid)
+    if len(owners) == 1:
+        return projects[next(iter(owners))]
+    return None
 
 
 # 语音转写常把场地编号听错。只收录已核实过的映射，其余未知编号一律打回，

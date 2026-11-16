@@ -86,12 +86,55 @@ class WorkbenchSourceShapeTests(unittest.TestCase):
         self.assertIn('发送月台AI相机数据底表', content['source'])
 
     def test_source_code_no_longer_passes_input(self):
-        """源码层兜底：谁把 input 加回去，这条立刻红。"""
+        """源码层兜底：谁把 input 加回去，这条立刻红。
+
+        ## 第一版是「固定窗口搜字符串」，有两个真实漏洞（2026-11-16 修）
+
+        原写法：`window = src[idx-1200 : idx+200]`，然后断言窗口里没有
+        `'input':request`。问题：
+
+        ① **窗口右边界只到 `add(...)` 之后 200 字符**。往 add **之后**加
+           input 抓不到——而 `add()` 之后确实还有代码（count+=1 / return）。
+        ② **只认字面量 `'input':request` 这一种写法**。实测下面这种绕过：
+
+               content['input'] = request        ← 抓不到！
+
+           这是加字段最常见的方式（先构造 content，再补字段）。
+
+        ## 现在的判据：整段函数体 + 宽模式
+
+        取 `workbench()` 函数**从 def 到下一个 def 的整段**，检查其中是否出现
+        任何形式的 input 赋值（`'input'`、`"input"`、`.input`、`['input']`）。
+        「整段」而不是定长窗口，改代码时不会因为变长而漏；「宽模式」而不是
+        单一字面量，换写法也躲不过。
+        """
         src = Path(growth.__file__).read_text(encoding='utf-8')
-        idx = src.index("add('workbench'")
-        window = src[max(0, idx - 1200): idx + 200]
-        self.assertNotIn("'input':request", window)
-        self.assertNotIn('"input":request', window)
+        # workbench 是 growth.collect() 里的嵌套函数：从 `def workbench():` 到下一个 def
+        start = src.index('def workbench():')
+        end = src.find('\n    def ', start + 1)
+        if end < 0:
+            end = src.find('\n    if ', start + 1)
+        body = src[start:end if end > 0 else start + 4000]
+        self.assertIn("add('workbench'", body, '定位失败：没取到 workbench 函数体')
+        for pattern in ("'input'", '"input"', "['input']", '.input'):
+            self.assertNotIn(pattern, body,
+                             'workbench 来源又把 input 传回 prompt 了（写成 %s）；'
+                             '它是可执行动作参数，只能陈述事实' % pattern)
+
+    def test_todo_source_hides_executable_shape(self):
+        """todo: 来源同样不许带可执行形状。
+
+        原测试只守 workbench，但 todo: 是同一类坑：`todo +get` 的完整返回里
+        带 taskId 和 activities(`task.done`)，模型照着能拼出 complete_todo。
+        这里守源码：isDone=True 分支不许出现 activities/taskId。
+        """
+        src = Path(growth.__file__).read_text(encoding='utf-8')
+        anchor = src.index("if d.get('isDone') is True:")
+        end = src.find('else:', anchor)
+        branch = src[anchor:end]
+        self.assertIn('事实记录', branch, '已完成分支应只陈述事实')
+        self.assertNotIn('activities', branch, '已完成分支不能暴露活动流水')
+        self.assertNotIn('taskId', branch, '已完成分支不能暴露编号')
 
 
 class TodoSourceShapeTests(unittest.TestCase):

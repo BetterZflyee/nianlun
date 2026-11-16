@@ -72,6 +72,9 @@ class ConfirmTests(unittest.TestCase):
         gw = FakeGateway(self.config, rows)
         with unittest.mock.patch.object(g, 'Gateway', return_value=gw), \
              unittest.mock.patch.object(g, 'table_write') as tw:
+            # table_write 的真实返回是 dict；MagicMock 默认的 .get(...) 返回
+            # truthy mock 对象，会让 verify_pending 分支被误触发。显式给真实形状。
+            tw.return_value = {'record_id': 'r1', 'verified': True}
             out = ra._confirm(self.config, 'r1')
         self.assertEqual(out['status'], 'confirmed')
         tw.assert_called_once()
@@ -93,6 +96,26 @@ class ConfirmTests(unittest.TestCase):
             out = ra._confirm(self.config, 'r2')
         self.assertEqual(out['status'], 'noop')
         tw.assert_not_called()
+
+    def test_verify_pending_honest_status(self):
+        """写已发生、回读未确认 → 如实返回 pending_verify，不谎报 confirmed。
+
+        这条语义与生长侧 table_write 的 verify_pending 一致：点过确认是事实，
+        标记清没清干净尚未核实——调用方（UI）必须拿到真话来决定提示文案。
+        """
+        fid = lambda k: self.config['tables']['records']['fields'][k]['fieldId']
+        rows = [{'recordId': 'r3', 'cells': {fid('title'): 'x',
+                self.detail_fid: '正文' + g.REVIEW_MARKER,
+                fid('status'): {'name': '开放'}, fid('project_ids'): {'linkedRecordIds': []}}}]
+        gw = FakeGateway(self.config, rows)
+        with unittest.mock.patch.object(g, 'Gateway', return_value=gw), \
+             unittest.mock.patch.object(g, 'table_write',
+                                        return_value={'record_id': 'r3',
+                                                      'verify_pending': True,
+                                                      'verify_reason': '回读超时'}):
+            out = ra._confirm(self.config, 'r3')
+        self.assertEqual(out['status'], 'pending_verify')
+        self.assertEqual(out['verify_pending'], '回读超时')
 
     def test_missing_record_raises(self):
         gw = FakeGateway(self.config, [])

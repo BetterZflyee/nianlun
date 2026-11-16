@@ -145,13 +145,18 @@ function admissionControls(row, contentRoot) {
   const confirmBtn = btn("确认", async () => {
     confirmBtn.disabled = true;
     try {
-      await run("admission_confirm", {
+      const result = await run("admission_confirm", {
         record_id: row.id,
         request_id: crypto.randomUUID(),
       });
       data = null;
       renderProject(contentRoot);
-      toast("已确认为项目记忆");
+      // 写已提交但回读没确认时不谎报「已确认」（后端如实返回 pending_verify）。
+      toast(
+        result.value?.status === "pending_verify"
+          ? "确认已提交，回读暂未确认——稍后刷新看标记是否已清"
+          : "已确认为项目记忆",
+      );
     } catch (e) {
       confirmBtn.disabled = false;
       toast(e.message);
@@ -160,14 +165,18 @@ function admissionControls(row, contentRoot) {
   const rejectBtn = btn("不是项目记忆", async () => {
     rejectBtn.disabled = true;
     try {
-      await run("admission_reject", {
+      const result = await run("admission_reject", {
         record_id: row.id,
         reason: "执行过程，不改变项目状态",
         request_id: crypto.randomUUID(),
       });
       data = null;
       renderProject(contentRoot);
-      toast("已归档，并告诉模型下次不再记这类内容");
+      toast(
+        result.value?.status === "pending_verify"
+          ? "驳回已提交（负例已记入），归档回读暂未确认——稍后刷新核对"
+          : "已归档，并告诉模型下次不再记这类内容",
+      );
     } catch (e) {
       rejectBtn.disabled = false;
       toast(e.message);

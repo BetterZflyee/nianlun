@@ -150,13 +150,22 @@ class Tests(unittest.TestCase):
         self.assertEqual(self.client.writes,1)
 
     def test_failed_verification_preserves_inflight_id(self):
+        """回读没确认时，`in_flight.record_id` 必须留着——这是「数据已进去」的物证。
+
+        2026-11-16 P0-b 改了外层状态：原来是 `stopped`（等于告诉用户整轮失败），
+        现在记 `pending_verify`（写已发生、只是没核实），不再阻断后续动作与水位。
+        **不变的是这条不变量**：record_id 必须保留，否则 recovery 无法判定
+        「待核」还是「未知」，用户也就不知道该不该重做。
+        """
         doc=n.plan(self.cfg,self.state,[self.item])
         self.client.verify_bad=True
-        with self.assertRaises(n.Error):
-            n.apply_plan(self.cfg,self.client,doc,self.receipt)
+        n.apply_plan(self.cfg,self.client,doc,self.receipt)
         receipt=n.load(self.receipt)
-        self.assertEqual(receipt['status'],'stopped')
+        self.assertEqual(receipt['status'],'pending_verify')
+        self.assertNotEqual(receipt['status'],'stopped')
         self.assertEqual(receipt['in_flight']['record_id'],'created-1')
+        self.assertTrue(receipt['in_flight'].get('verify_pending'))
+        self.assertTrue(receipt.get('pending_verify'))
 
     def test_tampered_candidate_rejected(self):
         doc=n.plan(self.cfg,self.state,[self.item])

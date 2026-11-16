@@ -130,7 +130,12 @@ def _confirm(config, record_id):
     if _g.REVIEW_MARKER not in detail:
         return {'status': 'noop', 'reason': '这条记录本来就没有待复核标记'}
     cleaned = detail.replace(_g.REVIEW_MARKER, '')
-    _g.table_write(config, gw, 'records', {field: cleaned}, record_id=str(record_id))
+    write = _g.table_write(config, gw, 'records', {field: cleaned}, record_id=str(record_id))
+    # 写已发生但回读没确认时不要谎报「已确认」：这条记录确实点过确认了，
+    # 但「标记清干净了没」这件事还没核实。如实回落，让调用方决定怎么提示。
+    if write.get('verify_pending'):
+        return {'status': 'pending_verify', 'record_id': str(record_id),
+                'verify_pending': write.get('verify_reason')}
     return {'status': 'confirmed', 'record_id': str(record_id)}
 
 
@@ -166,7 +171,13 @@ def _reject(config, record_id, reason=''):
     cells = {status_fid: '已归档'}
     if cleaned != detail:
         cells[field] = cleaned
-    _g.table_write(config, gw, 'records', cells, record_id=str(record_id))
+    write = _g.table_write(config, gw, 'records', cells, record_id=str(record_id))
+    # 负例照样入库：驳回这个决定本身已经做出，与回读是否确认无关。
     entry = record_rejection(config, record_id, title, project, reason)
-    return {'status': 'rejected', 'record_id': str(record_id),
-            'negative_added': entry['title']}
+    result = {'status': 'rejected', 'record_id': str(record_id),
+              'negative_added': entry['title']}
+    if write.get('verify_pending'):
+        result['status'] = 'pending_verify'
+        result['negative_added'] = entry['title']
+        result['verify_pending'] = write.get('verify_reason')
+    return result

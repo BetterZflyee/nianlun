@@ -24,8 +24,15 @@ def validate(value, schema, path='$'):
     if 'enum' in schema and value not in schema['enum']:raise n.Error(path+' 返回值不在选项内')
     if kind=='object':
         props=schema.get('properties',{})
-        if set(schema.get('required',[]))-set(value):raise n.Error(path+' 缺少必填内容')
-        if schema.get('additionalProperties') is False and set(value)-set(props):raise n.Error(path+' 含未知字段')
+        missing=set(schema.get('required',[]))-set(value)
+        if missing:
+            # 只报「缺少必填内容」会让排查从零开始：既看不出缺哪个键，也看不出模型是不是
+            # 把别的阶段的答案整份返回了。把缺失键和实际键名一起给出，下次一眼能定位。
+            actual=','.join(sorted(str(k) for k in value)) or '（空对象）'
+            raise n.Error(path+' 缺少必填内容：缺 '+','.join(sorted(missing))+'；实际收到 '+actual)
+        extra=set(value)-set(props)
+        if schema.get('additionalProperties') is False and extra:
+            raise n.Error(path+' 含未知字段：'+','.join(sorted(str(k) for k in extra)))
         for key,item in value.items():
             if key in props:validate(item,props[key],path+'.'+key)
     if kind=='array':

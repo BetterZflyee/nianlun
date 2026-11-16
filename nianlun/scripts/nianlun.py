@@ -698,11 +698,44 @@ def apply_plan(config, client, document, receipt_path):
             reread = client.call(['+record-query', '--base-id', config['base_id'], '--table-id', table, '--record-ids', result['record_id']])
             rows = reread.get('records', [])
             if len(rows) != 1 or rows[0].get('recordId') != result['record_id'] or not all(equivalent(rows[0]['cells'].get(k), v) for k, v in action['cells'].items()):
-                raise Error(f'写后验证失败或未知：{action["title"]}；停止后续写入')
+                # **写已发生，就不该让一次回读失败掐死整轮。**
+                #
+                # 2026-11-16 14:12 那轮：写入 14:11:48 成功（record_id=4Xr7szCkMJ 已入库），
+                # 回读 5 次（跨 74 秒）全是空信封，直到 14:20:47——**539 秒后**才读到。
+                # 原来的写法在这里抛错，代价是三重的：
+                #   ① 后续动作全部不执行（第 2、3 条记录和待办整批不做）；
+                #   ② finish() 不执行 → seen 不写、水位不推 → 下一轮重采同样来源；
+                #   ③ 用户看到 failed，不知道 reconcile 能救。
+                # 钩钉写后可见性延迟是分钟级的（实测 539 秒），等不起也猜不准，
+                # 所以这里记 pending_verify 继续走：数据是真的，只是还没确认。
+                # 未核实这件事不会消失——reconcile 会按 marker 回读把它落成 verified。
+                result['verified'] = False
+                result['verify_pending'] = True
+                # 稳定标识：create_record 用 marker，update_status 用 role/id。
+                pending_key = action.get('marker') or (action.get('role', '') + '/' + str(result['record_id']))
+                receipt.setdefault('pending_verify', {})[pending_key] = {
+                    'record_id': result['record_id'],
+                    'title': action['title'],
+                    'reason': '写好回读未确认（钉钉写后可见性延迟）',
+                    'how_to_verify': f'按 record_id={result["record_id"]} 到表格核对，或运行「核验原结果」',
+                }
+                save(receipt_path, receipt)
             receipt['results'].append(result)
-            receipt.pop('in_flight', None)
+            # `in_flight` 只在**真的核实通过**时才清掉。
+            # 待核的那条必须留着 record_id：这是「数据已经进去了」的唯一物证，
+            # 也是 recovery 判定「待核」还是「未知」的依据（test_nianlun 里
+            # test_failed_verification_preserves_inflight_id 守的就是这一点）。
+            if result.get('verify_pending'):
+                receipt['in_flight'] = {**receipt['in_flight'],
+                                        'record_id': result['record_id'],
+                                        'verify_pending': True}
+            else:
+                receipt.pop('in_flight', None)
             save(receipt_path, receipt)
-        receipt['status'] = 'verified'
+        # 全部动作都执行完了，但可能有些只是「已写入、待核实」。
+        # 不能一律记 verified——那等于把「还没确认」藏起来，
+        # 和原来把「可恢复」显示成 failed 是同一类毛病。
+        receipt['status'] = 'pending_verify' if receipt.get('pending_verify') else 'verified'
     except Exception as exc:
         receipt.update(status='stopped', error=str(exc))
         save(receipt_path, receipt)

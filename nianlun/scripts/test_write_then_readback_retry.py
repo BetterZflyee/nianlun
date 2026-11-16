@@ -57,7 +57,10 @@ class ReadbackRetryTests(unittest.TestCase):
     def block(self):
         src = self.growth()
         idx = src.index('def table_write(')
-        return src[idx: idx + 3000]
+        # 取到下一个顶层 def 为止，别用固定字符数：函数变长会把断言用的文案
+        # 截到窗口外，测试报「找不到」而代码其实是对的（2026-11-16 踩过）。
+        end = src.find('\ndef ', idx + 1)
+        return src[idx: end if end > 0 else idx + 8000]
 
     def test_readback_retries(self):
         block = self.block()
@@ -73,11 +76,35 @@ class ReadbackRetryTests(unittest.TestCase):
         self.assertLess(write_at, loop_at, '写调用不能在重试循环里')
 
     def test_error_says_do_not_retry_blindly(self):
-        """报错必须劝住用户「别直接重试」，两个文件各说一部分。"""
+        """必须劝住用户「别直接重试」，两个文件各说一部分。
+
+        ⚠️ 2026-11-16 这条断言随需求变过：原来 table_write 回读失败会 `raise`
+        一句「请先在表格里核对」，现在不再抛错，改为返回 verify_pending +
+        verify_reason 让整轮继续（否则 create_milestone 回读失败会把整轮掐死：
+        apply 抛 → _finish 不执行 → 水位不推、seen 不写）。
+
+        **变的是「怎么告知」，没变的是「必须告知」**：用户仍然要知道
+        「数据很可能已经写进去了，别重做」，否则照样会产生重复记录。
+        所以这里改为守 verify_reason 里的两句话。
+        """
         growth = self.block()
-        self.assertIn('请先在表格里核对', growth)
+        self.assertIn('到表格核对', growth, '必须告诉用户去哪里核对')
+        self.assertIn('不会重复写入', growth, '必须告诉用户系统核验不会重复写')
+        self.assertIn('不要直接重做', growth, '必须劝住用户别直接重做')
         transport = (Path(__file__).resolve().parent / 'dws_transport.py').read_text(encoding='utf-8')
         self.assertIn('不要直接重试', transport)
+
+    def test_readback_failure_does_not_abort_the_round(self):
+        """回读失败不能抛错——写已发生，抛错会让水位不推、seen 不写。
+
+        2026-11-16：create_milestone 走 table_write，它在生长主路径上。
+        这里一旦 raise，同一轮里 create_record 放行、create_milestone 掐死，
+        两条路径行为不一致，比两个都不改更糟。
+        """
+        block = self.block()
+        self.assertNotIn('表格写后验证不一致', block,
+                         '回读失败不应再抛「写后验证不一致」')
+        self.assertIn('verify_pending', block, '应返回 verify_pending 让调用方继续')
 
     def test_transport_distinguishes_readback(self):
         """运输层要能识别 read-back 失败并给出不同指引。"""

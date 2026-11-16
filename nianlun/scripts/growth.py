@@ -414,8 +414,23 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
             when=instant(receipt['finished_at'],end.tzinfo)
             if not start<=when<end:continue
             request=receipt.get('intent',{}).get('request',{})
-            content={'source':'用户在年轮工作台提交的表单操作，已经完成写入，不要重复创建',
-                     'input':request,'verified_result':receipt['result']}
+            # ⚠️ **绝不把 `input` 传给模型。**
+            # `input` 里是 `{"op":"complete_todo","task_id":"59017182180",...}` ——
+            # 一份完整的可执行动作参数。2026-11-16 12:20 那轮就栽在这里：
+            # 模型看到来源里写着 complete_todo + 真实 task_id，而 `todos` 可用列表里
+            # 又没有这条（它已完成），只能推断「该关它」，于是照抄参数生成动作，
+            # 一执行就被「待办不在本人未完成列表」拒绝，整轮作废。
+            # 同一批来源 13:00 那轮一个动作没提——两轮都读懂了「已完成」，
+            # 差别只是**没有任何规则告诉它看懂了之后不要动手**。
+            # 所以修法不是拦 ID（ID 是真的），是**不给它可执行的形状**：
+            # 只陈述事实。原始回执留在 request-*.json / receipt.json 里，
+            # 需要追溯时从磁盘查，不必进 prompt。
+            title=str(request.get('title') or '').strip()
+            verb={'complete_todo':'完成','update_status':'更新','create_record':'创建记录',
+                  'create_todo':'建待办'}.get(str(request.get('op') or ''),'处理')
+            content={'source':f'本人已于 {receipt["finished_at"]} 在年轮工作台{verb}'
+                               + (f'「{title}」' if title else '一项操作')
+                               + '。这是**已完成的事实记录**，不是待办任务，无需再处理、不要重复创建。'}
             add('workbench',request.get('request_id'),'年轮工作台手动操作',json.dumps(content,ensure_ascii=False),when.isoformat())
             count+=1
         return count
@@ -427,7 +442,17 @@ def collect(config, since=None, until=None, selection=None, progress=lambda mess
         try:
             current_channel='todo:'+tid
             d=gw.call(['todo','+get','--task-id',tid])
-            add('todo',tid,d['subject'],json.dumps(d,ensure_ascii=False),end.isoformat(),todo=d)
+            # 和 workbench 同一个坑：`todo +get` 的完整返回里带 taskId、
+            # activities(`task.done`) 这些**可执行形状**，模型会照着拼动作。
+            # 已完成（isDone=True）的只陈述事实，不暴露编号与活动流水；
+            # 未完成的才原样给，因为它确实还需要处理。
+            if d.get('isDone') is True:
+                content={'source':f'待办「{d.get("subject","")}」已完成，这是事实记录，'
+                                   '不是待办任务，不得据此生成任何执行动作。',
+                         'isDone':True}
+            else:
+                content=d
+            add('todo',tid,d['subject'],json.dumps(content,ensure_ascii=False),end.isoformat(),todo=d)
         except Exception as e:bundle['coverage'].append({'channel':'todo:'+tid,'status':'partial','error':str(e)})
     # Sources returned through overlapping channels are represented once.
     unique={}
@@ -578,6 +603,151 @@ def project_for(bundle,a):
     raise n.Error('动作' + str(a.get('op') or '') + '无法确定项目：请填 project（项目主表中的准确名称），'
                   '或给出**同属一个项目**的 record_ids/milestone_ids/record_id；'
                   '确实无法归属时把这个事项放进 pending 并说明原因，不要留空')
+
+
+def _record_matches_todo(bundle,record_id,todo_subject):
+    """这条记录与待办说的是不是同一件事？确定性的字面判定，纯函数。
+
+    为什么需要它：「record_ids 只要同项目」等于没校验。实测项目
+    3cffHOuyfg 有 **157 条记录**，任取一条都能通过——2026-11-16 复现：
+    拿「安排倒车辅助激光雷达方案评审会议」关掉了
+    「联系李岳天确认和记场地编码及机器狗需求范围」，用户完全看不见。
+    这是五个 P0 里唯一「数据错了且用户看不见」的一条。
+
+    判定必须是纯函数、确定性：validate 在 apply 里会重跑生成 fresh plan，
+    两次结果必须字节一致（教训 72），所以不能用相似度模型、不能带随机。
+
+    ## 为什么不能是「任意一对二字词重合」（第一版，被实测打回）
+
+    第一版阈值取 1，理由是「同项目不同事的两条，连一个二字词都不会共享」。
+    **这个理由是错的。** 实测同一条待办面对它所属项目的全部 21 条记录：
+
+        放行 16 / 21 = 76%
+
+    因为「机器狗」「月台」「场地」「数据」这类**项目领域词**在同项目每条记录
+    里都有，`want & got` 必然命中——那等于在问「这两件事是不是同一个项目的」，
+    而项目归属前面已经校验过了。全局 40 条待办 × 同项目记录放行 51%。
+
+    ## 现在的两段判据（满足其一即认）
+
+    ① **特有词 ≥2**：先按「同项目其他记录标题里的出现占比」剔除项目通用词，
+       只留这条待办**特有**的词去比对记录正文。
+
+       通用词必须按**占比**算，不能按绝对次数。产品给的算法是「出现 ≥3 次即
+       通用」，实测在 157 条记录的项目里产出 **308 个通用词**：「数据」(58次)、
+       「验证」(47次)、「计划」「发送」全被判成通用，于是真配对
+       「发送数据验证计划给罗兴成」只剩 1 个特有词而被误杀。
+       3/157 = 1.9% 显然不通用。改成占比（5%，且不少于 3 次）后通用词降到 4 个。
+
+    ② **包含度 ≥0.35**：同义改写走这条。实测待办「提供执行人员清单以录入
+       转运小智系统」↔ 记录「提供执行人员清单以便加入转运小智系统」——
+       除了「以便加入/以录入」几乎一字不差，但那几个词在该项目里恰好都是
+       高频词，特有词被清空，①必然判死。用包含度（交集/较短一方词数）
+       量出来 0.875，而恶意样本最高只有 0.10，两类完全分得开。
+
+    ## 实测四个数（2026-11-16 证据，tools/p05_measure.py）
+
+        ① 恶意样本 7 条全拒（含共用「机器狗」「月台」的 6 条）
+        ② 全局误放率 38.7% → 5.8%（目标 ≤10%）
+        ③ 正例 5 对全认得，0 误杀（links.json 已登记 + plan 里 create_todo 的 record_ref）
+        ④ 挡住 32/175；逐条看过，都是该项目里**确实没有对应记录**的待办
+           （如海康音柱项目只有 1 条记录），属正确拒绝，不是误杀。
+
+    宁可严格也不放宽：判不准时让模型改用 record_ref 指向本轮新建记录，
+    或把待办放进 pending，而不是让它挂一条不相关的记录蒙混过关——
+    「关错了」比「关不掉」严重得多。
+    """
+    row=next((r for r in (bundle.get('tables') or {}).get('records') or []
+              if r.get('id')==record_id),None)
+    if row is None:return False
+    text=' '.join(str(row.get(k) or '') for k in ('title','description','solution'))
+    if not text.strip():return False
+    got=terms_of(text)
+    # 待办标题带 `[项目名]` 前缀。前缀是**项目归属**信息，不是「这件事是什么」，
+    # 和项目通用词同理：它必然在同项目每条待办里出现，拿它当判据等于把
+    # 「同项目」又判了一遍。剔掉后 `[测试项目] 联调` ↔ `联调验证` 才判得对。
+    subject=re.sub(r'^\s*[\[【].*?[\]】]\s*','',str(todo_subject or '')) or str(todo_subject or '')
+    want=terms_of(subject)
+    if not want or not got:return False
+    generic=_project_generic_terms(bundle,row)
+    specific=want-generic
+    if len(specific & got)>=2:return True
+    # 同义改写兜底：词集高度包含即认
+    # 实测真配对 ≥0.33（联调↔联调验证 0.33、「以便加入/以录入」0.88），
+    # 恶意样本 ≤0.11（机器狗 0.11、月台 0.06）。取 0.30 留余量。
+    title_terms=terms_of(str(row.get('title') or ''))
+    if title_terms:
+        containment=len(want & title_terms)/min(len(want),len(title_terms))
+        if containment>=_CONTAINMENT:
+            return True
+    return False
+
+
+# 二字词切分的停用词：纯虚词/泛动词，不带业务含义。
+_TERM_STOP=set('的了和与及或在是要把对于这个那个上线进行完成确认联系安排处理项目工作'
+               '一下我们他们可以需要已经通过关于相关进行中的地得')
+
+# 同项目的词，在「同项目其他记录标题」里出现占比超过这个值，就算项目通用词。
+# 取 5% 而不是绝对 3 次：157 条记录的项目按 3 次算会把「数据/验证/计划」
+# 全判成通用词（实测 308 个），真配对反而被误杀。
+_GENERIC_FRAC=0.05
+_GENERIC_FLOOR=3
+
+# 同义改写兜底阈值：待办（去项目前缀后）与记录标题的词集包含度。
+# 实测真配对 ≥0.33（联调↔联调验证 0.33、「以便加入/以录入」0.88），
+# 恶意样本 ≤0.11（机器狗 0.11、月台 0.06）。取 0.30 留余量。
+_CONTAINMENT=0.30
+
+
+def terms_of(value):
+    """切词：中文按二字、英文/数字编码整体保留。纯函数。
+
+    编码（571WA、755RA、F区这类设备号/场地号）**整体当一个 token**，不切碎：
+    它们本身就是精确标识，"571WA" 和 "571WA3" 是不同设备。只按二字切中文，
+    也避免把 "571" "71W" "1WA" 这种碎片当成判据——那会让任何含 571 的记录都
+    命中，比不判还糟。
+
+    编码需要以字母或数字开头且长度 ≥2：`IP`、`F区`(中文部分另切)、`571WA`
+    都要能认。第一版正则是 `[A-Za-z][A-Za-z0-9_]{2,}`，`571WA`(数字开头) 和
+    `IP`(只有2位) 全被漏掉，导致设备编号这类最强判据失效。
+    """
+    out=set()
+    pattern=r'[\u4e00-\u9fa5]{2,}|[A-Za-z0-9][A-Za-z0-9_\-]{1,}'
+    for token in re.findall(pattern,str(value or '')):
+        if re.match(r'^[A-Za-z0-9]',token):
+            # 纯英文/数字编码：整体入集（小写归一，"F区" 的中文部分由上面那条切）
+            if not token.isdigit() or len(token)>=2:
+                out.add(token.lower())
+            continue
+        for i in range(len(token)-1):
+            gram=token[i:i+2]
+            if gram not in _TERM_STOP:out.add(gram)
+    return out
+
+
+def _project_generic_terms(bundle,row):
+    """本项目的通用词：同项目其他记录**标题**里出现占比 ≥_GENERIC_FRAC 的二字词。
+
+    只看标题（短且干净），与被比对记录用哪几个字段无关——这样「领域词」
+    的判定稳定，不会因为某条 solution 写得长就把词变成通用。
+    纯函数：同样的 bundle 与 row 永远得到同样的集合。
+    """
+    records=(bundle.get('tables') or {}).get('records') or []
+    project_ids=set(row.get('project_ids') or [])
+    if not project_ids:
+        return set()
+    freq={}
+    peers=0
+    for peer in records:
+        if not (project_ids & set(peer.get('project_ids') or [])):
+            continue
+        peers+=1
+        for term in terms_of(str(peer.get('title') or '')):
+            freq[term]=freq.get(term,0)+1
+    if not peers:
+        return set()
+    cut=max(_GENERIC_FLOOR,_GENERIC_FRAC*peers)
+    return {term for term,count in freq.items() if count>=cut}
 
 
 def _infer_project(bundle,a):
@@ -835,9 +1005,53 @@ def validate(config,bundle,decision):
             if a.get('expected_title')!=matches[0]['subject']:raise n.Error('待办标题不符')
             same_title=[t for t in bundle['todos'] if re.sub(r'\s','',t['subject'])==re.sub(r'\s','',matches[0]['subject'])]
             if len(same_title)!=1:raise n.Error('本人存在重复标题待办，不能凭消息自动选择其中一项')
+
+            # ① 证据不能跨待办：拿 todo:A 的证据去关 todo:B 必须拒绝。
+            #
+            # **但绝不能要求 source_id 必须 == todo:<task_id>。**
+            # 实测：398 条待办里只有 8 条登记在 links.json（覆盖率 1.8%），
+            # 而 collect 只对已登记的 tid 调 todo:+get（growth.py:426），
+            # 所以 390 条未登记待办**压根没有 todo: 来源**。
+            # 强制闭环 = 这 390 条即使证据确凿也永远关不掉，把人堵死。
+            # 这正是「改严了会有人被挡」的地方，被误挡的用户看到的是
+            # 「证据不是来自待办本身」——他根本无从修改，因为来源根本不存在。
+            #
+            # 正确边界：**只禁止拿「另一条待办」的来源来关本条**。
+            # 群聊/邮件/听记说「这件事完成了」是合法证据（原来就是这样）；
+            # 但 todo:B 的完成状态不能当作 todo:A 的完成证据。
+            owner=str(s['id'])
+            if owner.startswith('todo:') and owner!='todo:'+str(a['task_id']):
+                raise n.Error(
+                    '不能用另一条待办（'+owner+'）的完成状态来关闭这条待办「'
+                    +str(matches[0]['subject'])[:36]+'」。'
+                    '待办之间互不替代：请改用这条待办自己的来源、'
+                    '或能证明它完成的群聊/听记/邮件，或把事项放进 pending 说明')
+
             if not a.get('record_ids'):raise n.Error('完成待办需同时指定要同步的项目记录；无对应记录先归集建档')
             for rid in a['record_ids']:
                 if not any(r['id']==rid and p['id'] in r.get('project_ids',[]) for r in bundle['tables']['records']):raise n.Error('完成待办的记录关联不正确')
+
+            # ② 记录必须与待办**语义相关**，或者指向本轮新建的记录。
+            #    只校验「同项目」等于没校验：实测该项目 157 条记录，
+            #    2026-11-16 复现——拿「安排倒车辅助激光雷达方案评审会议」
+            #    成功关闭了「联系李岳天确认和记场地编码及机器狗需求范围」，
+            #    原校验直接放行，用户完全看不见。
+            #    这是五个 P0 里唯一「数据错了且用户看不见」的一条。
+            new_record_ids={x.get('ref') or x.get('title') for x in actions if x.get('op')=='create_record'}
+            unrelated=[rid for rid in a['record_ids']
+                       if not _record_matches_todo(bundle,rid,matches[0]['subject'])]
+            if unrelated:
+                # 允许指向本轮新建记录（模型刚为它建的档，天然相关）
+                unrelated=[rid for rid in unrelated if rid not in new_record_ids]
+            if unrelated:
+                raise n.Error(
+                    '要同步的记录与这条待办不是同一件事（'+ '、'.join(unrelated[:3]) +'）。'
+                    '记录内容与待办「'+matches[0]['subject'][:40]+'」对不上，'
+                    '照这样关闭会让人看不出到底做完了什么。'
+                    '请改用确实对应这条待办的记录，或用 create_record 先建一条'
+                    '（填 ref，再用 record_ref 指向它）；'
+                    '确实没有对应记录就把该待办放进 pending')
+
             linked=bundle.get('todo_links',{}).get(a['task_id'])
             if linked and (linked.get('project_id')!=p['id'] or set(a['record_ids'])!=set(linked.get('record_ids',[]))):
                 raise n.Error('自动完成目标与已登记的待办项目关系不同，不能改配关联')
@@ -1106,13 +1320,30 @@ def table_write(config,gw,role,cells,record_id=None,contact_cache=None):
                 n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):
             break
         if attempt<3:time.sleep(1.5*(attempt+1))
-    if len(rows)!=1 or rows[0]['recordId']!=record_id or not all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()):
-        raise n.Error('表格写后验证不一致：已重试读取 4 次仍未读到本次写入。'
-                      '该记录可能已写入但回读延迟，请先在表格里核对，确认后再决定是否重做')
+    verified = (len(rows)==1 and rows[0]['recordId']==record_id
+                and all(n.equivalent(rows[0]['cells'].get(k),v) for k,v in cells.items()))
     # dropped 不能悄悄丢掉：只读字段、越界选项、未知字段被剔除后，写进去的记录就少了几列，
     # 而调用方看到 verified=True 会以为整条都写成功了。把剔除明细带回回执。
-    result={'record_id':record_id,'verified':True}
+    result={'record_id':record_id,'verified':verified}
     if dropped:result['dropped']=[{'field':f,'reason':r} for f,r in dropped]
+    if verified:
+        return result
+    # **写已发生（record_id 拿到了），一次回读失败不该掐死整轮。**
+    #
+    # 这和 n.apply_plan 里 `create_record` 的处理必须是同一个口径，否则
+    # 同一轮里 create_record 放行、create_milestone 掐死，比两个都不改更糟。
+    # 而 create_milestone 就在生长主路径上（apply 里 op=='create_milestone'），
+    # 它一旦抛错：apply 抛 → _finish() 不执行 → 水位不推、seen 不写 →
+    # 下一轮重采同样来源。这正是「修了个寂寞」的形态。
+    #
+    # 钉钉写后可见性延迟实测可达 539 秒（records 表），没有理由认为
+    # milestones 表不会——延迟是表格层面的属性，与写哪张表无关。
+    # 所以这里记 verify_pending 让调用方继续，未核实这件事由 recovery 收尾。
+    result['verify_pending']=True
+    result['verify_reason']=(
+        '已写入但回读未确认（钉钉写后可见性延迟）。该条**很可能已经写入**，'
+        '数据没有丢失：请按 record_id='+str(record_id)+' 到表格核对，'
+        '或运行「核验原结果」由系统回读确认（不会重复写入）。不要直接重做。')
     return result
 
 
@@ -1145,6 +1376,11 @@ def apply(config,folder,plan_file):
                 receipt['in_flight']={'key':key,'op':op,'action':a};n.save(receipt_path,receipt)
             if op in ('create_record','update_status'):
                 result=n.apply_plan(config,gw.table(),a['table_plan'],folder/(key+'.receipt.json'))
+                # 子回执里的「写了没核到」必须冒泡到外层，否则外层状态会是
+                # verified，recovery.overview() 也就看不到它——
+                # 那等于把待核项藏起来，和 P0-b 要解决的毛病一样。
+                if result.get('pending_verify'):
+                    receipt.setdefault('pending_verify',{}).update(result['pending_verify'])
             elif op=='create_milestone':
                 f=config['tables']['milestones']['fields']; marker='[年轮来源:'+key+']'
                 rows=n.fetch(config,gw.table())['milestones']
@@ -1167,6 +1403,18 @@ def apply(config,folder,plan_file):
                 elif same:raise n.Error('同项目已有同名里程碑，需复核合并')
                 else:
                     result=table_write(config,gw,'milestones',cells)
+                    # create_milestone 走 table_write，也是「写已发生、回读没确认」
+                    # 的一条路径。待核项必须浮到外层回执，否则 _finish 只看得到
+                    # verified=False 却不知道该怎么办；recovery 也扫不到它。
+                    if result.get('verify_pending'):
+                        receipt.setdefault('pending_verify',{})[
+                            result.get('marker') or ('milestones/'+str(result['record_id']))]={
+                            'record_id':result['record_id'],
+                            'title':a['title'],
+                            'reason':'已写入但回读未确认（钉钉写后可见性延迟）',
+                            'how_to_verify':'按 record_id='+str(result['record_id'])
+                                            +' 到里程碑表核对，或运行「核验原结果」',
+                        }
             elif op=='create_todo':
                 title='['+a['project']+'] '+a['title']
                 args=['todo','task','create','--title',title,'--executors',bundle['identity']['user_id'],'--priority',str(a.get('priority',20))]
@@ -1202,10 +1450,37 @@ def apply(config,folder,plan_file):
                     pp=folder/(key+'-'+rid+'.plan.json')
                     p=n.load(pp) if pp.exists() else n.plan(config,bundle['tables'],[c])
                     if not pp.exists():n.save(pp,p)
-                    n.apply_plan(config,gw.table(),p,folder/(key+'-'+rid+'.json'))
+                    sub=n.apply_plan(config,gw.table(),p,folder/(key+'-'+rid+'.json'))
                     result['record_ids'].append(rid)
+                    # 同步记录状态也可能「写了没核到」。待办本身已经是完成态
+                    # （上面 check 过 isDone），但关联记录被标「已解决」这件事
+                    # 还没被确认——不冒泡的话外层会记 verified，等于把没说准的事
+                    # 说成说准了，正是 P0-b 要消灭的那种误导。
+                    if sub.get('pending_verify'):
+                        receipt.setdefault('pending_verify',{}).update(sub['pending_verify'])
+                # 回写 links.json：现在只有 8/398 条待办登记在这里（覆盖率 1.8%），
+                # 于是「已登记待办的项目/记录关系不能改配」这道校验对上 390 条
+                # 等于不存在。完成时补登记，新生的关联就能受它保护。
+                # 只补不覆盖：已有登记以原值为准（那是人工确认过的）。
+                try:
+                    lp=root(config)/'links.json';links=n.load(lp) if lp.exists() else {}
+                    if str(tid) not in links:
+                        links[str(tid)]={'project_id':a['project_id'],
+                                         'record_ids':list(result['record_ids']),
+                                         'source_id':a['source_id'],
+                                         'title':a['expected_title']}
+                        n.save(lp,links)
+                except Exception as exc:
+                    # 登记失败不能让已完成的待办回滚——数据已经对了，
+                    # 丢的只是下一轮的附加校验，记下来即可。
+                    result['links_writeback_error']=str(exc)[:200]
             receipt['results'][key]=result;receipt.pop('in_flight');n.save(receipt_path,receipt)
-        receipt['status']='verified';n.save(receipt_path,receipt)
+        # 外层回执也可能攒到待核项（apply_plan 写在子回执里的 pending_verify
+        # 不一定浮到这里），所以不能无条件写 verified——那会把「写了没核到」
+        # 装扮成「全部确认」，正是 P0-b 要消灭的那种误导。
+        pending_verify=receipt.get('pending_verify') or {}
+        receipt['status']='pending_verify' if pending_verify else 'verified'
+        n.save(receipt_path,receipt)
     except Exception as e:
         receipt.update(status='stopped',error=str(e));n.save(receipt_path,receipt);raise
     return receipt
@@ -1293,7 +1568,15 @@ def _finish(config,folder,decision_file):
     folder=Path(folder).expanduser().resolve();b=n.load(folder/'evidence.json');d=n.load(decision_file)
     validate(config,b,d)
     receipt=n.load(folder/'receipt.json') if (folder/'receipt.json').exists() else {}
-    if d['actions'] and (receipt.get('status')!='verified' or receipt.get('decision_hash')!=n.digest(d)):
+    # 放行 `pending_verify`：写已经发生（record_id 拿到了），只是回读没确认。
+    # 若这里只认 verified，一次分钟级的可见性延迟就会把整轮按死在这里——
+    # finish 不执行 → seen 不写、水位不推 → 下一轮重采同样的来源。
+    # 那条已经落库的数据会被当成本轮失败反复处理，正是要消灭的「失败自我喂养」。
+    # 待核项不会被丢掉：它留在 receipt['pending_verify'] 里，recovery 收尾。
+    action_status=receipt.get('status')
+    if d['actions'] and action_status not in ('verified','pending_verify'):
+        raise n.Error('动作尚未全部验证或总结与执行计划不一致，不能完成本轮')
+    if d['actions'] and receipt.get('decision_hash')!=n.digest(d):
         raise n.Error('动作尚未全部验证或总结与执行计划不一致，不能完成本轮')
     status_path=folder/'finish.json';status=n.load(status_path) if status_path.exists() else {}
     if status.get('in_flight'):raise n.Error('完成步骤存在未知结果，先对账，不重复执行')
@@ -1559,8 +1842,19 @@ def publish_report(config,project,since,until,summary_file=None,expected_facts=N
     # 否则会重复上传同一份报告，或者在链接已被本轮改写时误判为「被他人更新」。
     receipt['in_flight']={'step':'writeback','role':role,'field':field_id,'record':record_id,'url':receipt['url']}
     n.save(receipt_file,receipt)
-    table_write(config,gw,role,{field_id:receipt['url']},record_id)
-    receipt.update(status='verified',project_id=p['id'],report_id=key,
+    # 回填链接走 table_write，同样可能「写了没核到」。报告已经上传成功了，
+    # 这里绝不能因为回读延迟把整份汇报标成失败——但也不能假装确认过。
+    # 记 pending_verify，让「回填未确认」这件事可见，由核验流程收尾。
+    link_write=table_write(config,gw,role,{field_id:receipt['url']},record_id)
+    if link_write.get('verify_pending'):
+        receipt['pending_verify']={'table_writes/'+str(record_id):{
+            'record_id':record_id,
+            'title':label,
+            'reason':'汇报链接已回填但回读未确认（钉钉写后可见性延迟）',
+            'how_to_verify':'按 record_id='+str(record_id)+' 到'+str(label)+'核对汇报链接',
+        }}
+    receipt.update(status='pending_verify' if link_write.get('verify_pending') else 'verified',
+                   project_id=p['id'],report_id=key,
                    linked_table=role,linked_field=field_id,linked_record=record_id,linked_label=label)
     receipt.pop('in_flight',None)
     n.save(receipt_file,receipt)

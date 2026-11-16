@@ -431,6 +431,34 @@ def deepseek_reason(prompt,directory,preferred=None,schema=None,timeout=1200,con
     raise n.Error('DeepSeek Harness 会话重建失败，请检查 dsh 运行状态')
 
 
+def deepseek_clean(prompt,directory,choice,schema,timeout):
+    """deepseek 推理 + 契约污染自愈。
+
+    实测 2026-11-16：沿用 694 回合的长会话后，模型开始照着**上一轮的回答**继续
+    输出——14:00/15:00 三连轮全部返回上一轮的 run_id 与别的键，年轮报
+    「$ 缺少必填内容」整轮作废。这不是模型能力问题，是会话上下文被历史轮次
+    带偏。返回不合契约时，唯一有效的补救就是弃掉旧会话重问一次（写入不重发，
+    推理是纯读，重试安全）。重跑仍不合契约才把原错抛出去。
+    """
+    config_path=choice.get('config_path')
+    saved=harness_session(config_path,'deepseek') if config_path else None
+    value=deepseek_reason(prompt,directory,choice.get('binary'),schema,timeout,config_path)
+    if not schema or saved is None:return value
+    import host_bridge
+    try:
+        host_bridge.validate(value,schema)
+    except n.Error as first:
+        harness_session(config_path,'deepseek','')
+        try:
+            retry=deepseek_reason(prompt,directory,choice.get('binary'),schema,timeout,config_path)
+        except n.Error:
+            raise first
+        # 重跑答案不写缓存目录：目录缓存属于原会话语境，混用会污染 resume。
+        host_bridge.validate(retry,schema)
+        return retry
+    return value
+
+
 def custom_command(preferred=None):
     """通用 Agent 命令：可来自接入配置的 command 数组，或 config 里的 harness_command。
     约定 stdin 传入提示词、stdout 返回答案，年轮不假设任何厂商私有参数。"""
@@ -679,7 +707,7 @@ def reason(prompt,directory,preferred=None,schema=None,timeout=900):
         host_bridge.validate(cached,schema)
         return cached
     if choice['provider']=='codex':value=codex_reason(prompt,directory,choice.get('binary'),schema,timeout)
-    elif choice['provider']=='deepseek':value=deepseek_reason(prompt,directory,choice.get('binary'),schema,timeout,choice.get('config_path'))
+    elif choice['provider']=='deepseek':value=deepseek_clean(prompt,directory,choice,schema,timeout)
     elif choice['provider']=='generic':value=custom_reason(prompt,directory,choice,schema,timeout)
     else:value=claude_reason(prompt,directory,choice.get('binary'),schema,timeout)
     host_bridge.validate(value,schema)

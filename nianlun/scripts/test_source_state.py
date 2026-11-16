@@ -27,9 +27,24 @@ class SourceTests(unittest.TestCase):
     def test_delayed_minutes_are_revisited_after_successful_recent_run(self):
         checkpoint={'channels':{'minutes':{'until':(self.end-timedelta(hours=2)).isoformat()}}}
         self.assertEqual(s.window({},checkpoint,'minutes',self.end),self.end-timedelta(hours=48))
-    def test_legacy_backlog_is_preserved_during_upgrade(self):
+    def test_legacy_upgrade_backlog_is_capped(self):
+        """升级场景：旧版 checkpoint 是顶层 {'until': …}（没有 channels）。
+        这条路径**本来就受上限约束**（旧代码的 `if not retry_since` 对 until
+        成立），改语义前后行为一致——积压超过上限时按上限截断，避免撑爆宿主。"""
         earlier=self.end-timedelta(days=12)
-        self.assertEqual(s.window({}, {'retry_since':earlier.isoformat()},'minutes',self.end),earlier)
+        start=s.window({'max_lookback_days':7}, {'until':earlier.isoformat()},'minutes',self.end)
+        self.assertGreaterEqual(start,self.end-timedelta(days=7))
+    def test_retry_since_now_capped_too(self):
+        """2026-11-16 语义修正：retry_since 同样受上限约束。
+        旧测试假设「人工写 retry_since 表达迁移意图」——全仓 grep 确认
+        source_state.advance 是 retry_since 的**唯一**写入方（recovery/host/
+        growth 只读不写），豁免保护的调用方不存在，反而让 partial 渠道
+        窗口自我锁死：minutes 每轮重采 17 天积压 → 必然超预算 → advance
+        到不了 → 水位永不动。真需要人工指定起点走 collect(since=…) 的
+        explicit 参数（第一行直接返回，天然不受上限影响）。"""
+        earlier=self.end-timedelta(days=12)
+        start=s.window({'max_lookback_days':30}, {'retry_since':earlier.isoformat()},'growth',self.end)
+        self.assertGreaterEqual(start,self.end-timedelta(days=30))
     def test_deferred_item_rewinds_only_its_origin_channel(self):
         bundle=self.bundle();bundle['coverage'][0]['status']='complete'
         result=s.advance(bundle,{'deferred_source_ids':['minutes:one']},{})
@@ -166,12 +181,19 @@ class LookbackCeilingTests(unittest.TestCase):
         start = s.window({}, cp, 'growth', self.end())
         self.assertGreater(start, self.end() - timedelta(days=2))
 
-    def test_explicit_retry_since_is_never_capped(self):
-        """升级迁移或人工指定的重试起点是明确意图，不能被上限截断。"""
+    def test_retry_since_is_capped_but_explicit_param_is_not(self):
+        """2026-11-16 语义修正：retry_since 同样受上限约束。
+        原测试假设存在「人工写 retry_since 表达迁移意图」的调用方——全仓 grep
+        确认 advance() 是 retry_since 唯一写入方，豁免保护的调用方不存在，
+        反而造成 partial 渠道窗口自我锁死（17 天积压每轮重采、必然超预算）。
+        真正的人工指定走 collect 的 explicit since 参数（第一行直接返回）。"""
         from datetime import datetime
         earlier = datetime.fromisoformat('2026-10-08T12:00:00+08:00')
-        start = s.window({}, {'retry_since': earlier.isoformat()}, 'growth', self.end())
-        self.assertEqual(start, earlier)
+        start = s.window({'max_lookback_days': 7}, {'retry_since': earlier.isoformat()}, 'growth', self.end())
+        self.assertGreaterEqual(start, self.end() - timedelta(days=7))
+        # explicit 路径不受上限影响
+        explicit = s.window({'max_lookback_days': 7}, {}, 'growth', self.end(), earlier)
+        self.assertEqual(explicit, earlier)
 
     def test_ceiling_is_configurable(self):
         from datetime import timedelta

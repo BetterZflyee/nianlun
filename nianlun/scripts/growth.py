@@ -1374,7 +1374,7 @@ def _finish(config,folder,decision_file):
     # Incomplete sources retain their window for the next run; don't silently drop missing pages.
     checkpoint=root(config)/'checkpoint.json'
     if not b.get('manual'):
-        n.save(checkpoint,source_state.advance(b,water,n.load(checkpoint) if checkpoint.exists() else {}))
+        n.save(checkpoint,source_state.advance(b,water,n.load(checkpoint) if checkpoint.exists() else {},config['growth']))
     health_path=root(config)/'source-health.json'
     n.save(health_path,source_state.health(b,n.load(health_path) if health_path.exists() else {}))
     n.save(notice_path,{'signature':signature,'run_id':b['run_id']})

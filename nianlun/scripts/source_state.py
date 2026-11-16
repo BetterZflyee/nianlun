@@ -44,16 +44,28 @@ def window(settings, checkpoint, channel, end, explicit=None):
     # 积压很久（调度停过十天以上）时不能一次回溯到底：单轮证据会撑爆宿主上下文，
     # 每轮都失败、水印永不前进，变成死锁。按上限截断后每轮推进一点，
     # 剩下的后续轮次继续补——被截掉的部分不是丢失，水印会逐轮追赶。
-    # retry_since 是显式的重试意图（升级迁移、人工指定），不受这个上限约束。
-    if not saved.get('retry_since'):
-        ceiling=float(settings.get('max_lookback_days',7))
-        floor=end-timedelta(days=ceiling)
-        if start<floor:start=floor
+    #
+    # 2026-11-16 修正：**上限对 until 和 retry_since 一视同仁**。原注释说
+    # 「retry_since 是显式重试意图不受约束」，但全仓 grep 确认 advance() 是
+    # retry_since 的**唯一**写入方（没有任何升级迁移/人工代码路径写它），
+    # 豁免保护的调用方根本不存在。真实后果是死锁闭环：
+    #   start=retry_since(10-30) → coverage.since=10-30 → partial → advance
+    #   把同一个 10-30 原样写回 retry_since → 下一轮 start 仍是 10-30……
+    # 一个摘要永久失败的会议（实测 10-30 那场的 fullSummary 永不就绪）让
+    # minutes 每轮重采 17 天 → 证据必然超预算 → advance 到不了 → 水位永不动。
+    # 真需要人工指定起点时走 collect(since=…, until=…) 的 explicit 参数——
+    # 它在函数第一行返回，天然不受上限影响，那才是显式意图该走的路。
+    ceiling=float(settings.get('max_lookback_days',7))
+    floor=end-timedelta(days=ceiling)
+    if start<floor:start=floor
     return start
 
 
-def advance(bundle, decision, previous):
+def advance(bundle, decision, previous, settings=None):
+    # settings 可选：不传时用默认 max_lookback_days=7，与 window() 的默认一致，
+    # 现有 3 参数调用（含全部单测）不受影响。
     channels=dict(previous.get('channels',{}));deferred=set(decision.get('deferred_source_ids',[]))
+    settings=settings or {}
     delayed=set()
     # 模型想延后、但 ID 解析不中的那些（unresolved_deferred）不能当「已处理」跳过。
     # 短引用 S12 抄错几乎不可能，但升级过渡期/模型偶尔仍会写错。
@@ -69,8 +81,32 @@ def advance(bundle, decision, previous):
     for coverage in bundle['coverage']:
         channel=coverage['channel']
         if channel not in LABELS:continue
-        channels[channel]=({'retry_since':coverage.get('since',bundle['since'])}
-            if coverage['status']!='complete' or channel in delayed else {'until':bundle['until']})
+        if coverage['status']=='complete' and channel not in delayed:
+            channels[channel]={'until':bundle['until']}
+            continue
+        # partial 渠道的回溯起点**必须同样受 max_lookback_days 约束**。
+        # 原来注释写着「retry_since 是显式重试意图，不受上限约束」，但 advance
+        # 是 retry_since 的唯一写入方（升级迁移/人工指定都走不到这里），于是
+        # partial 的渠道每轮把窗口起点原样写回去：
+        #   start = retry_since(10-30) → coverage.since = 10-30 → 下轮 retry_since = 10-30
+        # **闭环自我锁死**，一个摘要永久失败的会议（实测 10-30 起 17 天）
+        # 让 minutes 渠道每轮重采 17 天、证据必然超预算、整轮必然失败。
+        # clamp 之后：坏数据自然滑出窗口，积压每轮至少推进一点，
+        # 失败详情仍保留在 coverage.error 里可见（不是静默丢弃）。
+        start_value = coverage.get('since') or bundle['since']
+        ceiling = float(settings.get('max_lookback_days', 7))
+        try:
+            end_dt = datetime.fromisoformat(str(bundle['until']))
+        except (KeyError, ValueError, TypeError):
+            end_dt = datetime.now().astimezone()
+        floor = end_dt - timedelta(days=ceiling)
+        try:
+            start_dt = datetime.fromisoformat(start_value)
+            if start_dt < floor:
+                start_value = floor.isoformat()
+        except (TypeError, ValueError):
+            pass
+        channels[channel] = {'retry_since': start_value}
     return {'format':'nianlun-watermarks-v2','channels':channels}
 
 
